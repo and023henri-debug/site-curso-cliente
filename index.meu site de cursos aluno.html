@@ -8951,7 +8951,7 @@ const MindMapSection = ({ user, courses, purchasedIds, setView }) => {
 
    
 // =================================================================================
-// INÍCIO DO COMPONENTE ALUNO: TRANSMISSÃO AO VIVO COM CHAT EM TEMPO REAL (ANTI-TRAVAMENTO)
+// INÍCIO DO COMPONENTE ALUNO: TRANSMISSÃO AO VIVO COM CHAT EM TEMPO REAL (DELAY 2s-3s LISO)
 // =================================================================================
 const StudentLivePlayer = ({ db, settings, showNotification, user }) => {
     // --- LÓGICA DO VÍDEO E CHUNKS ---
@@ -8975,7 +8975,7 @@ const StudentLivePlayer = ({ db, settings, showNotification, user }) => {
     const currentLiveId = settings?.currentLiveId || 'live_global_default';
     const isChatActive = settings?.liveChatActive !== false; 
 
-    // 1. CARREGA O VÍDEO COM GESTÃO INTELIGENTE DE BUFFER
+    // 1. CARREGA O VÍDEO COM GESTÃO INTELIGENTE DE BUFFER (CRAVADO EM 2~3 SEGUNDOS)
     React.useEffect(() => {
         if (!isLiveActive) {
             setIsConnected(false);
@@ -8998,27 +8998,32 @@ const StudentLivePlayer = ({ db, settings, showNotification, user }) => {
                         sb.addEventListener('updateend', () => {
                             isAppendingRef.current = false;
 
-                            // 👇 NOVA LÓGICA ANTI-TRAVAMENTO (Catch-up Suave) 👇
+                            // 👇 O SEGREDO DOS 2 SEGUNDOS SEM TRAVAR 👇
                             if (videoRef.current && videoRef.current.buffered.length > 0) {
                                 const video = videoRef.current;
                                 const bufferedEnd = video.buffered.end(video.buffered.length - 1);
                                 const delay = bufferedEnd - video.currentTime;
                                 
-                                // Se o delay ficar gigante (ex: minimizou o app e voltou), dá um salto
-                                // mas DEIXA 2 SEGUNDOS de vídeo carregado na frente para não engasgar
-                                if (delay > 5.0) {
-                                    video.currentTime = bufferedEnd - 2.0; 
+                                // 1. Se o delay passar de 6 segundos (ex: a internet do aluno caiu e voltou)
+                                // Faz um salto direto, mas DEIXA 2.5s de margem de segurança.
+                                if (delay > 6.0) {
+                                    video.currentTime = bufferedEnd - 2.5; 
                                 } 
-                                // Se o delay estiver entre 2.5s e 5s, acelera levimente para colar na live sem travar a imagem
-                                else if (delay > 2.5) {
+                                // 2. Se o delay estiver entre 3.5s e 6s, acelera suavemente (1.1x)
+                                else if (delay > 3.5) {
                                     video.playbackRate = 1.1;
                                 } 
-                                // Se o delay estiver saudável, velocidade normal
+                                // 3. A MÁGICA ANTI-CARREGAMENTO: Se estiver muito perto do fim (menos de 1.5s),
+                                // desacelera (0.9x) para dar tempo do próximo bloco baixar SEM PAUSAR O VÍDEO!
+                                else if (delay < 1.5) {
+                                    video.playbackRate = 0.9;
+                                } 
+                                // 4. Zona perfeita: delay cravado entre 1.5s e 3.5s (Velocidade Normal)
                                 else {
                                     video.playbackRate = 1.0;
                                 }
                                 
-                                // Se o vídeo engasgou por rede ruim e pausou, dá play automaticamente assim que tiver buffer
+                                // Força o play caso o navegador tenha pausado por falta de dados
                                 if (video.paused && video.currentTime > 0 && !video.ended) {
                                     video.play().catch(e => console.warn("Auto-play protegido:", e));
                                 }
