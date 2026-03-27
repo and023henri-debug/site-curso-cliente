@@ -1691,7 +1691,7 @@ const StudentMarketplace = ({ db, user, settings, showNotification, promotions =
             if (!playerRef.current && videoRef.current) {
                 const videoElement = videoRef.current;
 
-                playerRef.current = vjs(videoElement, {
+               playerRef.current = vjs(videoElement, {
                     autoplay: true,
                     muted: true, // Começa mutado para permitir autoplay
                     controls: true,
@@ -1699,14 +1699,16 @@ const StudentMarketplace = ({ db, user, settings, showNotification, promotions =
                     poster: poster,
                     html5: {
                         vhs: {
-                            liveSyncDuration: 1.5, 
-                            liveMaxLatencyDuration: 3.0, 
-                            liveTolerance: 0.5, 
-                            backBufferLength: 5, 
+                            // 👇 NOVOS PARÂMETROS PARA BAIXÍSSIMA LATÊNCIA NO VIDEO.JS 👇
+                            liveSyncDuration: 1.0, 
+                            liveMaxLatencyDuration: 2.0, 
+                            liveTolerance: 0.2, 
+                            backBufferLength: 2, 
                             enableLowInitialPlaylist: true,
                             limitRenditionByPlayerDimensions: false,
                             fastMQ: true,
                             useBandwidthFromLocalStorage: true
+                            // 👆 FIM DOS NOVOS PARÂMETROS 👆
                         }
                     }
                 });
@@ -8998,27 +9000,27 @@ const StudentLivePlayer = ({ db, settings, showNotification, user }) => {
                         sb.addEventListener('updateend', () => {
                             isAppendingRef.current = false;
 
-                            // 👇 O SEGREDO DOS 2 SEGUNDOS SEM TRAVAR 👇
+                            // 👇 O SEGREDO DO DELAY DE 1 A 2 SEGUNDOS SEM TRAVAR 👇
                             if (videoRef.current && videoRef.current.buffered.length > 0) {
                                 const video = videoRef.current;
                                 const bufferedEnd = video.buffered.end(video.buffered.length - 1);
                                 const delay = bufferedEnd - video.currentTime;
                                 
-                                // 1. Se o delay passar de 6 segundos (ex: a internet do aluno caiu e voltou)
-                                // Faz um salto direto, mas DEIXA 2.5s de margem de segurança.
-                                if (delay > 6.0) {
-                                    video.currentTime = bufferedEnd - 2.5; 
+                                // 1. Se o delay passar de 3.5 segundos (ex: internet lenta do aluno)
+                                // Faz um salto direto, deixando apenas 1 segundo de margem.
+                                if (delay > 3.5) {
+                                    video.currentTime = bufferedEnd - 1.0; 
                                 } 
-                                // 2. Se o delay estiver entre 3.5s e 6s, acelera suavemente (1.1x)
-                                else if (delay > 3.5) {
-                                    video.playbackRate = 1.1;
+                                // 2. Se o delay estiver entre 1.5s e 3.5s, acelera suavemente (1.15x)
+                                else if (delay > 1.5) {
+                                    video.playbackRate = 1.15;
                                 } 
-                                // 3. A MÁGICA ANTI-CARREGAMENTO: Se estiver muito perto do fim (menos de 1.5s),
+                                // 3. A MÁGICA ANTI-CARREGAMENTO: Se estiver muito perto do fim (menos de 0.6s),
                                 // desacelera (0.9x) para dar tempo do próximo bloco baixar SEM PAUSAR O VÍDEO!
-                                else if (delay < 1.5) {
+                                else if (delay < 0.6) {
                                     video.playbackRate = 0.9;
                                 } 
-                                // 4. Zona perfeita: delay cravado entre 1.5s e 3.5s (Velocidade Normal)
+                                // 4. Zona ultra rápida: delay cravado entre 0.6s e 1.5s (Velocidade Normal)
                                 else {
                                     video.playbackRate = 1.0;
                                 }
