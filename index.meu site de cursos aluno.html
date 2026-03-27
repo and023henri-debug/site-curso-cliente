@@ -8951,7 +8951,7 @@ const MindMapSection = ({ user, courses, purchasedIds, setView }) => {
 
    
 // =================================================================================
-// INÍCIO DO COMPONENTE ALUNO: TRANSMISSÃO AO VIVO COM CHAT EM TEMPO REAL (ULTRA LOW LATENCY)
+// INÍCIO DO COMPONENTE ALUNO: TRANSMISSÃO AO VIVO COM CHAT EM TEMPO REAL (ANTI-TRAVAMENTO)
 // =================================================================================
 const StudentLivePlayer = ({ db, settings, showNotification, user }) => {
     // --- LÓGICA DO VÍDEO E CHUNKS ---
@@ -8975,7 +8975,7 @@ const StudentLivePlayer = ({ db, settings, showNotification, user }) => {
     const currentLiveId = settings?.currentLiveId || 'live_global_default';
     const isChatActive = settings?.liveChatActive !== false; 
 
-    // 1. CARREGA O VÍDEO E APLICA O SISTEMA ANTI-DELAY
+    // 1. CARREGA O VÍDEO COM GESTÃO INTELIGENTE DE BUFFER
     React.useEffect(() => {
         if (!isLiveActive) {
             setIsConnected(false);
@@ -8998,31 +8998,32 @@ const StudentLivePlayer = ({ db, settings, showNotification, user }) => {
                         sb.addEventListener('updateend', () => {
                             isAppendingRef.current = false;
 
-                            // 👇 LÓGICA ANTI-DELAY MÁXIMA (CATCH-UP) 👇
+                            // 👇 NOVA LÓGICA ANTI-TRAVAMENTO (Catch-up Suave) 👇
                             if (videoRef.current && videoRef.current.buffered.length > 0) {
                                 const video = videoRef.current;
                                 const bufferedEnd = video.buffered.end(video.buffered.length - 1);
                                 const delay = bufferedEnd - video.currentTime;
                                 
-                                // Se estiver mais de 2.5s atrasado, dá um salto direto pra ponta
-                                if (delay > 2.5) {
-                                    video.currentTime = bufferedEnd - 0.3; 
+                                // Se o delay ficar gigante (ex: minimizou o app e voltou), dá um salto
+                                // mas DEIXA 2 SEGUNDOS de vídeo carregado na frente para não engasgar
+                                if (delay > 5.0) {
+                                    video.currentTime = bufferedEnd - 2.0; 
                                 } 
-                                // Se estiver entre 1s e 2.5s atrasado, acelera imperceptivelmente (1.15x)
-                                else if (delay > 1.0) {
-                                    video.playbackRate = 1.15;
+                                // Se o delay estiver entre 2.5s e 5s, acelera levimente para colar na live sem travar a imagem
+                                else if (delay > 2.5) {
+                                    video.playbackRate = 1.1;
                                 } 
-                                // Se estiver colado na live, volta a velocidade normal
+                                // Se o delay estiver saudável, velocidade normal
                                 else {
                                     video.playbackRate = 1.0;
                                 }
                                 
-                                // Força o play caso o navegador tenha pausado por falta de dados
+                                // Se o vídeo engasgou por rede ruim e pausou, dá play automaticamente assim que tiver buffer
                                 if (video.paused && video.currentTime > 0 && !video.ended) {
                                     video.play().catch(e => console.warn("Auto-play protegido:", e));
                                 }
                             }
-                            // 👆 FIM DA LÓGICA ANTI-DELAY 👆
+                            // 👆 FIM DA NOVA LÓGICA 👆
 
                             processQueue(); 
                         });
@@ -9046,7 +9047,6 @@ const StudentLivePlayer = ({ db, settings, showNotification, user }) => {
                                     if (processedChunks.current.has(chunkData.url)) return;
                                     processedChunks.current.add(chunkData.url);
                                     try {
-                                        // 👇 cache: 'no-store' acelera absurdamente a busca do vídeo novo
                                         const res = await fetch(chunkData.url, { cache: 'no-store' });
                                         const buf = await res.arrayBuffer();
                                         queueRef.current.push(buf);
@@ -9070,8 +9070,18 @@ const StudentLivePlayer = ({ db, settings, showNotification, user }) => {
         if (isAppendingRef.current || queueRef.current.length === 0 || !sourceBufferRef.current || sourceBufferRef.current.updating) return;
         const nextChunk = queueRef.current.shift();
         isAppendingRef.current = true;
-        try { sourceBufferRef.current.appendBuffer(nextChunk); } 
-        catch(e) { isAppendingRef.current = false; }
+        
+        try { 
+            sourceBufferRef.current.appendBuffer(nextChunk); 
+        } catch(e) { 
+            isAppendingRef.current = false; 
+            // PREVENÇÃO DE TELA PRETA: Se o buffer lotar (aulas de mais de 1h), apaga o passado do celular do aluno
+            if (e.name === 'QuotaExceededError' && sourceBufferRef.current && videoRef.current) {
+                try {
+                   sourceBufferRef.current.remove(0, videoRef.current.currentTime - 10);
+                } catch(err) {}
+            }
+        }
     };
 
     // 2. CARREGA O CHAT
@@ -9170,14 +9180,14 @@ const StudentLivePlayer = ({ db, settings, showNotification, user }) => {
                         </div>
                     ) : (
                         <div className="w-full aspect-video relative">
-                            {/* muted ajuda no autoplay do chrome, ideal ter um botão pra desmutar depois, mas deixei playsInline para celular */}
+                            {/* muted ajuda no autoplay do chrome */}
                             <video ref={videoRef} autoPlay playsInline controls className="w-full h-full object-contain" />
                             
                             {!isConnected && (
                                 <div className="absolute inset-0 bg-black/90 flex flex-col items-center justify-center z-10">
                                     <div className="w-10 h-10 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin mb-4"></div>
                                     <p className="text-sm font-bold text-white tracking-widest uppercase animate-pulse">Conectando ao Sinal...</p>
-                                    <p className="text-xs text-gray-500 mt-2 text-center px-4">Carregando e decodificando o vídeo em tempo real.</p>
+                                    <p className="text-xs text-gray-500 mt-2 text-center px-4">Carregando e estabilizando a rede.</p>
                                 </div>
                             )}
                         </div>
