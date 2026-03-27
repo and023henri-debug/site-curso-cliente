@@ -8977,79 +8977,39 @@ const StudentLivePlayer = ({ db, settings, showNotification, user }) => {
     const currentLiveId = settings?.currentLiveId || 'live_global_default';
     const isChatActive = settings?.liveChatActive !== false; 
 
-    // 1. CARREGA O VÍDEO COM GESTÃO INTELIGENTE DE BUFFER VIA WEBSOCKET
-    React.useEffect(() => {
-        if (!isLiveActive) {
-            setIsConnected(false);
-            return;
-        }
+    // 1. CARREGA O VÍDEO VIA VERCEL (MÉTODO SLIDESHOW DE FRAMES)
+        React.useEffect(() => {
+            if (!isLiveActive) {
+                setIsConnected(false);
+                return;
+            }
 
-        let socket;
+            // 👇 COLE AQUI O LINK DO SEU PROJETO NA VERCEL 👇
+            const URL_HTTP_VERCEL = 'https://site-curso-cliente.vercel.app/';
 
-        const initLive = async () => {
-            try {
-                const ms = new MediaSource();
-                mediaSourceRef.current = ms;
-                if (videoRef.current) videoRef.current.src = URL.createObjectURL(ms);
+            setIsConnected(true); // Define como conectado imediatamente
+            let intervalId;
 
-                ms.addEventListener('sourceopen', async () => {
-                    try {
-                        const sb = ms.addSourceBuffer('video/webm; codecs="vp8,opus"');
-                        sourceBufferRef.current = sb;
-
-                        sb.addEventListener('updateend', () => {
-                            isAppendingRef.current = false;
-                            
-                            // Lógica de aceleração/desaceleração para não deixar travar
-                            if (videoRef.current && videoRef.current.buffered.length > 0) {
-                                const video = videoRef.current;
-                                const bufferedEnd = video.buffered.end(video.buffered.length - 1);
-                                const delay = bufferedEnd - video.currentTime;
-                                
-                                if (delay > 3.5) video.currentTime = bufferedEnd - 1.0; 
-                                else if (delay > 1.5) video.playbackRate = 1.15;
-                                else if (delay < 0.6) video.playbackRate = 0.9;
-                                else video.playbackRate = 1.0;
-                                
-                                if (video.paused && video.currentTime > 0 && !video.ended) {
-                                    video.play().catch(e => console.warn("Auto-play protegido:", e));
-                                }
-                            }
-                            processQueue(); 
-                        });
-
-                        // 👇 A MÁGICA: CONEXÃO DIRETA COM O NOVO BACKEND 👇
-                        // Substitua a URL abaixo pelo link que o Railway/Render te der
-                        socket = new window.WebSocket('wss://SEU_BACKEND_AQUI.up.railway.app');
-                        socket.binaryType = 'arraybuffer'; // Recebe em formato puro
-
-                        socket.onopen = () => {
-                            console.log("Conectado ao servidor de Live!");
-                            setIsConnected(true);
-                        };
-
-                        // Quando recebe o chunk de vídeo, coloca na fila
-                        socket.onmessage = (event) => {
-                            queueRef.current.push(event.data);
-                            processQueue();
-                        };
-
-                        socket.onclose = () => setIsConnected(false);
-
-                    } catch (err) {
-                        setHasError(true);
+            const pullFrames = async () => {
+                try {
+                    const response = await fetch(URL_HTTP_VERCEL);
+                    const data = await response.json();
+                    
+                    // Atualiza a imagem na tela do aluno
+                    if (data && data.image && videoRef.current) {
+                        videoRef.current.src = data.image;
                     }
-                });
-            } catch (e) { setHasError(true); }
-        };
+                } catch (error) {
+                    console.warn("Aguardando próximo frame da Vercel...");
+                }
+            };
 
-        initLive();
-        
-        // Limpeza ao fechar
-        return () => {
-            if (socket) socket.close();
-        };
-    }, [isLiveActive, currentLiveId]);
+            // Puxa um novo frame a cada 1 segundo (1000 milissegundos)
+            intervalId = setInterval(pullFrames, 1000);
+            pullFrames(); // Puxa o primeiro logo de cara
+
+            return () => clearInterval(intervalId);
+        }, [isLiveActive, currentLiveId]);
 
     const processQueue = () => {
         if (isAppendingRef.current || queueRef.current.length === 0 || !sourceBufferRef.current || sourceBufferRef.current.updating) return;
@@ -9166,7 +9126,7 @@ const StudentLivePlayer = ({ db, settings, showNotification, user }) => {
                     ) : (
                         <div className="w-full aspect-video relative">
                             {/* muted ajuda no autoplay do chrome */}
-                            <video ref={videoRef} autoPlay playsInline controls className="w-full h-full object-contain" />
+                            <img ref={videoRef} className="w-full h-full object-contain bg-black" alt="Transmissão ao vivo" />
                             
                             {!isConnected && (
                                 <div className="absolute inset-0 bg-black/90 flex flex-col items-center justify-center z-10">
