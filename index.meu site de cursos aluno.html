@@ -8977,14 +8977,14 @@ const StudentLivePlayer = ({ db, settings, showNotification, user }) => {
     const currentLiveId = settings?.currentLiveId || 'live_global_default';
     const isChatActive = settings?.liveChatActive !== false; 
 
-    // 1. CARREGA O VÍDEO COM GESTÃO INTELIGENTE DE BUFFER (CRAVADO EM 2~3 SEGUNDOS)
+    // 1. CARREGA O VÍDEO COM GESTÃO INTELIGENTE DE BUFFER VIA WEBSOCKET
     React.useEffect(() => {
         if (!isLiveActive) {
             setIsConnected(false);
             return;
         }
 
-        let unsubscribe = () => {};
+        let socket;
 
         const initLive = async () => {
             try {
@@ -8999,69 +8999,43 @@ const StudentLivePlayer = ({ db, settings, showNotification, user }) => {
 
                         sb.addEventListener('updateend', () => {
                             isAppendingRef.current = false;
-
-                            // 👇 O SEGREDO DO DELAY DE 1 A 2 SEGUNDOS SEM TRAVAR 👇
+                            
+                            // Lógica de aceleração/desaceleração para não deixar travar
                             if (videoRef.current && videoRef.current.buffered.length > 0) {
                                 const video = videoRef.current;
                                 const bufferedEnd = video.buffered.end(video.buffered.length - 1);
                                 const delay = bufferedEnd - video.currentTime;
                                 
-                                // 1. Se o delay passar de 3.5 segundos (ex: internet lenta do aluno)
-                                // Faz um salto direto, deixando apenas 1 segundo de margem.
-                                if (delay > 3.5) {
-                                    video.currentTime = bufferedEnd - 1.0; 
-                                } 
-                                // 2. Se o delay estiver entre 1.5s e 3.5s, acelera suavemente (1.15x)
-                                else if (delay > 1.5) {
-                                    video.playbackRate = 1.15;
-                                } 
-                                // 3. A MÁGICA ANTI-CARREGAMENTO: Se estiver muito perto do fim (menos de 0.6s),
-                                // desacelera (0.9x) para dar tempo do próximo bloco baixar SEM PAUSAR O VÍDEO!
-                                else if (delay < 0.6) {
-                                    video.playbackRate = 0.9;
-                                } 
-                                // 4. Zona ultra rápida: delay cravado entre 0.6s e 1.5s (Velocidade Normal)
-                                else {
-                                    video.playbackRate = 1.0;
-                                }
+                                if (delay > 3.5) video.currentTime = bufferedEnd - 1.0; 
+                                else if (delay > 1.5) video.playbackRate = 1.15;
+                                else if (delay < 0.6) video.playbackRate = 0.9;
+                                else video.playbackRate = 1.0;
                                 
-                                // Força o play caso o navegador tenha pausado por falta de dados
                                 if (video.paused && video.currentTime > 0 && !video.ended) {
                                     video.play().catch(e => console.warn("Auto-play protegido:", e));
                                 }
                             }
-                            // 👆 FIM DA NOVA LÓGICA 👆
-
                             processQueue(); 
                         });
 
-                        if (settings?.initChunkUrl) {
-                            try {
-                                const res = await fetch(settings.initChunkUrl, { cache: 'no-store' });
-                                const buf = await res.arrayBuffer();
-                                isAppendingRef.current = true;
-                                sb.appendBuffer(buf);
-                                processedChunks.current.add(settings.initChunkUrl);
-                                setIsConnected(true);
-                            } catch (e) { console.error("Erro cabeçalho", e); }
-                        }
+                        // 👇 A MÁGICA: CONEXÃO DIRETA COM O NOVO BACKEND 👇
+                        // Substitua a URL abaixo pelo link que o Railway/Render te der
+                        socket = new window.WebSocket('wss://SEU_BACKEND_AQUI.up.railway.app');
+                        socket.binaryType = 'arraybuffer'; // Recebe em formato puro
 
-                        const q = query(collection(db, "live_chunks"), where("liveId", "==", currentLiveId), orderBy("timestamp", "asc"));
-                        unsubscribe = onSnapshot(q, (snap) => {
-                            snap.docChanges().forEach(async (change) => {
-                                if (change.type === 'added') {
-                                    const chunkData = change.doc.data();
-                                    if (processedChunks.current.has(chunkData.url)) return;
-                                    processedChunks.current.add(chunkData.url);
-                                    try {
-                                        const res = await fetch(chunkData.url, { cache: 'no-store' });
-                                        const buf = await res.arrayBuffer();
-                                        queueRef.current.push(buf);
-                                        processQueue();
-                                    } catch (e) {}
-                                }
-                            });
-                        });
+                        socket.onopen = () => {
+                            console.log("Conectado ao servidor de Live!");
+                            setIsConnected(true);
+                        };
+
+                        // Quando recebe o chunk de vídeo, coloca na fila
+                        socket.onmessage = (event) => {
+                            queueRef.current.push(event.data);
+                            processQueue();
+                        };
+
+                        socket.onclose = () => setIsConnected(false);
+
                     } catch (err) {
                         setHasError(true);
                     }
@@ -9070,8 +9044,12 @@ const StudentLivePlayer = ({ db, settings, showNotification, user }) => {
         };
 
         initLive();
-        return () => unsubscribe();
-    }, [isLiveActive, currentLiveId, db]);
+        
+        // Limpeza ao fechar
+        return () => {
+            if (socket) socket.close();
+        };
+    }, [isLiveActive, currentLiveId]);
 
     const processQueue = () => {
         if (isAppendingRef.current || queueRef.current.length === 0 || !sourceBufferRef.current || sourceBufferRef.current.updating) return;
