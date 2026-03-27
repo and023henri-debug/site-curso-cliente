@@ -356,21 +356,9 @@
 <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/aws-sdk/2.1363.0/aws-sdk.min.js"></script>
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-    
-</head>
+  <link href="https://vjs.zencdn.net/8.10.0/video-js.css" rel="stylesheet" />
+  <script src="https://vjs.zencdn.net/8.10.0/video.min.js"></script>
+  </head>
 <body class="bg-slate-900 text-slate-100 transition-colors duration-300 selection:bg-blue-200 selection:text-blue-900">
   <div id="root"></div>
 
@@ -1672,418 +1660,106 @@ const StudentMarketplace = ({ db, user, settings, showNotification, promotions =
 // =================================================================================
     
 // =================================================================================
-    // SUB-COMPONENTE: PLAYER DE VÍDEO CUSTOMIZADO PREMIUM (ESTILO YOUTUBE + TOUCH NATIVO)
+    // SUB-COMPONENTE: PLAYER DE VÍDEO CUSTOMIZADO PREMIUM (VIDEO.JS LOW LATENCY)
     // =================================================================================
     const CustomVideoPlayer = ({ src, onEnded, poster, isCompleted, showNotification }) => {
         const videoRef = useRef(null);
-        const playerContainerRef = useRef(null);
-        
-        const [isPlaying, setIsPlaying] = useState(false);
-        const [progress, setProgress] = useState(0);
-        const [currentTime, setCurrentTime] = useState(0);
-        const [duration, setDuration] = useState(0);
-        const [volume, setVolume] = useState(1);
-        const [isMuted, setIsMuted] = useState(false);
-        const [playbackRate, setPlaybackRate] = useState(1);
-        const [isFullscreen, setIsFullscreen] = useState(false);
-        
-        const [showControls, setShowControls] = useState(true);
-        const [showSpeedMenu, setShowSpeedMenu] = useState(false);
-        const [hoverTime, setHoverTime] = useState(0);
-        const [hoverPos, setHoverPos] = useState(0);
-        const [isHoveringTimeline, setIsHoveringTimeline] = useState(false);
-        
-        // Feedback Visual apenas para avanço (duplo clique)
-        const [seekFeedback, setSeekFeedback] = useState(null);
-        
-        const controlsTimeoutRef = useRef(null);
-        const clickTimeoutRef = useRef(null);
-        // Referência para calcular o tempo entre toques no celular
-        const lastClickTimeRef = useRef(0);
+        const playerRef = useRef(null);
 
-        
-        // 👇 INÍCIO: COLE ESTE NOVO BLOCO AQUI 👇
+        // Define a variável global de controle para a IA
         useEffect(() => {
-            // Cria um controle global exclusivo para o vídeo atualmente aberto
             window.AemVideoControl = {
-                play: () => { 
-                    if (videoRef.current) {
-                        videoRef.current.play(); 
-                        setIsPlaying(true); 
-                    }
-                },
-                pause: () => { 
-                    if (videoRef.current) {
-                        videoRef.current.pause(); 
-                        setIsPlaying(false); 
-                    }
-                },
+                play: () => { if (playerRef.current) playerRef.current.play(); },
+                pause: () => { if (playerRef.current) playerRef.current.pause(); },
                 skip: (amount) => { 
-                    if (videoRef.current) {
-                        const newTime = videoRef.current.currentTime + amount;
-                        // Impede de avançar caso a aula não esteja concluída (Mantém sua regra de segurança)
-                        if (amount > 0 && !isCompleted && newTime > videoRef.current.currentTime) {
+                    if (playerRef.current) {
+                        const newTime = playerRef.current.currentTime() + amount;
+                        if (amount > 0 && !isCompleted && newTime > playerRef.current.currentTime()) {
                              if (showNotification) showNotification("Assista ao vídeo para liberar o avanço.", "error");
                              return;
                         }
-                        videoRef.current.currentTime = newTime;
+                        playerRef.current.currentTime(newTime);
                     }
                 }
             };
-
-            // Quando o aluno sair do vídeo, limpamos os controles
             return () => { delete window.AemVideoControl; };
-        }, [isCompleted, setIsPlaying]);
-        // 👆 FIM: COLE ESTE NOVO BLOCO AQUI 👆
-        
-        const formatTime = (timeInSeconds) => {
-            if (isNaN(timeInSeconds)) return "00:00";
-            const m = Math.floor(timeInSeconds / 60);
-            const s = Math.floor(timeInSeconds % 60);
-            return `${m < 10 ? '0' : ''}${m}:${s < 10 ? '0' : ''}${s}`;
-        };
-
-        const handleActivity = () => {
-            setShowControls(true);
-            if (controlsTimeoutRef.current) clearTimeout(controlsTimeoutRef.current);
-            
-            controlsTimeoutRef.current = setTimeout(() => {
-                if (videoRef.current && !videoRef.current.paused && !isHoveringTimeline) {
-                    setShowControls(false);
-                    setShowSpeedMenu(false);
-                }
-            }, 3000);
-        };
-
-        const handleMouseLeave = () => {
-            if (isPlaying && !isHoveringTimeline) {
-                setShowControls(false);
-                setShowSpeedMenu(false);
-            }
-        };
+        }, [isCompleted, showNotification]);
 
         useEffect(() => {
-            if (isPlaying && !isHoveringTimeline) {
-                handleActivity();
-            } else {
-                setShowControls(true);
-                if (controlsTimeoutRef.current) clearTimeout(controlsTimeoutRef.current);
-            }
-            return () => { if (controlsTimeoutRef.current) clearTimeout(controlsTimeoutRef.current); };
-        }, [isPlaying, isHoveringTimeline]);
-
-        const togglePlay = (e) => {
-            if (e) e.stopPropagation(); 
+            const vjs = window.videojs; 
             
-            if (!videoRef.current) return;
+            if (!playerRef.current && videoRef.current) {
+                const videoElement = videoRef.current;
 
-            if (videoRef.current.paused || videoRef.current.ended) {
-                const playPromise = videoRef.current.play();
-                if (playPromise !== undefined) {
-                    playPromise.catch(error => console.log("Play aguardando interação do usuário", error));
-                }
-            } else {
-                videoRef.current.pause();
-            }
-        };
-
-        // NOVO ESTADO: Previne que a aula marque como concluída várias vezes seguidas
-        const [hasAutoCompleted, setHasAutoCompleted] = useState(false);
-        useEffect(() => { setHasAutoCompleted(false); }, [src]);
-
-        const handleTimeUpdate = () => {
-            if (!videoRef.current) return;
-            const curr = videoRef.current.currentTime;
-            const dur = videoRef.current.duration;
-            setCurrentTime(curr);
-            
-            const perc = (curr / dur) * 100;
-            setProgress(perc);
-
-            // MÁGICA DO AUTO-COMPLETAR: Ao passar de 95% do vídeo, marca a aula automaticamente!
-            if (perc > 95 && !isCompleted && !hasAutoCompleted) {
-                setHasAutoCompleted(true);
-                if (onEnded) onEnded();
-            }
-        };
-
-        const handleLoadedMetadata = () => {
-            setDuration(videoRef.current.duration);
-        };
-
-        const triggerFeedback = (direction) => {
-            setSeekFeedback(direction);
-            setTimeout(() => setSeekFeedback(null), 500);
-        };
-
-        const skip = (amount, e = null) => {
-            if (e) e.stopPropagation();
-            if (amount > 0 && !isCompleted) {
-                if (showNotification) showNotification("Assista ao vídeo para liberar o avanço.", "error");
-                return;
-            }
-            if (videoRef.current) videoRef.current.currentTime += amount;
-        };
-
-        const handleSeek = (e) => {
-            const rect = e.currentTarget.getBoundingClientRect();
-            const clientX = e.clientX || (e.touches && e.touches[0].clientX);
-            if (!clientX) return;
-
-            const pos = (clientX - rect.left) / rect.width;
-            const newTime = pos * duration;
-
-            if (!isCompleted && newTime > videoRef.current.currentTime) {
-                if (showNotification) showNotification("Assista ao vídeo para liberar o avanço.", "error");
-                return;
-            }
-
-            videoRef.current.currentTime = newTime;
-            setCurrentTime(newTime);
-        };
-
-        // LÓGICA DE TOUCH E CLIQUE MATADORA (Funciona PC e Mobile Perfeitamente)
-        const handleVideoInteraction = (e) => {
-            let clientX = e.clientX;
-            if (clientX === undefined && e.nativeEvent && e.nativeEvent.changedTouches) {
-                clientX = e.nativeEvent.changedTouches[0]?.clientX;
-            }
-
-            const rect = e.currentTarget.getBoundingClientRect();
-            const clickX = clientX - rect.left;
-            const width = rect.width;
-
-            const now = Date.now();
-            const timeSinceLastClick = now - lastClickTimeRef.current;
-
-            if (timeSinceLastClick < 300) {
-                // CLIQUE DUPLO DETECTADO! (Menos de 300ms de diferença)
-                clearTimeout(clickTimeoutRef.current); // Impede o vídeo de pausar
-                
-                const isLeft = clickX < width / 2;
-                if (isLeft) {
-                    skip(-10);
-                    triggerFeedback('left');
-                } else {
-                    if (isCompleted) {
-                        skip(10);
-                        triggerFeedback('right');
-                    } else {
-                        if (showNotification) showNotification("Assista ao vídeo para liberar o avanço.", "error");
+                playerRef.current = vjs(videoElement, {
+                    autoplay: true,
+                    muted: true, // Começa mutado para permitir autoplay
+                    controls: true,
+                    liveui: true, // UI especial para transmissões ao vivo
+                    poster: poster,
+                    html5: {
+                        vhs: {
+                            liveSyncDuration: 1.5, 
+                            liveMaxLatencyDuration: 3.0, 
+                            liveTolerance: 0.5, 
+                            backBufferLength: 5, 
+                            enableLowInitialPlaylist: true,
+                            limitRenditionByPlayerDimensions: false,
+                            fastMQ: true,
+                            useBandwidthFromLocalStorage: true
+                        }
                     }
+                });
+
+                // Eventos
+                playerRef.current.on('ended', () => {
+                    if (onEnded) onEnded();
+                });
+
+                // Auto-Completar (simulando a lógica original que avançava o progresso)
+                playerRef.current.on('timeupdate', () => {
+                    const player = playerRef.current;
+                    const perc = (player.currentTime() / player.duration()) * 100;
+                    // Lógica simplificada do seu auto-completar original:
+                    if (perc > 95 && !isCompleted && !playerRef.current.hasAutoCompleted) {
+                        playerRef.current.hasAutoCompleted = true;
+                        if (onEnded) onEnded();
+                    }
+                });
+
+                playerRef.current.ready(() => {
+                    const player = playerRef.current;
+                    player.src({ src: src, type: 'application/x-mpegURL' }); // Importante: tipo HLS
+                    
+                    player.on('loadedmetadata', () => {
+                        const duration = player.duration();
+                        // Tenta pular para o final (ao vivo) se for uma live
+                        if (isFinite(duration)) {
+                            player.currentTime(duration);
+                        }
+                    });
+                });
+            }
+
+            return () => {
+                if (playerRef.current) {
+                    playerRef.current.dispose();
+                    playerRef.current = null;
                 }
-                lastClickTimeRef.current = 0; // Zera para evitar bug de triplo clique
-            } else {
-                // CLIQUE SIMPLES DETECTADO (Registra a hora e espera pra ver se tem outro toque)
-                lastClickTimeRef.current = now;
-                handleActivity(); // Mostra a barra de tempo
-
-                clickTimeoutRef.current = setTimeout(() => {
-                    togglePlay(); // Efetivamente Pausa ou Dá Play depois de 300ms
-                }, 300);
-            }
-        };
-
-        const handleTimelineHover = (e) => {
-            const rect = e.currentTarget.getBoundingClientRect();
-            let pos = (e.clientX - rect.left) / rect.width;
-            if(pos < 0) pos = 0; if(pos > 1) pos = 1;
-            setHoverTime(pos * duration);
-            setHoverPos(pos * 100);
-        };
-
-        const toggleMute = () => {
-            if (!videoRef.current) return;
-            videoRef.current.muted = !isMuted;
-            setIsMuted(!isMuted);
-        };
-
-        const handleVolumeChange = (e) => {
-            const val = parseFloat(e.target.value);
-            if (videoRef.current) videoRef.current.volume = val;
-            setVolume(val);
-            setIsMuted(val === 0);
-        };
-
-        const changeSpeed = (rate) => {
-            if (videoRef.current) videoRef.current.playbackRate = rate;
-            setPlaybackRate(rate);
-            setShowSpeedMenu(false);
-        };
-
-        const toggleFullscreen = () => {
-            if (!document.fullscreenElement) {
-                playerContainerRef.current.requestFullscreen().catch(err => console.error(err));
-            } else {
-                document.exitFullscreen();
-            }
-        };
-
-        const togglePiP = async () => {
-            try {
-                if (document.pictureInPictureElement) {
-                    await document.exitPictureInPicture();
-                } else if (document.pictureInPictureEnabled && videoRef.current) {
-                    await videoRef.current.requestPictureInPicture();
-                }
-            } catch (error) {
-                console.error("Erro ao ativar PiP", error);
-            }
-        };
-
-        useEffect(() => {
-            const handleFullscreenChange = () => setIsFullscreen(!!document.fullscreenElement);
-            document.addEventListener('fullscreenchange', handleFullscreenChange);
-            return () => document.removeEventListener('fullscreenchange', handleFullscreenChange);
-        }, []);
-
-        useEffect(() => {
-            const handleVisibilityChange = () => { if (document.hidden && isPlaying) togglePlay(); };
-            document.addEventListener("visibilitychange", handleVisibilityChange);
-            return () => document.removeEventListener("visibilitychange", handleVisibilityChange);
-        }, [isPlaying]);
+            };
+        }, [src, poster, isCompleted, onEnded]);
 
         return (
-            <div 
-                ref={playerContainerRef} 
-                className={`relative w-full h-full bg-black overflow-hidden group font-sans flex items-center justify-center sm:rounded-t-2xl select-none transition-all ${(!showControls && isPlaying) ? 'cursor-none' : ''}`}
-                onMouseMove={handleActivity}
-                onMouseLeave={handleMouseLeave}
-                onTouchStart={handleActivity}
-            >
+            <div data-vjs-player className="w-full h-full rounded-2xl overflow-hidden shadow-2xl bg-black">
                 <video 
-                    ref={videoRef}
-                    src={src}
-                    poster={poster}
-                    className="w-full h-full object-contain cursor-pointer"
-                    onTimeUpdate={handleTimeUpdate}
-                    onLoadedMetadata={handleLoadedMetadata}
-                    onEnded={onEnded}
-                    onClick={handleVideoInteraction}
-                    onPlay={() => setIsPlaying(true)}
-                    onPause={() => setIsPlaying(false)}
-                    controls={false}
-                    controlsList="nodownload"
-                    autoPlay
+                    ref={videoRef} 
+                    className="video-js vjs-default-skin vjs-big-play-centered w-full h-full object-cover" 
+                    playsInline
+                    preload="auto"
                 />
-
-                {/* Efeito Visual do Double Tap */}
-                {seekFeedback === 'left' && (
-                    <div className="absolute inset-y-0 left-0 w-[40%] bg-white/10 rounded-r-[100%] flex items-center justify-center animate-fade-in z-20 pointer-events-none transition-all duration-300">
-                        <div className="flex flex-col items-center text-white/80 bg-black/40 p-4 rounded-full backdrop-blur-md">
-                            <RotateCcw size={32} />
-                            <span className="font-bold mt-1 text-sm">-10s</span>
-                        </div>
-                    </div>
-                )}
-                {seekFeedback === 'right' && (
-                    <div className="absolute inset-y-0 right-0 w-[40%] bg-white/10 rounded-l-[100%] flex items-center justify-center animate-fade-in z-20 pointer-events-none transition-all duration-300">
-                        <div className="flex flex-col items-center text-white/80 bg-black/40 p-4 rounded-full backdrop-blur-md">
-                            <RotateCw size={32} />
-                            <span className="font-bold mt-1 text-sm">+10s</span>
-                        </div>
-                    </div>
-                )}
-
-                {/* OVERLAY DE CONTROLES INFERIORES */}
-                <div className={`absolute bottom-0 left-0 right-0 px-3 md:px-6 pb-3 md:pb-4 pt-24 bg-gradient-to-t from-black/90 via-black/40 to-transparent transition-opacity duration-500 ${showControls ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
-                    
-                    <div 
-                        className="relative w-full h-1.5 md:h-2 bg-white/20 rounded-full cursor-pointer mb-3 md:mb-4 group/timeline flex items-center pointer-events-auto"
-                        onClick={handleSeek}
-                        onMouseMove={handleTimelineHover}
-                        onMouseEnter={() => setIsHoveringTimeline(true)}
-                        onMouseLeave={() => setIsHoveringTimeline(false)}
-                        onTouchStart={() => setIsHoveringTimeline(true)}
-                        onTouchEnd={() => setIsHoveringTimeline(false)}
-                    >
-                        <div className="absolute top-0 left-0 h-full bg-white/30 rounded-full" style={{ width: `${progress + 5}%`, maxWidth: '100%' }}></div>
-                        <div className="absolute top-0 left-0 h-full bg-indigo-500 rounded-full shadow-[0_0_10px_rgba(99,102,241,0.8)] transition-all ease-linear" style={{ width: `${progress}%` }}></div>
-                        <div className="absolute top-1/2 -translate-y-1/2 w-3.5 h-3.5 md:w-4 md:h-4 bg-white rounded-full scale-0 group-hover/timeline:scale-100 transition-transform shadow-lg pointer-events-none" style={{ left: `calc(${progress}% - 8px)` }}></div>
-
-                        {isHoveringTimeline && (
-                            <div className="absolute bottom-6 -translate-x-1/2 bg-black/80 backdrop-blur-md text-white text-xs font-bold py-1.5 px-3 rounded-lg border border-white/10 shadow-xl pointer-events-none animate-fade-in hidden md:block" style={{ left: `${hoverPos}%` }}>
-                                {formatTime(hoverTime)}
-                            </div>
-                        )}
-                    </div>
-
-                    <div className="flex items-center justify-between text-white/90 pointer-events-auto">
-                        
-                        {/* LADO ESQUERDO */}
-                        <div className="flex items-center gap-2.5 md:gap-5">
-                            
-                            <button onClick={(e) => skip(-10, e)} className="hover:text-white hover:scale-110 transition-all focus:outline-none relative group/btn" title="Voltar 10s">
-                                <RotateCcw className="w-5 h-5 md:w-[22px] md:h-[22px]" />
-                                <span className="absolute inset-0 flex items-center justify-center text-[7px] md:text-[8px] font-bold mt-[1px]">10</span>
-                            </button>
-                            
-                            <button onClick={togglePlay} className="hover:text-white hover:scale-110 transition-all focus:outline-none">
-                                {isPlaying ? <Pause className="w-6 h-6 md:w-8 md:h-8" fill="currentColor" /> : <Play className="w-6 h-6 md:w-8 md:h-8" fill="currentColor" />}
-                            </button>
-
-                            {isCompleted && (
-                                <button onClick={(e) => skip(10, e)} className="hover:text-white hover:scale-110 transition-all focus:outline-none relative group/btn animate-fade-in" title="Avançar 10s">
-                                    <RotateCw className="w-5 h-5 md:w-[22px] md:h-[22px]" />
-                                    <span className="absolute inset-0 flex items-center justify-center text-[7px] md:text-[8px] font-bold mt-[1px]">10</span>
-                                </button>
-                            )}
-
-                            <div className="text-[10px] md:text-sm font-medium tracking-wide font-mono ml-0.5 md:ml-2">
-                                {formatTime(currentTime)} <span className="text-white/40 mx-0.5">/</span> {formatTime(duration)}
-                            </div>
-                        </div>
-
-                        {/* LADO DIREITO */}
-                        <div className="flex items-center gap-3 md:gap-5 relative">
-                            <div className="flex items-center gap-2 group/volume">
-                                <button onClick={toggleMute} className="hover:text-white transition-colors focus:outline-none">
-                                    {isMuted || volume === 0 ? <VolumeX className="w-4 h-4 md:w-5 md:h-5" /> : <Volume2 className="w-4 h-4 md:w-5 md:h-5" />}
-                                </button>
-                                <input 
-                                    type="range" min="0" max="1" step="0.05" value={isMuted ? 0 : volume} onChange={handleVolumeChange}
-                                    className="w-0 opacity-0 group-hover/volume:w-20 group-hover/volume:opacity-100 transition-all duration-300 origin-left cursor-pointer accent-indigo-500 h-1.5 bg-white/20 rounded-full appearance-none hidden md:block"
-                                />
-                            </div>
-
-                            <div className="relative">
-                                <button onClick={() => setShowSpeedMenu(!showSpeedMenu)} className="text-[11px] md:text-[13px] font-bold hover:text-white transition-colors focus:outline-none w-6 md:w-8 text-center">
-                                    {playbackRate}x
-                                </button>
-                                
-                                {showSpeedMenu && (
-                                    <div className="absolute bottom-8 md:bottom-10 left-1/2 -translate-x-1/2 bg-black/90 backdrop-blur-xl border border-white/10 rounded-xl py-2 flex flex-col shadow-2xl overflow-hidden animate-fade-in">
-                                        {[0.5, 1, 1.25, 1.5, 2].map(rate => (
-                                            <button 
-                                                key={rate} 
-                                                onClick={() => changeSpeed(rate)}
-                                                className={`px-5 py-2 text-xs font-bold transition-colors text-left hover:bg-white/10 ${playbackRate === rate ? 'text-indigo-400 bg-indigo-500/10' : 'text-white'}`}
-                                            >
-                                                {rate}x
-                                            </button>
-                                        ))}
-                                    </div>
-                                )}
-                            </div>
-
-                            {/* 👇 AQUI ESTÁ A MUDANÇA: Tirei o "hidden md:block" e ajustei o tamanho 👇 */}
-                            <button onClick={togglePiP} className="hover:text-white hover:scale-110 transition-all focus:outline-none" title="Miniplayer">
-                                <svg className="w-4 h-4 md:w-[18px] md:h-[18px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                    <rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect>
-                                    <rect x="12" y="11" width="8" height="4" rx="1" ry="1"></rect>
-                                </svg>
-                            </button>
-
-                            <button onClick={toggleFullscreen} className="hover:text-white hover:scale-110 transition-all focus:outline-none">
-                                {isFullscreen ? <Minimize className="w-4 h-4 md:w-5 md:h-5" /> : <Maximize className="w-4 h-4 md:w-5 md:h-5" />}
-                            </button>
-                        </div>
-                    </div>
-                </div>
             </div>
         );
     };
-
 
 // =================================================================================
     // MOTOR DE EXTRAÇÃO DE ÁUDIO PARA A IA (Baseado no seu modelo)
