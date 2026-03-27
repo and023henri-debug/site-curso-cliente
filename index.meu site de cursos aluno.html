@@ -8950,8 +8950,8 @@ const MindMapSection = ({ user, courses, purchasedIds, setView }) => {
     }
 
    
- // =================================================================================
-// INÍCIO DO COMPONENTE ALUNO: TRANSMISSÃO AO VIVO COM CHAT EM TEMPO REAL
+// =================================================================================
+// INÍCIO DO COMPONENTE ALUNO: TRANSMISSÃO AO VIVO COM CHAT EM TEMPO REAL (ULTRA LOW LATENCY)
 // =================================================================================
 const StudentLivePlayer = ({ db, settings, showNotification, user }) => {
     // --- LÓGICA DO VÍDEO E CHUNKS ---
@@ -8971,12 +8971,11 @@ const StudentLivePlayer = ({ db, settings, showNotification, user }) => {
     const [newMessage, setNewMessage] = React.useState('');
     const [isSending, setIsSending] = React.useState(false);
 
-    // CORREÇÃO AQUI: Garante que nunca falte um ID para travar o envio das mensagens
     const isLiveActive = settings?.liveActive;
     const currentLiveId = settings?.currentLiveId || 'live_global_default';
     const isChatActive = settings?.liveChatActive !== false; 
 
-    // 1. CARREGA O VÍDEO
+    // 1. CARREGA O VÍDEO E APLICA O SISTEMA ANTI-DELAY
     React.useEffect(() => {
         if (!isLiveActive) {
             setIsConnected(false);
@@ -8998,12 +8997,39 @@ const StudentLivePlayer = ({ db, settings, showNotification, user }) => {
 
                         sb.addEventListener('updateend', () => {
                             isAppendingRef.current = false;
+
+                            // 👇 LÓGICA ANTI-DELAY MÁXIMA (CATCH-UP) 👇
+                            if (videoRef.current && videoRef.current.buffered.length > 0) {
+                                const video = videoRef.current;
+                                const bufferedEnd = video.buffered.end(video.buffered.length - 1);
+                                const delay = bufferedEnd - video.currentTime;
+                                
+                                // Se estiver mais de 2.5s atrasado, dá um salto direto pra ponta
+                                if (delay > 2.5) {
+                                    video.currentTime = bufferedEnd - 0.3; 
+                                } 
+                                // Se estiver entre 1s e 2.5s atrasado, acelera imperceptivelmente (1.15x)
+                                else if (delay > 1.0) {
+                                    video.playbackRate = 1.15;
+                                } 
+                                // Se estiver colado na live, volta a velocidade normal
+                                else {
+                                    video.playbackRate = 1.0;
+                                }
+                                
+                                // Força o play caso o navegador tenha pausado por falta de dados
+                                if (video.paused && video.currentTime > 0 && !video.ended) {
+                                    video.play().catch(e => console.warn("Auto-play protegido:", e));
+                                }
+                            }
+                            // 👆 FIM DA LÓGICA ANTI-DELAY 👆
+
                             processQueue(); 
                         });
 
                         if (settings?.initChunkUrl) {
                             try {
-                                const res = await fetch(settings.initChunkUrl);
+                                const res = await fetch(settings.initChunkUrl, { cache: 'no-store' });
                                 const buf = await res.arrayBuffer();
                                 isAppendingRef.current = true;
                                 sb.appendBuffer(buf);
@@ -9020,7 +9046,8 @@ const StudentLivePlayer = ({ db, settings, showNotification, user }) => {
                                     if (processedChunks.current.has(chunkData.url)) return;
                                     processedChunks.current.add(chunkData.url);
                                     try {
-                                        const res = await fetch(chunkData.url);
+                                        // 👇 cache: 'no-store' acelera absurdamente a busca do vídeo novo
+                                        const res = await fetch(chunkData.url, { cache: 'no-store' });
                                         const buf = await res.arrayBuffer();
                                         queueRef.current.push(buf);
                                         processQueue();
@@ -9070,7 +9097,6 @@ const StudentLivePlayer = ({ db, settings, showNotification, user }) => {
 
     const handleSendMessage = async (e) => {
         e.preventDefault();
-        // CORREÇÃO: Removido o bloqueio cego do currentLiveId que quebrava o envio
         if (!newMessage.trim() || isSending) return;
 
         setIsSending(true);
@@ -9085,7 +9111,6 @@ const StudentLivePlayer = ({ db, settings, showNotification, user }) => {
             });
             setNewMessage('');
             
-            // Rola para o fim ao enviar
             setTimeout(() => {
                 if (chatEndRef.current) chatEndRef.current.scrollIntoView({ behavior: "smooth" });
             }, 100);
@@ -9145,20 +9170,21 @@ const StudentLivePlayer = ({ db, settings, showNotification, user }) => {
                         </div>
                     ) : (
                         <div className="w-full aspect-video relative">
+                            {/* muted ajuda no autoplay do chrome, ideal ter um botão pra desmutar depois, mas deixei playsInline para celular */}
                             <video ref={videoRef} autoPlay playsInline controls className="w-full h-full object-contain" />
                             
                             {!isConnected && (
                                 <div className="absolute inset-0 bg-black/90 flex flex-col items-center justify-center z-10">
                                     <div className="w-10 h-10 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin mb-4"></div>
                                     <p className="text-sm font-bold text-white tracking-widest uppercase animate-pulse">Conectando ao Sinal...</p>
-                                    <p className="text-xs text-gray-500 mt-2 text-center px-4">Carregando e decodificando o vídeo.</p>
+                                    <p className="text-xs text-gray-500 mt-2 text-center px-4">Carregando e decodificando o vídeo em tempo real.</p>
                                 </div>
                             )}
                         </div>
                     )}
                 </div>
 
-                {/* NOVO CHAT ESTILO YOUTUBE */}
+                {/* CHAT ESTILO YOUTUBE */}
                 {isChatActive && isLiveActive && (
                     <div className="lg:col-span-4 bg-[#0f0f0f] rounded-2xl border border-white/10 shadow-xl h-[500px] lg:h-full min-h-[500px] max-h-[600px] flex flex-col overflow-hidden animate-fade-in relative z-20">
                         
