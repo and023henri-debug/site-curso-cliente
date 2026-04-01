@@ -358,6 +358,61 @@
 
   <link href="https://vjs.zencdn.net/8.10.0/video-js.css" rel="stylesheet" />
   <script src="https://vjs.zencdn.net/8.10.0/video.min.js"></script>
+
+
+
+
+
+
+<script>
+        // Executa apenas após a página carregar, evitando a "tela branca"
+        window.addEventListener('DOMContentLoaded', (event) => {
+            
+            // 1. Bloqueia o botão direito (Menu de Contexto)
+            document.addEventListener('contextmenu', function(e) {
+                e.preventDefault();
+            });
+
+            // 2. Bloqueia atalhos F12, Inspecionar, Ver Código Fonte e Salvar
+            document.addEventListener('keydown', function(e) {
+                // F12
+                if (e.key === 'F12' || e.keyCode === 123) {
+                    e.preventDefault();
+                }
+                // Ctrl + Shift + I / J / C (Windows/Linux)
+                if (e.ctrlKey && e.shiftKey && ['I', 'J', 'C', 'i', 'j', 'c'].includes(e.key)) {
+                    e.preventDefault();
+                }
+                // Ctrl + U (Ver código fonte) / Ctrl + S (Salvar)
+                if (e.ctrlKey && ['U', 'S', 'u', 's'].includes(e.key)) {
+                    e.preventDefault();
+                }
+                // Cmd + Option + I / J / U (Mac)
+                if (e.metaKey && e.altKey && ['I', 'J', 'U', 'i', 'j', 'u'].includes(e.key)) {
+                    e.preventDefault();
+                }
+            });
+
+            // 3. Oculta o corpo da página se a impressão (Ctrl+P) for acionada para salvar em PDF
+            window.addEventListener('beforeprint', () => {
+                document.body.style.display = 'none';
+            });
+            window.addEventListener('afterprint', () => {
+                document.body.style.display = '';
+            });
+            
+            // 4. Limpa o console constantemente para evitar injeção de scripts
+            setInterval(() => {
+                console.clear();
+                console.log("%c⛔ ACESSO RESTRITO POR A&M PRODUÇÕES", "color: red; font-size: 24px; font-weight: bold; text-shadow: 1px 1px 0px black;");
+            }, 1000);
+        });
+    </script>
+    </head>
+
+
+
+
   </head>
 <body class="bg-slate-900 text-slate-100 transition-colors duration-300 selection:bg-blue-200 selection:text-blue-900">
   <div id="root"></div>
