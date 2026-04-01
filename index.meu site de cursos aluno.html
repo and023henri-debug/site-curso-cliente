@@ -1306,6 +1306,29 @@ const StudentMarketplace = ({ db, user, settings, showNotification, promotions =
                         
                         if (novoStatus === 'pago') {
                             if(showNotification) showNotification(`O pagamento do produto "${order.productTitle}" foi aprovado e liberado!`, "success");
+                            
+                            // 👇 BUSCANDO A FOTO DO PRODUTO 👇
+                            let capaDoProduto = "https://images.unsplash.com/photo-1616469829941-c7200edec809?q=80&w=600";
+                            try {
+                                const prodInfo = products.find(p => p.id === order.productId);
+                                if (prodInfo && prodInfo.images && prodInfo.images.length > 0) {
+                                    capaDoProduto = prodInfo.images[0];
+                                }
+                            } catch(e){}
+
+                            // 👇 DISPARO DE E-MAIL DE PRODUTO 👇
+                            fetch("https://script.google.com/macros/s/AKfycby6iVs46K0I-P5JgEtk5CYQYyNFZDQobWmJNQa3DvSLJlJiFnCuXlPoPVRDoG61ycg/exec", {
+                                method: "POST", 
+                                mode: "no-cors", 
+                                headers: { "Content-Type": "text/plain;charset=utf-8" },
+                                body: JSON.stringify({
+                                    to: order.userEmail,
+                                    userName: order.userName || 'Aluno',
+                                    itemName: order.productTitle || 'Produto VIP',
+                                    itemImage: capaDoProduto,
+                                    itemType: "product"
+                                })
+                            }).catch(e => console.log("Erro no e-mail de Produto: ", e));
                         }
                     }
                 }
@@ -1652,6 +1675,20 @@ const StudentMarketplace = ({ db, user, settings, showNotification, promotions =
                     </div>
                 </div>
             )}
+
+            {/* 👇 CÓDIGO NOVO: MODAL DE CHECKOUT DA LOJA SENDO EXIBIDO 👇 */}
+            {checkoutProduct && (
+                <MarketplaceCheckoutModal 
+                    product={checkoutProduct} 
+                    user={user} 
+                    onClose={() => setCheckoutProduct(null)} 
+                    settings={settings} 
+                    showNotification={showNotification} 
+                    db={db} 
+                />
+            )}
+            {/* 👆 FIM DO CÓDIGO NOVO 👆 */}
+
         </div>
     );
 };
@@ -1660,108 +1697,262 @@ const StudentMarketplace = ({ db, user, settings, showNotification, promotions =
 // =================================================================================
     
 // =================================================================================
-    // SUB-COMPONENTE: PLAYER DE VÍDEO CUSTOMIZADO PREMIUM (VIDEO.JS LOW LATENCY)
-    // =================================================================================
-    const CustomVideoPlayer = ({ src, onEnded, poster, isCompleted, showNotification }) => {
-        const videoRef = useRef(null);
-        const playerRef = useRef(null);
+// SUB-COMPONENTE: PLAYER PREMIUM COM QUALIDADE, PULO DE 10S E PROGRESSO INTELIGENTE
+// =================================================================================
+const CustomVideoPlayer = ({ src, onEnded, poster, isCompleted, showNotification }) => {
+    
+    // 1. LÓGICA DAS FONTES DE VÍDEO E QUALIDADE
+    const fontes = typeof src === 'string' ? {
+        '1080p': src,
+        '720p': src,
+        '480p': src
+    } : (src || { '1080p': '' });
 
-        // Define a variável global de controle para a IA
-        useEffect(() => {
-            window.AemVideoControl = {
-                play: () => { if (playerRef.current) playerRef.current.play(); },
-                pause: () => { if (playerRef.current) playerRef.current.pause(); },
-                skip: (amount) => { 
-                    if (playerRef.current) {
-                        const newTime = playerRef.current.currentTime() + amount;
-                        if (amount > 0 && !isCompleted && newTime > playerRef.current.currentTime()) {
-                             if (showNotification) showNotification("Assista ao vídeo para liberar o avanço.", "error");
-                             return;
-                        }
-                        playerRef.current.currentTime(newTime);
+    const qualidadesDisponiveis = Object.keys(fontes).reverse();
+    const [qualidadeAtual, setQualidadeAtual] = React.useState(qualidadesDisponiveis[0]);
+    const [mostrarMenuQualidade, setMostrarMenuQualidade] = React.useState(false);
+    
+    // 2. REFS E ESTADOS DE CONTROLE
+    const videoRef = React.useRef(null);
+    const [seekAnim, setSeekAnim] = React.useState({ show: false, side: '' });
+    const isCompletedRef = React.useRef(isCompleted);
+    
+    // 👇 O SEGREDO AQUI: Memória de até onde o aluno já assistiu
+    const maxTimeWatched = React.useRef(0); 
+
+    // Mantém a trava atualizada (se a aula já for concluída, o limite é "infinito")
+    React.useEffect(() => {
+        isCompletedRef.current = isCompleted;
+        if (isCompleted) {
+            maxTimeWatched.current = Infinity;
+        }
+    }, [isCompleted]);
+
+    // 3. COMUNICAÇÃO COM A IA (AemVideoControl)
+    React.useEffect(() => {
+        window.AemVideoControl = {
+            play: () => { if (videoRef.current) videoRef.current.play(); },
+            pause: () => { if (videoRef.current) videoRef.current.pause(); },
+            skip: (amount) => { 
+                if (videoRef.current) {
+                    let newTime = videoRef.current.currentTime + amount;
+                    // Trava de IA: Se tentar avançar mais do que assistiu
+                    if (!isCompletedRef.current && newTime > maxTimeWatched.current) {
+                        newTime = maxTimeWatched.current;
                     }
+                    videoRef.current.currentTime = newTime;
                 }
-            };
-            return () => { delete window.AemVideoControl; };
-        }, [isCompleted, showNotification]);
-
-        useEffect(() => {
-            const vjs = window.videojs; 
-            
-            if (!playerRef.current && videoRef.current) {
-                const videoElement = videoRef.current;
-
-               playerRef.current = vjs(videoElement, {
-                    autoplay: true,
-                    muted: true, // Começa mutado para permitir autoplay
-                    controls: true,
-                    liveui: true, // UI especial para transmissões ao vivo
-                    poster: poster,
-                    html5: {
-                        vhs: {
-                            // 👇 NOVOS PARÂMETROS PARA BAIXÍSSIMA LATÊNCIA NO VIDEO.JS 👇
-                            liveSyncDuration: 1.0, 
-                            liveMaxLatencyDuration: 2.0, 
-                            liveTolerance: 0.2, 
-                            backBufferLength: 2, 
-                            enableLowInitialPlaylist: true,
-                            limitRenditionByPlayerDimensions: false,
-                            fastMQ: true,
-                            useBandwidthFromLocalStorage: true
-                            // 👆 FIM DOS NOVOS PARÂMETROS 👆
-                        }
-                    }
-                });
-
-                // Eventos
-                playerRef.current.on('ended', () => {
-                    if (onEnded) onEnded();
-                });
-
-                // Auto-Completar (simulando a lógica original que avançava o progresso)
-                playerRef.current.on('timeupdate', () => {
-                    const player = playerRef.current;
-                    const perc = (player.currentTime() / player.duration()) * 100;
-                    // Lógica simplificada do seu auto-completar original:
-                    if (perc > 95 && !isCompleted && !playerRef.current.hasAutoCompleted) {
-                        playerRef.current.hasAutoCompleted = true;
-                        if (onEnded) onEnded();
-                    }
-                });
-
-                playerRef.current.ready(() => {
-                    const player = playerRef.current;
-                    player.src({ src: src, type: 'application/x-mpegURL' }); // Importante: tipo HLS
-                    
-                    player.on('loadedmetadata', () => {
-                        const duration = player.duration();
-                        // Tenta pular para o final (ao vivo) se for uma live
-                        if (isFinite(duration)) {
-                            player.currentTime(duration);
-                        }
-                    });
-                });
             }
+        };
+        return () => { delete window.AemVideoControl; };
+    }, []);
 
-            return () => {
-                if (playerRef.current) {
-                    playerRef.current.dispose();
-                    playerRef.current = null;
-                }
-            };
-        }, [src, poster, isCompleted, onEnded]);
+    // 4. FUNÇÃO: MUDAR QUALIDADE SEM PERDER O TEMPO
+    const mudarQualidade = (novaQualidade) => {
+        if (novaQualidade === qualidadeAtual) return;
+        
+        const video = videoRef.current;
+        if (!video) return;
 
-        return (
-            <div data-vjs-player className="w-full h-full rounded-2xl overflow-hidden shadow-2xl bg-black">
-                <video 
-                    ref={videoRef} 
-                    className="video-js vjs-default-skin vjs-big-play-centered w-full h-full object-cover" 
-                    playsInline
-                    preload="auto"
-                />
-            </div>
-        );
+        const tempoAtual = video.currentTime;
+        const estavaTocando = !video.paused;
+
+        setQualidadeAtual(novaQualidade);
+        setMostrarMenuQualidade(false);
+        if (showNotification) showNotification(`Ajustando qualidade para ${novaQualidade}...`, "info");
+
+        setTimeout(() => {
+            video.load(); 
+            video.currentTime = tempoAtual; 
+            if (estavaTocando) {
+                video.play().catch(e => console.log("Aguardando interação:", e));
+            }
+        }, 50);
     };
+
+    // 5. FUNÇÃO: DOUBLE CLICK PARA AVANÇAR/VOLTAR 10s (RESPEITANDO O PROGRESSO)
+    const handleDblClick = (e) => {
+        e.preventDefault(); 
+        e.stopPropagation();
+
+        const video = videoRef.current;
+        if (!video) return;
+
+        const rect = e.currentTarget.getBoundingClientRect();
+        const x = e.clientX - rect.left;
+        const side = x < rect.width / 2 ? 'left' : 'right';
+        const jump = side === 'left' ? -10 : 10;
+        const currentTime = video.currentTime;
+        let newTime = currentTime + jump;
+
+        // 👇 TRAVA INTELIGENTE: Pula apenas até o máximo que ele já assistiu
+        if (jump > 0 && !isCompletedRef.current && newTime > maxTimeWatched.current) {
+            newTime = maxTimeWatched.current; // Puxa de volta para o limite
+            if (showNotification && newTime <= currentTime + 1) {
+                showNotification("Você só pode avançar até onde já assistiu.", "warning");
+            }
+        }
+
+        setSeekAnim({ show: true, side });
+        video.currentTime = Math.max(0, Math.min(video.duration || 0, newTime));
+        setTimeout(() => setSeekAnim({ show: false, side: '' }), 600);
+    };
+
+    // 6. FUNÇÃO: REGISTRAR O TEMPO MÁXIMO E AUTO CONCLUIR AOS 95%
+    const handleTimeUpdate = () => {
+        const video = videoRef.current;
+        if (!video) return;
+
+        // Se o vídeo estiver tocando normalmente (não está sendo arrastado)
+        if (!video.seeking && !isCompletedRef.current) {
+            if (video.currentTime > maxTimeWatched.current) {
+                maxTimeWatched.current = video.currentTime;
+            }
+        }
+
+        const perc = (video.currentTime / video.duration) * 100;
+        if (perc > 95 && !isCompletedRef.current && !video.hasAutoCompleted) {
+            video.hasAutoCompleted = true;
+            isCompletedRef.current = true; // Libera na hora
+            maxTimeWatched.current = Infinity; // Destrava a barra de tempo de vez
+            if (onEnded) onEnded();
+        }
+    };
+
+    // 7. FUNÇÃO: TRAVAR O "ARRASTAR" NA BARRA DE TEMPO NATIVA
+    const handleSeeking = () => {
+        const video = videoRef.current;
+        if (!video) return;
+
+        // Se ele arrastar a bolinha nativa além do que já assistiu
+        if (!isCompletedRef.current && video.currentTime > maxTimeWatched.current) {
+            video.currentTime = maxTimeWatched.current; // Puxa a bolinha de volta
+        }
+    };
+
+    return (
+        <div className="w-full h-full rounded-2xl md:rounded-[2rem] overflow-hidden shadow-[0_20px_50px_rgba(0,0,0,0.5)] bg-black relative group select-none">
+            
+            {/* VÍDEO NATIVO INTEGRADO (Agora escutando o onSeeking) */}
+            <video 
+                ref={videoRef}
+                controls 
+                controlsList="nodownload"
+                poster={poster}
+                onEnded={onEnded}
+                onTimeUpdate={handleTimeUpdate}
+                onSeeking={handleSeeking} 
+                className="w-full h-full object-contain"
+                src={fontes[qualidadeAtual]}
+            >
+                Seu navegador não suporta a tag de vídeo.
+            </video>
+
+            {/* CAMADA INVISÍVEL (OVERLAY) PARA INTERCEPTAR OS CLIQUES */}
+            <div 
+                className="absolute top-0 left-0 w-full h-[calc(100%-70px)] z-10 cursor-pointer"
+                onClick={(e) => {
+                    // Se for 1 clique, dá Play ou Pause
+                    if (e.detail === 1) {
+                        const video = videoRef.current;
+                        if (video) {
+                            if (video.paused) video.play();
+                            else video.pause();
+                        }
+                    }
+                }}
+                onDoubleClick={handleDblClick}
+            ></div>
+
+            {/* ANIMAÇÃO DE 10 SEGUNDOS (VISUAL) */}
+            {seekAnim.show && (
+                <div className={`absolute inset-y-0 ${seekAnim.side === 'left' ? 'left-0 rounded-r-full' : 'right-0 rounded-l-full'} w-1/3 bg-white/20 backdrop-blur-md z-50 flex flex-col items-center justify-center pointer-events-none transition-all duration-300 animate-fade-in`}>
+                    <div className="flex items-center justify-center gap-0 mb-2">
+                        {seekAnim.side === 'left' ? (
+                            <div className="flex animate-[bounce_0.6s_infinite] text-white">
+                                <Play className="rotate-180 fill-white w-8 h-8 -mr-4 opacity-40" />
+                                <Play className="rotate-180 fill-white w-8 h-8 -mr-4 opacity-70" />
+                                <Play className="rotate-180 fill-white w-8 h-8" />
+                            </div>
+                        ) : (
+                            <div className="flex animate-[bounce_0.6s_infinite] text-white">
+                                <Play className="fill-white w-8 h-8 -mr-4" />
+                                <Play className="fill-white w-8 h-8 -mr-4 opacity-70" />
+                                <Play className="fill-white w-8 h-8 opacity-40" />
+                            </div>
+                        )}
+                    </div>
+                    <span className="text-white font-black text-2xl tracking-tighter drop-shadow-lg">10 segundos</span>
+                </div>
+            )}
+
+            {/* OVERLAY PREMIUM: ENGRENAGEM (QUALIDADE) */}
+            <div className="absolute top-4 right-4 md:top-6 md:right-6 opacity-0 group-hover:opacity-100 transition-opacity duration-500 z-[60]">
+                <div className="relative flex flex-col items-end">
+                    <button 
+                        onClick={(e) => {
+                            e.stopPropagation();
+                            setMostrarMenuQualidade(!mostrarMenuQualidade);
+                        }}
+                        className={`bg-black/40 hover:bg-black/80 backdrop-blur-xl text-white w-10 h-10 md:w-12 md:h-12 rounded-full transition-all duration-500 shadow-[0_8px_30px_rgba(0,0,0,0.6)] border border-white/10 flex items-center justify-center ${mostrarMenuQualidade ? 'rotate-90 bg-indigo-600/50 border-indigo-500/50 scale-110' : 'hover:scale-110 hover:border-white/30'}`}
+                        title="Configurações de Qualidade"
+                    >
+                        <Settings size={20} className={`md:w-6 md:h-6 transition-colors ${mostrarMenuQualidade ? 'text-indigo-300' : 'text-white/90'}`} />
+                    </button>
+
+                    {/* MENU DROPDOWN PREMIUM */}
+                    {mostrarMenuQualidade && (
+                        <div className="absolute right-0 top-14 md:top-16 mt-2 w-48 bg-[#0a0a0f]/95 backdrop-blur-3xl border border-white/10 rounded-2xl shadow-[0_30px_60px_rgba(0,0,0,0.9)] z-[70] overflow-hidden animate-scale-in transform origin-top-right flex flex-col">
+                            <div className="px-5 py-3.5 flex items-center gap-2.5 border-b border-white/5 bg-gradient-to-r from-white/5 to-transparent shrink-0">
+                                <Settings size={14} className="text-indigo-400" />
+                                <span className="text-[10px] font-black text-indigo-400 uppercase tracking-widest drop-shadow-md">
+                                    Resolução
+                                </span>
+                            </div>
+
+                            <div className="p-2 flex flex-col gap-1">
+                                {qualidadesDisponiveis.map((qualidade) => (
+                                    <button
+                                        key={qualidade}
+                                        onClick={(e) => {
+                                            e.stopPropagation();
+                                            mudarQualidade(qualidade);
+                                        }}
+                                        className={`w-full text-left px-4 py-3 rounded-xl text-xs md:text-sm font-bold flex items-center justify-between transition-all duration-300 group/btn ${
+                                            qualidadeAtual === qualidade 
+                                            ? 'bg-indigo-600/20 text-indigo-400 border border-indigo-500/30 shadow-inner' 
+                                            : 'text-slate-300 hover:bg-white/10 hover:text-white border border-transparent'
+                                        }`}
+                                    >
+                                        {qualidade}
+                                        {qualidadeAtual === qualidade ? (
+                                            <CheckCircle size={16} className="text-indigo-400 drop-shadow-md" />
+                                        ) : (
+                                            <div className="w-4 h-4 rounded-full border border-slate-600 group-hover/btn:border-slate-400 transition-colors"></div>
+                                        )}
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+                    )}
+                </div>
+            </div>
+            
+            {/* AREA DE CLIQUE INVISÍVEL PARA FECHAR O MENU SE CLICAR FORA */}
+            {mostrarMenuQualidade && (
+                <div 
+                    className="absolute inset-0 z-50 cursor-pointer" 
+                    onClick={(e) => {
+                        e.stopPropagation();
+                        setMostrarMenuQualidade(false);
+                    }}
+                ></div>
+            )}
+            
+        </div>
+    );
+};
+// =================================================================================
 
 // =================================================================================
     // MOTOR DE EXTRAÇÃO DE ÁUDIO PARA A IA (Baseado no seu modelo)
@@ -2080,6 +2271,7 @@ const StudentMarketplace = ({ db, user, settings, showNotification, promotions =
             const newCompleted = isAlreadyCompleted ? currentCompleted : currentCompleted + 1;
             const oldPercent = totalLessons === 0 ? 0 : (currentCompleted / totalLessons);
             const newPercent = totalLessons === 0 ? 0 : (newCompleted / totalLessons);
+            const finalPercentage = Math.round(newPercent * 100);
 
             const reward = Number(course.pointsReward) || 0;
             const pointsBefore = Math.floor(oldPercent * reward);
@@ -2093,11 +2285,27 @@ const StudentMarketplace = ({ db, user, settings, showNotification, promotions =
                         userId: user.uid,
                         courseId: course.id,
                         completedLessons: arrayUnion(lessonKey),
-                        percentage: Math.round(newPercent * 100),
+                        percentage: finalPercentage,
                         lastAccessed: serverTimestamp(),
                         lastMod: activeModuleIndex,
                         lastLes: activeLessonIndex
                     }, { merge: true });
+
+                    // 👇 MÁGICA: AVISA O ADMIN IMEDIATAMENTE QUE CONCLUIU 👇
+                    if (finalPercentage >= 99 && !isAlreadyCompleted) {
+                        const completedRef = doc(db, "completed_courses", `${user.uid}_${course.id}`);
+                        await setDoc(completedRef, {
+                            userId: user.uid,
+                            userName: user.displayName || 'Aluno',
+                            userEmail: user.email || '',
+                            userPhoto: user.photoURL || '',
+                            courseId: course.id,
+                            courseTitle: course.title || course.titulo || 'Curso',
+                            completedAt: serverTimestamp(),
+                            status: 'concluido'
+                        }, { merge: true });
+                    }
+                    // 👆 FIM DA MÁGICA 👆
 
                     if (pointsToGive > 0 && !isAlreadyCompleted) {
                         const userRef = doc(db, "users", user.uid);
@@ -2125,11 +2333,10 @@ const StudentMarketplace = ({ db, user, settings, showNotification, promotions =
 
             if (autoPlayNext) {
                 setTimeout(() => {
-                    handleNextLesson(Math.round(newPercent * 100));
+                    handleNextLesson(finalPercentage);
                 }, 1500);
             }
         };
-        // 👆 FIM DOS CÓDIGOS RECUPERADOS DE NAVEGAÇÃO E PROGRESSO 👆
 
 
 // SALVA NOTAS, CAPA E ASSINATURA NA NUVEM
@@ -2879,403 +3086,547 @@ const StudentMarketplace = ({ db, user, settings, showNotification, promotions =
     // FIM DO COMPONENTE COURSE PLAYER
     // ================================================================================
 
+// =================================================================================
+// COMPONENTE COMPARTILHADO: RENDERIZADOR DE CERTIFICADO UNIFICADO (ADMIN E ALUNO)
+// =================================================================================
+const CertificateRenderer = ({ 
+    bgUrl, 
+    fields = [], 
+    containerRef, 
+    onMouseDown, 
+    selectedFieldId = null, 
+    previewMode = true,
+    studentData = {},
+    scale = 1
+}) => {
     
-    
-    
-    // =================================================================================
-    // 3. SEÇÃO DE CERTIFICADOS (CORRIGIDA PARA CONTABILIZAR TODOS OS CURSOS)
-    // =================================================================================
-    
-   // --- COMPONENTE DE CARTÃO (VISUAL LIMPO QUE ABRE O MODAL) ---
-    const CertificateCard = ({ user, course, template, customPdf, onExpand }) => {
-        const [previewUrl, setPreviewUrl] = useState(null);
-        const [userData, setUserData] = useState(user);
+    const BASE_WIDTH = 1123;
+    const BASE_HEIGHT = 794;
 
-        useEffect(() => {
-            const fetchExtras = async () => {
-                try {
-                    const docSnap = await getDoc(doc(db, "users", user.uid));
-                    if (docSnap.exists()) setUserData(prev => ({ ...prev, ...docSnap.data() }));
-                } catch(e) {}
-            };
-            fetchExtras();
-        }, [user]);
-
-        useEffect(() => {
-            if (!template?.bgUrl) return;
-
-            const canvas = document.createElement('canvas');
-            const ctx = canvas.getContext('2d');
-            const img = new Image();
-            img.crossOrigin = "Anonymous";
-            img.src = template.bgUrl;
-
-            img.onload = () => {
-                canvas.width = img.width;
-                canvas.height = img.height;
-                const w = canvas.width;
-                const h = canvas.height;
-                const centerX = w / 2;
-
-                ctx.drawImage(img, 0, 0);
-                ctx.textAlign = "center";
-                ctx.textBaseline = "middle";
-
-                const Y_HEADER = 0.35; 
-                const Y_NOME   = 0.45; 
-                const Y_CORPO  = 0.55; 
-                const Y_CURSO  = 0.62; 
-                const Y_DATA   = 0.78; 
-
-                ctx.font = `italic ${Math.floor(w * 0.018)}px 'Merriweather', serif`;
-                ctx.fillStyle = "#475569"; 
-                ctx.fillText("Certificamos para os devidos fins que", centerX, h * Y_HEADER);
-
-                const nomeAluno = userData.displayName || userData.name || "Nome do Aluno";
-                ctx.font = `bold ${Math.floor(w * 0.05)}px 'Merriweather', serif`; 
-                ctx.fillStyle = "#0f172a"; 
-                ctx.shadowColor = "rgba(0,0,0,0.1)"; 
-                ctx.shadowBlur = 4;
-                ctx.shadowOffsetX = 2;
-                ctx.shadowOffsetY = 2;
-                ctx.fillText(nomeAluno, centerX, h * Y_NOME, w * 0.85);
-                ctx.shadowColor = "transparent";
-
-                let docText = "";
-                if (userData.cpf) docText += `CPF: ${userData.cpf}`;
-                if (userData.cpf && userData.rg) docText += "  •  "; 
-                if (userData.rg) docText += `RG: ${userData.rg}`;
-                
-                if (docText) {
-                    ctx.font = `${Math.floor(w * 0.014)}px 'Inter', sans-serif`;
-                    ctx.fillStyle = "#64748b"; 
-                    ctx.fillText(docText, centerX, h * (Y_NOME + 0.06));
-                }
-
-                ctx.font = `normal ${Math.floor(w * 0.018)}px 'Inter', sans-serif`;
-                ctx.fillStyle = "#334155";
-                ctx.fillText("Concluiu com êxito a carga horária do curso profissionalizante de:", centerX, h * Y_CORPO);
-
-                ctx.font = `bold ${Math.floor(w * 0.035)}px 'Merriweather', serif`;
-                ctx.fillStyle = "#1e293b"; 
-                ctx.fillText(course.title, centerX, h * Y_CURSO, w * 0.8);
-
-                ctx.beginPath();
-                ctx.moveTo(centerX - (w * 0.15), h * 0.74);
-                ctx.lineTo(centerX + (w * 0.15), h * 0.74);
-                ctx.strokeStyle = "#cbd5e1";
-                ctx.lineWidth = 2;
-                ctx.stroke();
-
-                const dateStr = new Date().toLocaleDateString('pt-BR', { day: 'numeric', month: 'long', year: 'numeric' });
-                ctx.font = `${Math.floor(w * 0.016)}px 'Inter', sans-serif`;
-                ctx.fillStyle = "#475569";
-                ctx.fillText(`São Paulo, ${dateStr}`, centerX, h * Y_DATA);
-
-                setPreviewUrl(canvas.toDataURL('image/jpeg', 0.5));
-            };
-        }, [userData, course, template]);
-
-        return (
-            <div 
-            className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-4 shadow-sm hover:shadow-md transition-all flex flex-col gap-4 group cursor-pointer"
-            onClick={() => (template || customPdf) ? onExpand(course, template, customPdf) : null}
-        >
-                <div 
-                    className="relative bg-slate-100 dark:bg-slate-700 rounded-lg overflow-hidden border border-slate-200 dark:border-slate-600 flex items-center justify-center" 
-                    style={{ maxHeight: '200px', minHeight: '160px' }}
-                >
-                    {customPdf ? (
-                        <>
-                            <div className="absolute inset-0 w-full h-full bg-white dark:bg-slate-800 overflow-hidden flex items-center justify-center pointer-events-none">
-                                {customPdf.toLowerCase().includes('.pdf') ? (
-                                    <iframe 
-                                        src={`${customPdf}#page=1&view=FitH&toolbar=0&navpanes=0&scrollbar=0`} 
-                                        className="w-[105%] h-[105%] pointer-events-none border-none select-none" 
-                                        scrolling="no"
-                                        title="Capa do Certificado PDF"
-                                    />
-                                ) : (
-                                    <img src={customPdf} className="w-full h-full object-cover" alt="Capa do Certificado" />
-                                )}
-                            </div>
-
-                            <div className="absolute inset-0 z-10 bg-transparent"></div>
-
-                            <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center z-20 gap-3 backdrop-blur-[2px]">
-                                <Award size={36} className="text-white drop-shadow-md" />
-                                <div className="bg-indigo-600 text-white px-5 py-2.5 rounded-full font-bold shadow-xl transform scale-90 group-hover:scale-100 transition-transform flex items-center gap-2 text-sm">
-                                    <Maximize size={18}/> Visualizar Certificado
-                                </div>
-                            </div>
-                        </>
-                    ) : template && previewUrl ? (
-                        <>
-                            <img src={previewUrl} className="w-full h-full object-contain animate-fade-in" alt="Certificado Preview" />
-                            <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-                                <div className="bg-white text-slate-800 px-4 py-2 rounded-full font-bold shadow-lg transform scale-90 group-hover:scale-100 transition-transform flex items-center gap-2">
-                                    <Maximize size={16}/> Ampliar
-                                </div>
-                            </div>
-                        </>
-                    ) : template && !previewUrl ? (
-                        <div className="w-full h-full flex flex-col items-center justify-center text-slate-400 animate-pulse py-8">
-                            <Award size={48} className="opacity-50 mb-2"/>
-                            <span className="text-xs">Gerando Arte...</span>
-                        </div>
-                    ) : (
-                        <div className="w-full h-full flex flex-col items-center justify-center text-slate-500 py-8 px-4 text-center bg-slate-800/50">
-                            <Clock size={40} className="opacity-40 mb-3 text-yellow-500"/>
-                            <span className="text-xs font-bold text-slate-300">Certificado em elaboração</span>
-                            <span className="text-[10px] text-slate-500 mt-1">O instrutor logo disponibilizará a arte oficial.</span>
-                        </div>
-                    )}
-                </div>
-                
-                <div>
-                    <h4 className="font-bold text-slate-800 dark:text-white mb-1 line-clamp-1">{course.title}</h4>
-                    <p className="text-xs text-slate-500">{customPdf ? 'PDF Oficial Disponível' : (template ? 'Documento Oficial Liberado' : 'Aguardando Arte do Instrutor')}</p>
-                </div>
-                
-                <button 
-                    disabled={!template && !customPdf}
-                    className="w-full py-2.5 bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-700 dark:text-white rounded-lg font-bold text-sm flex items-center justify-center gap-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed pointer-events-none"
-                >
-                    {(template || customPdf) ? <><Eye size={16} /> Abrir Certificado</> : <><Lock size={16} /> Indisponível</>}
-                </button>
-            </div>
-        );
+    const resolveMacro = (field) => {
+        if (!previewMode && studentData) {
+            if (field.type === 'macro_studentName' || field.type === 'studentName') return studentData.nome || 'NOME DO ALUNO';
+            if (field.type === 'macro_courseName' || field.type === 'courseName') return studentData.curso || 'NOME DO CURSO';
+            if (field.type === 'macro_date' || field.type === 'date') return studentData.dataConclusao || 'DD/MM/AAAA';
+            if (field.type === 'macro_workload') return studentData.cargaHoraria || 'X Horas';
+            if (field.type === 'macro_cpf' || field.type === 'cpf') return studentData.custom?.CPF || '000.000.000-00';
+            if (field.type === 'custom_macro' && studentData.custom) return studentData.custom[field.label] || field.label;
+            if (field.type === 'fixedText' || field.type === 'customText') return field.label;
+            if (field.type === 'macro_completionText') return `Certificamos que o aluno(a) ${studentData.nome || 'NOME DO ALUNO'} concluiu com êxito o curso ${studentData.curso || 'NOME DO CURSO'} no dia ${studentData.dataConclusao || 'DD/MM/AAAA'}.`;
+            if (field.type === 'macro_signature' || field.type === 'signature') return studentData.nome || 'NOME DO ALUNO';
+        }
+        if (field.type === 'macro_completionText') return 'Certificamos que o aluno(a) NOME COMPLETO DO ALUNO DA SILVA concluiu com êxito o curso TÍTULO DO CURSO DE EXEMPLO no dia 31/12/2026.';
+        if (field.type === 'macro_signature') return 'Assinatura do Aluno';
+        return field.label || 'Texto';
     };
+
+    return (
+        <div style={{ width: '100%', display: 'flex', justifyContent: 'center', overflow: 'hidden', padding: '20px 0' }}>
+            <div 
+                ref={containerRef}
+                style={{
+                    position: 'relative', width: `${BASE_WIDTH}px`, height: `${BASE_HEIGHT}px`,
+                    backgroundImage: bgUrl ? `url(${bgUrl})` : 'none', backgroundSize: '100% 100%',
+                    backgroundPosition: 'center', backgroundRepeat: 'no-repeat', backgroundColor: '#fff',
+                    boxShadow: '0 10px 30px rgba(0,0,0,0.15)', transform: `scale(${scale})`,
+                    transformOrigin: 'top center', marginBottom: `-${BASE_HEIGHT * (1 - scale)}px`
+                }}
+            >
+                {fields.map(field => {
+                    const isSelected = selectedFieldId === field.id;
+                    const isDescription = field.type === 'macro_completionText';
+                    
+                    if (field.type === 'image') {
+                        return (
+                            <img 
+                                key={field.id} src={field.url} onMouseDown={(e) => onMouseDown && onMouseDown(e, field.id)}
+                                style={{
+                                    position: 'absolute', left: `${field.x}%`, top: `${field.y}%`, width: `${field.width || 150}px`,
+                                    transform: `translate(-50%, -50%) rotate(${field.rotation || 0}deg)`,
+                                    cursor: onMouseDown ? 'move' : 'default', border: isSelected ? '2px dashed #4f46e5' : 'none',
+                                    userSelect: 'none', WebkitUserDrag: 'none', zIndex: isSelected ? 30 : 20
+                                }}
+                                draggable="false" alt="Elemento"
+                            />
+                        );
+                    }
+
+                    if (field.type === 'line') {
+                        return (
+                            <div key={field.id} onMouseDown={(e) => onMouseDown && onMouseDown(e, field.id)}
+                                style={{
+                                    position: 'absolute', left: `${field.x}%`, top: `${field.y}%`,
+                                    width: `${field.width || 300}px`, height: `${field.height || 2}px`, backgroundColor: field.color || '#000000',
+                                    transform: `translate(-50%, -50%) rotate(${field.rotation || 0}deg)`,
+                                    cursor: onMouseDown ? 'move' : 'default', border: isSelected ? '2px dashed #4f46e5' : 'none',
+                                    zIndex: isSelected ? 30 : 20, borderRadius: '2px'
+                                }}
+                            />
+                        );
+                    }
+
+                    return (
+                        <div key={field.id} onMouseDown={(e) => onMouseDown && onMouseDown(e, field.id)}
+                            style={{
+                                position: 'absolute', left: `${field.x}%`, top: `${field.y}%`, 
+                                transform: `translate(-50%, -50%) rotate(${field.rotation || 0}deg)`, 
+                                color: field.color || '#000', opacity: 0.92, mixBlendMode: 'multiply', 
+                                textShadow: `0px 0px 0.5px ${field.color || '#000'}`,
+                                fontSize: `${field.fontSize || 30}px`, fontFamily: field.fontFamily || 'Arial',
+                                fontWeight: field.fontWeight || 'normal', textAlign: field.textAlign || 'center',
+                                width: isDescription ? '85%' : '100%', whiteSpace: isDescription ? 'normal' : 'nowrap',
+                                cursor: onMouseDown ? 'move' : 'default', border: isSelected ? '2px dashed #4f46e5' : '2px solid transparent',
+                                padding: '4px', userSelect: 'none', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: isSelected ? 30 : 20
+                            }}
+                        >
+                            {resolveMacro(field)}
+                        </div>
+                    );
+                })}
+            </div>
+        </div>
+    );
+};
+
     
-   // =================================================================================
-    // --- SEÇÃO DE CERTIFICADOS (ULTRA COMPACTO NO MOBILE, IGUAL FAVORITOS) ---
-    // =================================================================================
-    const CertificatesSection = ({ user, courses, userProgress, certificates, customCerts, onGenerate }) => {
-        const [expandedCert, setExpandedCert] = useState(null); 
-        const [previewHighRes, setPreviewHighRes] = useState(null);
+    
+// --- COMPONENTE DE CARTÃO (PREVIEW DO CERTIFICADO NO PAINEL DO ALUNO) ---
+const CertificateCard = ({ user, course, template, customPdf, onExpand, progressInfo }) => {
+    const [userData, setUserData] = React.useState(user);
+    const wrapperRef = React.useRef(null);
+    const [scale, setScale] = React.useState(1);
 
-        useEffect(() => {
-            if (!expandedCert) {
-                setPreviewHighRes(null);
-                return;
-            }
-
-            const { course, template, customPdf } = expandedCert;
-            
-            // 👇 PROTEÇÃO CONTRA O ERRO: Se não tiver template (é PDF customizado), aborta o desenho!
-            if (!template || !template.bgUrl) return;
-
-            const img = new Image();
-            img.crossOrigin = "Anonymous";
-            img.src = template.bgUrl;
-            img.onload = async () => {
-                const canvas = document.createElement('canvas');
-                const ctx = canvas.getContext('2d');
-                
-                let finalUser = user;
-                try {
-                    const docSnap = await getDoc(doc(db, "users", user.uid));
-                    if (docSnap.exists()) finalUser = { ...user, ...docSnap.data() };
-                } catch(e) {}
-
-                canvas.width = img.width;
-                canvas.height = img.height;
-                const w = canvas.width;
-                const h = canvas.height;
-                const centerX = w / 2;
-
-                ctx.drawImage(img, 0, 0);
-                ctx.textAlign = "center";
-                ctx.textBaseline = "middle";
-
-                const Y_HEADER = 0.35; 
-                const Y_NOME   = 0.45; 
-                const Y_CORPO  = 0.55; 
-                const Y_CURSO  = 0.62; 
-                const Y_DATA   = 0.78; 
-
-                ctx.font = `italic ${Math.floor(w * 0.018)}px 'Merriweather', serif`;
-                ctx.fillStyle = "#475569";
-                ctx.fillText("Certificamos para os devidos fins que", centerX, h * Y_HEADER);
-
-                const nomeAluno = finalUser.displayName || finalUser.name || "Nome do Aluno";
-                ctx.font = `bold ${Math.floor(w * 0.05)}px 'Merriweather', serif`; 
-                ctx.fillStyle = "#0f172a"; 
-                ctx.shadowColor = "rgba(0,0,0,0.15)"; 
-                ctx.shadowBlur = 5;
-                ctx.shadowOffsetX = 3;
-                ctx.shadowOffsetY = 3;
-                ctx.fillText(nomeAluno, centerX, h * Y_NOME, w * 0.85);
-                ctx.shadowColor = "transparent";
-
-                let docText = "";
-                if (finalUser.cpf) docText += `CPF: ${finalUser.cpf}`;
-                if (finalUser.cpf && finalUser.rg) docText += "  •  "; 
-                if (finalUser.rg) docText += `RG: ${finalUser.rg}`;
-                
-                if (docText) {
-                    ctx.font = `${Math.floor(w * 0.014)}px 'Inter', sans-serif`;
-                    ctx.fillStyle = "#64748b"; 
-                    ctx.fillText(docText, centerX, h * (Y_NOME + 0.06));
-                }
-
-                ctx.font = `normal ${Math.floor(w * 0.018)}px 'Inter', sans-serif`;
-                ctx.fillStyle = "#334155";
-                ctx.fillText("Concluiu com êxito a carga horária do curso profissionalizante de:", centerX, h * Y_CORPO);
-
-                ctx.font = `bold ${Math.floor(w * 0.035)}px 'Merriweather', serif`;
-                ctx.fillStyle = "#1e293b"; 
-                ctx.fillText(course.title, centerX, h * Y_CURSO, w * 0.8);
-
-                ctx.beginPath();
-                ctx.moveTo(centerX - (w * 0.15), h * 0.74);
-                ctx.lineTo(centerX + (w * 0.15), h * 0.74);
-                ctx.strokeStyle = "#cbd5e1";
-                ctx.lineWidth = 2;
-                ctx.stroke();
-
-                const dateStr = new Date().toLocaleDateString('pt-BR', { day: 'numeric', month: 'long', year: 'numeric' });
-                ctx.font = `${Math.floor(w * 0.016)}px 'Inter', sans-serif`;
-                ctx.fillStyle = "#475569";
-                ctx.fillText(`São Paulo, ${dateStr}`, centerX, h * Y_DATA);
-
-                setPreviewHighRes(canvas.toDataURL('image/jpeg', 0.9));
-            };
-
-        }, [expandedCert, user]);
-
-        const handleExpand = (course, template, customPdf) => {
-            setExpandedCert({ course, template, customPdf });
+    // Busca os dados atualizados do usuário (CPF, RG, etc)
+    React.useEffect(() => {
+        const fetchExtras = async () => {
+            if (!user?.uid || typeof db === 'undefined') return;
+            try {
+                const docSnap = await getDoc(doc(db, "users", user.uid));
+                if (docSnap.exists()) setUserData(prev => ({ ...prev, ...docSnap.data() }));
+            } catch(e) {}
         };
+        fetchExtras();
+    }, [user]);
 
-        const handleClose = () => {
-            setExpandedCert(null);
-        };
+    // Calcula a escala para o certificado caber dentro do cartãozinho (thumbnail)
+    React.useEffect(() => {
+        if (wrapperRef.current && template) {
+            const availableWidth = wrapperRef.current.clientWidth;
+            // 1123 é a largura base. Damos um zoom out drástico.
+            setScale(availableWidth / 1123);
+        }
+    }, [template]);
 
-        const availableCertificates = courses.filter(course => {
-            const prog = userProgress ? userProgress[course.id] : null;
-            if (prog && prog.percentage === 100) return true;
+    // Prepara os dados dinâmicos do aluno para o renderizador
+    const dadosAluno = {
+        nome: userData.displayName || userData.name || userData.nome || "Aluno sem Nome",
+        curso: course.title || course.titulo || "Curso",
+        dataConclusao: progressInfo?.completedAt 
+            ? (progressInfo.completedAt.seconds 
+                ? new Date(progressInfo.completedAt.seconds * 1000).toLocaleDateString('pt-BR') 
+                : new Date(progressInfo.completedAt).toLocaleDateString('pt-BR'))
+            : new Date().toLocaleDateString('pt-BR'),
+        cargaHoraria: course.workload || '40 Horas',
+        custom: {
+            "CPF": userData.cpf ? `CPF: ${userData.cpf}` : "CPF não cadastrado"
+        }
+    };
 
-            let total = 0;
-            let completed = 0;
-            if(course.modulos) {
-                course.modulos.forEach((mod, mIdx) => {
-                    if(mod.aulas) mod.aulas.forEach((_, lIdx) => {
-                        total++;
-                        if(localStorage.getItem(`completed_${user.uid}_${course.id}_${mIdx}_${lIdx}`) === 'true') {
-                            completed++;
-                        }
-                    });
-                });
-            }
-            return total > 0 && completed === total;
-        });
-
-        return (
-            <div className="space-y-4 md:space-y-10 animate-fade-in max-w-[100rem] mx-auto mt-16 md:mt-28 mb-10 px-3 md:px-8 lg:px-12 font-sans">
-                
-                {/* HEADER (Mais compacto no mobile) */}
-                <div className="flex items-center gap-2 md:gap-5 mb-3 md:mb-8 px-1">
-                   <div className="p-2 md:p-5 bg-yellow-100 dark:bg-yellow-900/30 text-yellow-600 dark:text-yellow-400 rounded-lg md:rounded-2xl shadow-inner">
-                       <Award className="w-5 h-5 md:w-8 md:h-8" />
-                   </div>
-                   <div>
-                       <h2 className="text-xl md:text-4xl font-black text-slate-800 dark:text-white tracking-tight">Galeria de Certificados</h2>
-                       <p className="text-slate-500 dark:text-slate-400 text-[10px] md:text-base mt-0.5 md:mt-1.5">Visualize e baixe seus certificados de conclusão.</p>
-                   </div>
-               </div>
-
-               {availableCertificates.length === 0 ? (
-                   <div className="border-2 border-dashed border-slate-200 dark:border-slate-700 rounded-2xl md:rounded-3xl p-8 md:p-24 flex flex-col items-center justify-center text-center bg-slate-50/50 dark:bg-slate-900/50 min-h-[200px] md:min-h-[400px]">
-                       <div className="w-12 h-12 md:w-24 md:h-24 bg-slate-100 dark:bg-slate-800 rounded-full flex items-center justify-center text-slate-400 mb-3 md:mb-8">
-                           <Lock className="w-6 h-6 md:w-12 md:h-12" />
-                       </div>
-                       <h4 className="font-extrabold text-base md:text-3xl text-slate-700 dark:text-slate-200 mb-1.5 md:mb-4">Nenhuma conquista ainda</h4>
-                       <p className="text-slate-500 text-xs md:text-lg max-w-sm md:max-w-xl leading-relaxed">Complete 100% de um curso para liberar seu certificado e registrar sua conquista aqui.</p>
-                   </div>
-               ) : (
-                  
-
-               // GRADE DE CERTIFICADOS (Layout de Documento Horizontal - Usa o componente CertificateCard)
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-                        {availableCertificates.map(course => {
-                            const template = certificates.find(c => c.courseId === course.id);
-                            // Aqui o código puxa o PDF oficial que o administrador enviou pelo painel!
-                            const customPdf = customCerts ? customCerts[course.id] : null; 
-                            
-                            return (
-                                <CertificateCard 
-                                    key={course.id} 
-                                    user={user} 
-                                    course={course} 
-                                    template={template}
-                                    customPdf={customPdf} 
-                                    onExpand={handleExpand} 
-                                />
-                            );
-                        })}
+    return (
+        <div 
+            className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-4 shadow-sm hover:shadow-md transition-all flex flex-col gap-4 group cursor-pointer"
+            onClick={() => (template || customPdf) ? onExpand(course, template, customPdf, progressInfo) : null}
+        >
+            <div 
+                ref={wrapperRef}
+                className="relative bg-slate-100 dark:bg-slate-700 rounded-lg overflow-hidden border border-slate-200 dark:border-slate-600 flex items-center justify-center pointer-events-none" 
+                style={{ height: '200px' }} // Altura fixa para o thumbnail
+            >
+                {customPdf ? (
+                    <>
+                        <div className="absolute inset-0 w-full h-full bg-white dark:bg-slate-800 overflow-hidden flex items-center justify-center pointer-events-none">
+                            {customPdf.toLowerCase().includes('.pdf') ? (
+                                <iframe src={`${customPdf}#page=1&view=FitH&toolbar=0&navpanes=0&scrollbar=0`} className="w-[105%] h-[105%] pointer-events-none border-none select-none" scrolling="no" />
+                            ) : (
+                                <img src={customPdf} className="w-full h-full object-cover" />
+                            )}
+                        </div>
+                        <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center z-20 gap-3 backdrop-blur-[2px]">
+                            <Award size={36} className="text-white drop-shadow-md" />
+                            <div className="bg-indigo-600 text-white px-5 py-2.5 rounded-full font-bold shadow-xl transform scale-90 group-hover:scale-100 transition-transform flex items-center gap-2 text-sm">
+                                <Maximize size={18}/> Ver Certificado
+                            </div>
+                        </div>
+                    </>
+                ) : template ? (
+                    <div className="flex items-center justify-center" style={{ transform: `scale(${scale})`, transformOrigin: 'center center' }}>
+                        <CertificateRenderer 
+                            bgUrl={template.bgUrl} 
+                            fields={template.fields} 
+                            previewMode={false} 
+                            studentData={dadosAluno}
+                            scale={1} // Mandamos 1 porque o Wrapper por fora já está fazendo o zoom out
+                        />
+                        <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center z-20">
+                            <div className="bg-white text-slate-800 px-4 py-2 rounded-full font-bold shadow-lg transform scale-90 group-hover:scale-100 transition-transform flex items-center gap-2">
+                                <Maximize size={16}/> Ampliar
+                            </div>
+                        </div>
+                    </div>
+                ) : (
+                    <div className="w-full h-full flex flex-col items-center justify-center text-slate-500 py-8 px-4 text-center bg-slate-800/50">
+                        <Clock size={40} className="opacity-40 mb-3 text-yellow-500"/>
+                        <span className="text-xs font-bold text-slate-300">Certificado em elaboração</span>
                     </div>
                 )}
+            </div>
+            
+            <div>
+                <h4 className="font-bold text-slate-800 dark:text-white mb-1 line-clamp-1">{course.title}</h4>
+                <p className="text-xs text-slate-500">{customPdf ? 'PDF Oficial Disponível' : (template ? 'Documento Oficial Liberado' : 'Aguardando Arte')}</p>
+            </div>
+        </div>
+    );
+};
+    
+// =================================================================================
+// --- SEÇÃO PRINCIPAL E MODAL DE DOWNLOAD DE CERTIFICADOS ---
+// =================================================================================
+const CertificatesSection = ({ user, courses, userProgress, certificates, customCerts }) => {
+    const [expandedCert, setExpandedCert] = React.useState(null); 
+    const [previewHighRes, setPreviewHighRes] = React.useState(null);
 
-               {/* Modal de Visualização (INALTERADO) */}
-               {expandedCert && (
-                   <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-black/90 backdrop-blur-md animate-fade-in" onClick={handleClose}>
-                       <div className="relative w-full max-w-6xl bg-white dark:bg-slate-900 rounded-2xl shadow-2xl overflow-hidden flex flex-col" onClick={e => e.stopPropagation()}>
-                           
-                           <div className="p-4 border-b border-slate-100 dark:border-slate-800 flex justify-between items-center bg-white dark:bg-slate-900 z-10 shrink-0">
-                               <h3 className="font-bold text-slate-800 dark:text-white flex items-center gap-2">
-                                   <Award className="text-yellow-500" size={20}/> 
-                                   {expandedCert.course.title}
-                               </h3>
-                               <button onClick={handleClose} className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-full transition-colors text-slate-500 dark:text-slate-400">
-                                   <X size={24} />
-                               </button>
-                           </div>
+    React.useEffect(() => {
+        if (!expandedCert) return;
+        setPreviewHighRes(null);
 
-                           <div className="flex-1 overflow-hidden p-4 md:p-8 bg-slate-100 dark:bg-slate-950 flex items-center justify-center min-h-[50vh]">
-                                {expandedCert.customPdf ? (
-                                    expandedCert.customPdf.toLowerCase().includes('.pdf') ? (
-                                        <iframe src={`${expandedCert.customPdf}#view=FitH`} className="w-full h-[70vh] rounded-xl shadow-2xl bg-white border-none" />
-                                    ) : (
-                                        <img src={expandedCert.customPdf} className="max-w-full max-h-[70vh] object-contain shadow-2xl rounded-lg border-4 border-white dark:border-slate-800" alt="Certificado Personalizado" />
-                                    )
-                                ) : previewHighRes ? (
-                                    <img 
-                                        src={previewHighRes} 
-                                        className="max-w-full max-h-[70vh] object-contain shadow-2xl rounded-lg border-4 border-white dark:border-slate-800" 
-                                        alt="Certificado Expandido" 
-                                    />
+        const { course, template, progressInfo, customPdf } = expandedCert;
+        
+        // Se for um arquivo PDF ou Imagem direto (customizado), não usamos Canvas
+        if (customPdf) {
+            setPreviewHighRes('custom_ready');
+            return;
+        }
+        
+        if (!template?.bgUrl) {
+            setPreviewHighRes('erro_cors');
+            return;
+        }
+
+        // Função vital para lidar com domínios e evitar bloqueios
+        const fixUrl = (url) => {
+            if (!url) return null;
+            const wrongDomain = "https://pub-2ece542306d80259e71a793d20f91a60.r2.dev";
+            const rightDomain = "https://pub-263c6a7252164111a104a68e6835cfc4.r2.dev";
+            let safeUrl = url.includes(wrongDomain) ? url.replace(wrongDomain, rightDomain) : url;
+            
+            // TRUQUE MÁGICO DO CACHE BUSTER: Impede o navegador de usar a imagem bugada do cache
+            return safeUrl + (safeUrl.includes('?') ? '&' : '?') + 'cb=' + new Date().getTime();
+        };
+
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
+        const img = new Image();
+        img.crossOrigin = "Anonymous"; // Essencial para exportar o certificado depois
+        img.src = fixUrl(template.bgUrl);
+
+        // Proteção contra loop infinito de carregamento
+        img.onerror = () => {
+            console.error("Erro ao carregar a imagem do certificado. Verifique as configurações de CORS.");
+            setPreviewHighRes('erro_cors');
+        };
+
+        img.onload = async () => {
+            let finalUser = user;
+            try {
+                if (typeof db !== 'undefined') {
+                    const docSnap = await getDoc(doc(db, "users", user.uid));
+                    if (docSnap.exists()) finalUser = { ...user, ...docSnap.data() };
+                }
+            } catch(e) {}
+
+            canvas.width = img.width;
+            canvas.height = img.height;
+            const w = canvas.width;
+            const h = canvas.height;
+            
+            ctx.drawImage(img, 0, 0);
+
+            if (template.fields && template.fields.length > 0) {
+                const ratio = w / 1000; 
+                
+                // 1. IMAGENS LOGOS E SELOS (COM ROTAÇÃO)
+                const imageFields = template.fields.filter(f => f.type === 'image');
+                for (let field of imageFields) {
+                    if (!field.url) continue;
+                    try {
+                        const imgMacro = new Image();
+                        imgMacro.crossOrigin = "Anonymous";
+                        imgMacro.src = fixUrl(field.url);
+                        await new Promise((resolve, reject) => { imgMacro.onload = resolve; imgMacro.onerror = reject; });
+                        
+                        let pxX = (parseFloat(field.x) / 100) * w;
+                        let pxY = (parseFloat(field.y) / 100) * h;
+                        let targetW = (parseFloat(field.width) || 150) * ratio;
+                        let targetH = imgMacro.height * (targetW / imgMacro.width);
+                        
+                        ctx.save();
+                        ctx.translate(pxX, pxY);
+                        ctx.rotate((field.rotation || 0) * Math.PI / 180);
+                        ctx.drawImage(imgMacro, -targetW / 2, -targetH / 2, targetW, targetH);
+                        ctx.restore();
+                    } catch(e) { console.warn("Aviso: Falha ao carregar macro de imagem.", e); }
+                }
+
+                // 2. LINHAS GEOMÉTRICAS
+                const lineFields = template.fields.filter(f => f.type === 'line');
+                for (let field of lineFields) {
+                    const pxX = (parseFloat(field.x) / 100) * w;
+                    const pxY = (parseFloat(field.y) / 100) * h;
+                    const targetW = (parseFloat(field.width) || 300) * ratio;
+                    const targetH = (parseFloat(field.height) || 2) * ratio;
+
+                    ctx.save();
+                    ctx.translate(pxX, pxY);
+                    ctx.rotate((field.rotation || 0) * Math.PI / 180);
+                    ctx.fillStyle = field.color || "#000000";
+                    ctx.fillRect(-targetW / 2, -targetH / 2, targetW, targetH);
+                    ctx.restore();
+                }
+
+                // 3. TEXTOS E MACROS AUTOMÁTICAS
+                const textFields = template.fields.filter(f => f.type !== 'image' && f.type !== 'line');
+                for (let field of textFields) {
+                    let pxX = (parseFloat(field.x) / 100) * w;
+                    let pxY = (parseFloat(field.y) / 100) * h;
+                    const fontSizePx = (parseFloat(field.fontSize) || 30) * ratio;
+
+                    let type = field.type || "";
+                    let originalText = String(field.label || field.text || "");
+                    let cleanText = originalText.toUpperCase().trim();
+
+                    let isName = type.includes('studentName') || cleanText.includes("NOME DO ALUNO") || cleanText === "NOME" || cleanText.includes("MACRO_NOME");
+                    let isCPF = type.includes('cpf') || cleanText.includes("CPF");
+                    let isCourse = type.includes('courseName') || cleanText.includes("NOME DO CURSO");
+                    let isDate = type.includes('date') || cleanText.includes("DATA");
+                    let isSignature = type.includes('signature') || cleanText.includes("ASSINATURA");
+                    let isDescription = type.includes('completionText') || cleanText.includes("TEXTO CONCLUS");
+                    
+                    let fontWeight = isSignature ? 'normal' : (field.fontWeight || 'bold');
+                    let fontStyle = isSignature ? 'italic' : 'normal';
+                    let fontFamily = isSignature ? "'Brush Script MT', 'Dancing Script', 'Great Vibes', cursive" : (field.fontFamily || 'Arial');
+                    
+                    ctx.textAlign = "center";
+                    ctx.textBaseline = "middle"; 
+                    ctx.fillStyle = field.color || "#000000";
+                    ctx.globalCompositeOperation = "multiply"; 
+                    ctx.globalAlpha = 0.92; 
+                    ctx.shadowColor = field.color || "#000000"; 
+                    ctx.shadowBlur = 1.5; 
+                    
+                    const alunoData = finalUser || user || {};
+                    const nomeAluno = alunoData.name || alunoData.displayName || user.displayName || "Aluno";
+                    const cpfStr = alunoData.cpf || "CPF não cadastrado";
+                    const cName = course.title || course.titulo || "Curso sem título";
+                    
+                    let dateStr = new Date().toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' });
+                    if (progressInfo?.completedAt) {
+                        const d = progressInfo.completedAt.seconds ? new Date(progressInfo.completedAt.seconds * 1000) : new Date(progressInfo.completedAt);
+                        if (!isNaN(d.getTime())) dateStr = d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' });
+                    }
+
+                    let textoFinal = originalText;
+                    if (isName) textoFinal = nomeAluno;
+                    else if (isCPF) textoFinal = `CPF: ${cpfStr}`;
+                    else if (isCourse) textoFinal = cName;
+                    else if (isDate) textoFinal = `Conclusão: ${dateStr}`;
+                    else if (isSignature) textoFinal = nomeAluno; 
+                    else if (isDescription) textoFinal = `Certificamos que o aluno(a) ${nomeAluno} concluiu com êxito o curso ${cName} no dia ${dateStr}.`;
+                    else if (field.type === 'custom_macro') {
+                        const macroName = field.label.trim();
+                        textoFinal = course[macroName] || alunoData[macroName] || ""; 
+                    } else if (field.type === 'fixedText' || field.type === 'customText') {
+                        textoFinal = field.label;
+                    }
+
+                    if (!textoFinal || String(textoFinal).trim() === "") continue;
+
+                    let maxAvailableWidth = Math.min(pxX, w - pxX) * 2 * 0.90; 
+
+                    ctx.save();
+                    ctx.translate(pxX, pxY);
+                    ctx.rotate((field.rotation || 0) * Math.PI / 180);
+
+                    if (isDescription || textoFinal.length > 50) {
+                        ctx.font = `${fontStyle} ${fontWeight} ${fontSizePx}px ${fontFamily}`;
+                        const words = textoFinal.split(' ');
+                        let line = ''; const lines = [];
+
+                        for(let n = 0; n < words.length; n++) {
+                            const testLine = line + words[n] + ' ';
+                            const metrics = ctx.measureText(testLine);
+                            if (metrics.width > maxAvailableWidth && n > 0) { 
+                                lines.push(line.trim()); line = words[n] + ' '; 
+                            } else { line = testLine; }
+                        }
+                        lines.push(line.trim());
+                        
+                        let currentY = 0 - (((lines.length - 1) * (fontSizePx * 1.5)) / 2);
+                        for(let i = 0; i < lines.length; i++) {
+                            ctx.fillText(lines[i], 0, currentY);
+                            currentY += (fontSizePx * 1.5);
+                        }
+                    } else {
+                        let currentFontSize = fontSizePx;
+                        ctx.font = `${fontStyle} ${fontWeight} ${currentFontSize}px ${fontFamily}`;
+                        let metrics = ctx.measureText(textoFinal);
+                        
+                        while (metrics.width > maxAvailableWidth && currentFontSize > 10) {
+                            currentFontSize -= 1;
+                            ctx.font = `${fontStyle} ${fontWeight} ${currentFontSize}px ${fontFamily}`;
+                            metrics = ctx.measureText(textoFinal);
+                        }
+                        ctx.fillText(textoFinal, 0, 0);
+                    }
+                    ctx.restore();
+                }
+                ctx.globalCompositeOperation = "source-over";
+                ctx.globalAlpha = 1.0;
+                ctx.shadowBlur = 0;
+            }
+
+            try {
+                setPreviewHighRes(canvas.toDataURL('image/jpeg', 1.0));
+            } catch(err) {
+                console.error("Falha ao exportar o Canvas. Ocorreu bloqueio de CORS:", err);
+                setPreviewHighRes('erro_cors');
+            }
+        };
+    }, [expandedCert, user]);
+
+    const handleExpand = (course, template, customPdf, progressInfo) => setExpandedCert({ course, template, customPdf, progressInfo });
+    const handleClose = () => { setExpandedCert(null); setPreviewHighRes(null); };
+
+    const handleDownloadGeneratedCertificate = () => {
+        if (!previewHighRes || previewHighRes === 'erro_cors') return;
+        const link = document.createElement('a');
+        link.download = `Certificado_${user.displayName || 'Aluno'}_${expandedCert.course.title.replace(/\s+/g, '_')}.jpg`;
+        link.href = previewHighRes;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+    };
+
+    const availableCertificates = courses.filter(course => {
+        const prog = userProgress ? userProgress[course.id] : null;
+        if (prog && prog.percentage >= 99) return true;
+        let total = 0; let completed = 0;
+        if(course.modulos) {
+            course.modulos.forEach((mod, mIdx) => {
+                if(mod.aulas) mod.aulas.forEach((_, lIdx) => {
+                    total++;
+                    if(localStorage.getItem(`completed_${user.uid}_${course.id}_${mIdx}_${lIdx}`) === 'true') completed++;
+                });
+            });
+        }
+        return total > 0 && completed >= total;
+    });
+
+    return (
+        <div className="space-y-4 md:space-y-10 animate-fade-in max-w-[100rem] mx-auto mt-16 md:mt-28 mb-10 px-3 md:px-8 lg:px-12 font-sans">
+            <div className="flex items-center gap-2 md:gap-5 mb-3 md:mb-8 px-1">
+               <div className="p-2 md:p-5 bg-yellow-100 dark:bg-yellow-900/30 text-yellow-600 dark:text-yellow-400 rounded-lg md:rounded-2xl shadow-inner">
+                   <Award className="w-5 h-5 md:w-8 md:h-8" />
+               </div>
+               <div>
+                   <h2 className="text-xl md:text-4xl font-black text-slate-800 dark:text-white tracking-tight">Galeria de Certificados</h2>
+                   <p className="text-slate-500 dark:text-slate-400 text-[10px] md:text-base mt-0.5 md:mt-1.5">Visualize e baixe seus certificados de conclusão.</p>
+               </div>
+           </div>
+
+           {availableCertificates.length === 0 ? (
+               <div className="border-2 border-dashed border-slate-200 dark:border-slate-700 rounded-2xl md:rounded-3xl p-8 md:p-24 flex flex-col items-center justify-center text-center bg-slate-50/50 dark:bg-slate-900/50 min-h-[200px] md:min-h-[400px]">
+                   <div className="w-12 h-12 md:w-24 md:h-24 bg-slate-100 dark:bg-slate-800 rounded-full flex items-center justify-center text-slate-400 mb-3 md:mb-8">
+                       <Lock className="w-6 h-6 md:w-12 md:h-12" />
+                   </div>
+                   <h4 className="font-extrabold text-base md:text-3xl text-slate-700 dark:text-slate-200 mb-1.5 md:mb-4">Nenhuma conquista ainda</h4>
+                   <p className="text-slate-500 text-xs md:text-lg max-w-sm md:max-w-xl leading-relaxed">Complete 100% de um curso para liberar seu certificado e registrar sua conquista aqui.</p>
+               </div>
+           ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+                    {availableCertificates.map(course => {
+                        const template = certificates.find(c => c.courseId === course.id);
+                        const customPdf = customCerts ? customCerts[course.id] : null; 
+                        return (
+                            <CertificateCard 
+                                key={course.id} user={user} course={course} template={template}
+                                customPdf={customPdf} progressInfo={userProgress ? userProgress[course.id] : null}
+                                onExpand={handleExpand} 
+                            />
+                        );
+                    })}
+                </div>
+            )}
+
+           {expandedCert && (
+               <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-fade-in" onClick={handleClose}>
+                   <div className="w-full max-w-4xl bg-white dark:bg-slate-900 rounded-2xl shadow-2xl flex flex-col relative overflow-hidden border border-slate-200 dark:border-slate-700 animate-scale-in" onClick={e => e.stopPropagation()}>
+                       
+                       <div className="p-4 border-b border-slate-200 dark:border-slate-800 flex justify-between items-center bg-slate-50 dark:bg-slate-800/50 shrink-0">
+                           <h3 className="font-bold text-lg text-slate-800 dark:text-white flex items-center gap-2 truncate pr-4">
+                               <Award className="text-indigo-500 shrink-0" size={24}/> Certificado de Conclusão
+                           </h3>
+                           <button onClick={handleClose} className="text-slate-400 hover:text-red-500 transition-colors p-1">
+                               <X size={24} />
+                           </button>
+                       </div>
+
+                       {/* ÁREA DE CARREGAMENTO / VISUALIZAÇÃO DO CERTIFICADO CORRIGIDA */}
+                       <div className="flex-1 p-6 flex items-center justify-center bg-white dark:bg-slate-800 min-h-[400px] overflow-y-auto custom-scrollbar">
+                            {expandedCert.customPdf ? (
+                                expandedCert.customPdf.toLowerCase().includes('.pdf') ? (
+                                    <iframe src={`${expandedCert.customPdf}#view=FitH`} className="w-full h-[60vh] rounded-xl shadow-2xl bg-white border-none" />
                                 ) : (
-                                    <div className="flex flex-col items-center gap-3 text-slate-400 py-20">
-                                        <div className="w-10 h-10 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin"></div>
-                                        <p>Gerando alta resolução...</p>
-                                    </div>
-                                )}
-                            </div>
-                           <div className="p-6 border-t border-slate-100 dark:border-slate-800 bg-white dark:bg-slate-900 flex flex-col md:flex-row justify-between items-center gap-4 shrink-0">
-                               <p className="text-sm text-slate-500 dark:text-slate-400 text-center md:text-left">
-                                   Certificado emitido para <strong>{user.displayName}</strong>
-                               </p>
-                               <button 
-                                   onClick={() => {
-                                        if (customCerts && customCerts[expandedCert.course.id]) {
-                                            window.open(customCerts[expandedCert.course.id], "_blank");
-                                        } else {
-                                            onGenerate(expandedCert.course.id, expandedCert.course.title);
-                                        }
-                                   }}
-                                   className="px-8 py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold shadow-lg shadow-indigo-600/20 flex items-center gap-2 transition-all hover:scale-105 active:scale-95 w-full md:w-auto justify-center"
-                               >
-                                   <Download size={20} /> {customCerts && customCerts[expandedCert.course.id] ? "Baixar PDF Oficial" : "Baixar Certificado"}
-                               </button>
-                           </div>
+                                    <img src={expandedCert.customPdf} className="max-w-full max-h-[60vh] object-contain shadow-2xl rounded-lg border border-slate-200 dark:border-slate-700" alt="Certificado" />
+                                )
+                            ) : previewHighRes === 'erro_cors' ? (
+                                <div className="flex flex-col items-center gap-3 text-red-500 py-20 text-center px-4">
+                                    <AlertCircle size={40} className="mb-2 text-red-500" />
+                                    <span className="font-bold text-lg">Houve um bloqueio de segurança na imagem.</span>
+                                    <span className="text-sm text-slate-500 max-w-sm">Tente limpar o cache do seu navegador ou avise o administrador.</span>
+                                </div>
+                            ) : previewHighRes && previewHighRes !== 'custom_ready' ? (
+                                <img src={previewHighRes} className="max-w-full max-h-[60vh] object-contain shadow-2xl rounded-lg border border-slate-200 dark:border-slate-700" alt="Certificado Expandido" />
+                            ) : (
+                                <div className="flex flex-col items-center gap-3 text-indigo-500 py-20">
+                                    <div className="w-10 h-10 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin"></div>
+                                    <span className="font-bold">Gerando seu certificado oficial...</span>
+                                </div>
+                            )}
+                       </div>
+
+                       {/* RODAPÉ E BOTÕES DE DOWNLOAD */}
+                       <div className="p-4 border-t border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900 flex justify-end items-center gap-3 shrink-0">
+                           <button onClick={handleClose} className="px-6 py-2.5 rounded-xl font-bold text-slate-600 bg-white border border-slate-200 hover:bg-slate-100 dark:bg-slate-800 dark:border-slate-700 dark:text-slate-300 transition-colors hidden sm:block">
+                               Fechar
+                           </button>
+                           <button 
+                               onClick={() => {
+                                    if (expandedCert.customPdf) window.open(expandedCert.customPdf, "_blank"); 
+                                    else handleDownloadGeneratedCertificate(); 
+                               }}
+                               disabled={(!expandedCert.customPdf && !previewHighRes) || previewHighRes === 'erro_cors'}
+                               className="px-6 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold shadow-lg flex items-center justify-center gap-2 transition-all active:scale-95 disabled:opacity-50"
+                           >
+                               <Download size={20} /> Salvar / Imprimir
+                           </button>
                        </div>
                    </div>
-               )}
-            </div>
-        );
-    };
-   
+               </div>
+           )}
+        </div>
+    );
+};
    
    
 
@@ -5493,8 +5844,9 @@ const HomeSection = ({ user, courses, purchasedIds, userProgress, db, setView, o
             1. SE FOR SAUDAÇÃO OU BATE-PAPO (ex: "Oi", "Tudo bem?"): Responda normalmente SEM JSON.
             2. SE FOR ORDEM (ex: "Me leve", "Faça resumo", "Mude meu nome", "Abra o curso"): Responda e INCLUA OBRIGATORIAMENTE um bloco JSON no final.
             
-            AÇÕES JSON:
-            - Navegar: {"action": "navigate", "target": "catalog|my_courses|loja|favorites|certificates|community|support|profile|informacoes"}
+            AÇÕES JSON (Siga exatamente estes formatos):
+            - Navegar: {"action": "navigate", "target": "ID_DA_TELA"}
+              (Use APENAS um destes IDs: home = Início, catalog = Portais, my_courses = Meus Cursos, loja = Loja VIP, favorites = Favoritos, certificates = Conquistas, community = Comunidade, support = Suporte, profile = Perfil, wallet = Carteira/Pontos, informacoes = Sobre Nós/Políticas)
             - Abrir Curso: {"action": "open_course", "courseName": "NOME"}
             - Editar Perfil: {"action": "edit_profile", "field": "name|bio|city", "value": "NOVO VALOR"}
             - Postar Comunidade: {"action": "post_community", "text": "MENSAGEM"}
@@ -7889,6 +8241,21 @@ const PointsWalletSection = ({ user, courses, purchasedIds, userPoints, db, setP
 
                     setPurchasedIds(prev => [...prev, course.id]);
                     showNotification("Troca realizada com sucesso! O curso já está liberado.", "success");
+
+                    // 👇 DISPARO DE E-MAIL (RESGATE POR PONTOS) 👇
+                    let capaDoCurso = course.cover || course.thumbnailUrl || "https://images.unsplash.com/photo-1616469829941-c7200edec809?q=80&w=600";
+                    fetch("https://script.google.com/macros/s/AKfycbyEiSTm2Xl2ZiOa7swyE06LbDvjcd9d4HBCQsUq8EzBvmYx6vPkga1s4f6TA66rMGI/exec", {
+                        method: "POST", mode: "no-cors", headers: { "Content-Type": "text/plain;charset=utf-8" },
+                        body: JSON.stringify({
+                            to: user.email,
+                            userName: user.displayName || 'Aluno',
+                            itemName: course.title || course.titulo,
+                            itemImage: capaDoCurso,
+                            itemType: "points_exchange" // Avisa o Google que foi resgate por pontos
+                        })
+                    }).catch(e => console.log("Erro no e-mail de resgate: ", e));
+                    // 👆 FIM DO DISPARO 👇
+
                 } catch (error) {
                     showNotification("Erro ao processar a troca. Tente novamente.", "error");
                 } finally {
@@ -8333,6 +8700,122 @@ const MindMapSection = ({ user, courses, purchasedIds, setView }) => {
        const [loadingData, setLoadingData] = useState(true);
        const [currentSettings, setCurrentSettings] = useState(settings || { mercadopagoAccessToken: BACKUP_ACCESS_TOKEN });
 
+
+       // =======================================================================
+           // 👇 COLE O MOTOR DE VERIFICAÇÃO AQUI 👇
+           // =======================================================================
+           const [pendingCourseOrders, setPendingCourseOrders] = useState([]);
+           const isCheckingCoursesRef = useRef(false);
+
+           useEffect(() => {
+               if (!db || !user) return;
+               const qPending = query(
+                   collection(db, "transactions"), 
+                   where("userId", "==", user.uid), 
+                   where("status", "in", ["pendente", "pending", "in_process"])
+               );
+               const unsubPending = onSnapshot(qPending, snap => {
+                   setPendingCourseOrders(snap.docs.map(d => ({id: d.id, ...d.data()})));
+               });
+               return () => unsubPending();
+           }, [db, user]);
+
+           const verifyPendingCoursePayments = async () => {
+               if (isCheckingCoursesRef.current || pendingCourseOrders.length === 0) return;
+               
+               const mpToken = currentSettings?.mercadoPagoAccessToken || currentSettings?.mercadopagoAccessToken || 'APP_USR-5078406563096978-100721-63ed85c89b2cb57e85109eb14514462c-336516116';
+               if (!mpToken) return;
+
+               isCheckingCoursesRef.current = true;
+
+               try {
+                   for (let order of pendingCourseOrders) {
+                       let mpStatus = null;
+                       let mpData = null;
+                       const mpId = order.mpPaymentId || order.paymentId || order.payment_id;
+                       
+                       if (mpId && mpId !== 'N/A') {
+                           const resId = await fetch(`https://api.mercadopago.com/v1/payments/${String(mpId).trim()}`, { 
+                               headers: { 'Authorization': `Bearer ${mpToken}` } 
+                           });
+                           if (resId.ok) { 
+                               mpData = await resId.json(); 
+                               mpStatus = String(mpData.status).toLowerCase(); 
+                           }
+                       }
+
+                       if (!mpStatus) {
+                           const searchUrl = `https://api.mercadopago.com/v1/payments/search?sort=date_created&criteria=desc&external_reference=${order.id}`;
+                           const resSearch = await fetch(searchUrl, { 
+                               headers: { 'Authorization': `Bearer ${mpToken}` } 
+                           });
+                           if (resSearch.ok) {
+                               const searchData = await resSearch.json();
+                               if (searchData.results && searchData.results.length > 0) { 
+                                   mpData = searchData.results[0]; 
+                                   mpStatus = String(mpData.status).toLowerCase(); 
+                               }
+                           }
+                       }
+
+                       if (mpStatus) {
+                           let novoStatus = order.status;
+                           if (['approved', 'accredited'].includes(mpStatus)) novoStatus = 'pago'; 
+                           else if (['rejected', 'cancelled', 'refunded', 'charged_back'].includes(mpStatus)) novoStatus = 'cancelado'; 
+                           
+                           if (novoStatus !== order.status) {
+                               let capaDoCurso = "https://images.unsplash.com/photo-1616469829941-c7200edec809?q=80&w=600";
+                               try {
+                                   const cursoInfo = allCourses.find(c => c.id === order.courseId);
+                                   if (cursoInfo && (cursoInfo.cover || cursoInfo.thumbnailUrl)) {
+                                       capaDoCurso = cursoInfo.cover || cursoInfo.thumbnailUrl;
+                                   }
+                               } catch(e){}
+
+                               await updateDoc(doc(db, "transactions", order.id), { 
+                                   status: novoStatus, 
+                                   mpPaymentId: mpData ? String(mpData.id) : order.mpPaymentId, 
+                                   updatedAt: serverTimestamp() 
+                               });
+                               
+                               if (novoStatus === 'pago') {
+                                   if(showNotification) showNotification(`🎉 Pagamento aprovado! O curso "${order.courseTitle || 'Adquirido'}" já está liberado.`, "success");
+                                   
+                                   fetch("https://script.google.com/macros/s/AKfycbyEiSTm2Xl2ZiOa7swyE06LbDvjcd9d4HBCQsUq8EzBvmYx6vPkga1s4f6TA66rMGI/exec", {
+                                       method: "POST", mode: "no-cors", headers: { "Content-Type": "text/plain;charset=utf-8" },
+                                       body: JSON.stringify({
+                                           to: order.userEmail,
+                                           userName: order.userName || 'Aluno',
+                                           itemName: order.courseTitle || 'Seu Curso',
+                                           itemImage: capaDoCurso,
+                                           itemType: "course"
+                                       })
+                                   }).catch(e => console.log("Erro no e-mail: ", e));
+                                   
+                                   const qTrans = query(collection(db, "transactions"), where("userEmail", "==", user.email), where("status", "in", ["aprovado", "pago", "approved"]));
+                                   const transSnapList = await getDocs(qTrans);
+                                   setPurchasedIds(transSnapList.docs.map(d => d.data().courseId));
+                               }
+                           }
+                       }
+                   }
+               } catch (error) {
+                   console.error("Erro na verificação automática de Cursos:", error);
+               } finally {
+                   isCheckingCoursesRef.current = false;
+               }
+           };
+
+           useEffect(() => {
+               let interval;
+               if (pendingCourseOrders.length > 0) {
+                   interval = setInterval(() => {
+                       verifyPendingCoursePayments();
+                   }, 5000);
+               }
+               return () => clearInterval(interval);
+           }, [pendingCourseOrders, currentSettings]);
+
        // 👇 SUPER INTEGRAÇÃO DE NAVEGAÇÃO E AÇÕES AUTÔNOMAS DA IA 👇
        useEffect(() => {
            window.AemGlobalAPI = {
@@ -8451,33 +8934,190 @@ const MindMapSection = ({ user, courses, purchasedIds, setView }) => {
            document.documentElement.setAttribute('data-theme', 'dark');
        }, []);
 
-       const generateCertificate = async (courseId, courseName) => {
-           const modelo = certificates.find(c => c.courseId === courseId);
-           if (!modelo || !modelo.bgUrl) return showNotification("Erro: Modelo de certificado não encontrado.", "error");
-           showNotification("Gerando arquivo de alta definição...", "info");
-           const canvas = document.createElement('canvas');
-           const ctx = canvas.getContext('2d');
-           const img = new Image();
-           img.crossOrigin = "Anonymous"; 
-           img.src = modelo.bgUrl;
-           img.onload = () => {
-               canvas.width = img.width; canvas.height = img.height;
-               const w = canvas.width; const h = canvas.height; const centerX = w / 2;
-               ctx.drawImage(img, 0, 0); ctx.textAlign = "center"; ctx.textBaseline = "middle";
-               ctx.font = `italic ${Math.floor(w * 0.018)}px 'Merriweather', serif`; ctx.fillStyle = "#475569"; ctx.fillText("Certificamos para os devidos fins que", centerX, h * 0.35);
-               ctx.font = `bold ${Math.floor(w * 0.05)}px 'Merriweather', serif`; ctx.fillStyle = "#0f172a"; ctx.fillText(realProfile.name, centerX, h * 0.45, w * 0.85);
-               getDoc(doc(db, "users", user.uid)).then(docSnap => {
-                   const finalUser = docSnap.exists() ? { ...user, ...docSnap.data() } : user;
-                   let docText = ""; if (finalUser.cpf) docText += `CPF: ${finalUser.cpf}`; if (finalUser.cpf && finalUser.rg) docText += "  •  "; if (finalUser.rg) docText += `RG: ${finalUser.rg}`;
-                   if (docText) { ctx.font = `${Math.floor(w * 0.014)}px 'Inter', sans-serif`; ctx.fillStyle = "#64748b"; ctx.fillText(docText, centerX, h * 0.51); }
-                   ctx.font = `normal ${Math.floor(w * 0.018)}px 'Inter', sans-serif`; ctx.fillStyle = "#334155"; ctx.fillText("Concluiu com êxito a carga horária do curso profissionalizante de:", centerX, h * 0.55);
-                   ctx.font = `bold ${Math.floor(w * 0.035)}px 'Merriweather', serif`; ctx.fillStyle = "#1e293b"; ctx.fillText(courseName, centerX, h * 0.62, w * 0.8);
-                   const dateStr = new Date().toLocaleDateString('pt-BR', { day: 'numeric', month: 'long', year: 'numeric' });
-                   ctx.font = `${Math.floor(w * 0.016)}px 'Inter', sans-serif`; ctx.fillStyle = "#475569"; ctx.fillText(`São Paulo, ${dateStr}`, centerX, h * 0.78);
-                   try { const dataUrl = canvas.toDataURL('image/png', 1.0); const link = document.createElement('a'); link.download = `Certificado_${courseName.replace(/\s+/g, '_')}.png`; link.href = dataUrl; document.body.appendChild(link); link.click(); document.body.removeChild(link); showNotification("Certificado baixado!", "success"); } catch (err) { console.error(err); }
-               });
-           };
-       };
+      const generateCertificate = async (courseId, courseName, courseObj, progressInfo) => {
+        const modelo = certificados.find(c => c.courseId === courseId);
+        if (!modelo || !modelo.bgUrl) return showNotification("Erro: Modelo de certificado não encontrado.", "error");
+
+        showNotification("Gerando arquivo de alta definição...", "info");
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
+        const img = new Image();
+        img.crossOrigin = "Anonymous";
+        img.src = modelo.bgUrl;
+
+        img.onload = async () => {
+            let finalUser = user;
+            try {
+                if (typeof db !== 'undefined') {
+                    const docSnap = await getDoc(doc(db, "users", user.uid));
+                    if (docSnap.exists()) finalUser = { ...user, ...docSnap.data() };
+                }
+            } catch(e) {}
+
+            canvas.width = img.width;
+            canvas.height = img.height;
+            const w = canvas.width;
+            const h = canvas.height;
+            
+            ctx.drawImage(img, 0, 0);
+
+            if (modelo.fields && modelo.fields.length > 0) {
+                const ratio = w / 1000; 
+                
+                // 1. IMAGENS (LOGOS/SELOS)
+                const imageFields = modelo.fields.filter(f => f.type === 'image');
+                for (let field of imageFields) {
+                    if (!field.url) continue;
+                    try {
+                        const imgMacro = new Image();
+                        imgMacro.crossOrigin = "Anonymous";
+                        imgMacro.src = field.url;
+                        await new Promise((resolve) => { imgMacro.onload = resolve; imgMacro.onerror = resolve; });
+                        
+                        let pxX = (parseFloat(field.x) / 100) * w;
+                        let pxY = (parseFloat(field.y) / 100) * h;
+                        let targetW = (parseFloat(field.width) || 150) * ratio;
+                        let targetH = imgMacro.height * (targetW / imgMacro.width);
+                        
+                        ctx.save();
+                        ctx.translate(pxX, pxY);
+                        ctx.rotate((field.rotation || 0) * Math.PI / 180);
+                        ctx.drawImage(imgMacro, -targetW / 2, -targetH / 2, targetW, targetH);
+                        ctx.restore();
+                    } catch(e) {}
+                }
+
+                // 2. LINHAS GEOMÉTRICAS (NOVO)
+                const lineFields = modelo.fields.filter(f => f.type === 'line');
+                for (let field of lineFields) {
+                    const pxX = (parseFloat(field.x) / 100) * w;
+                    const pxY = (parseFloat(field.y) / 100) * h;
+                    const targetW = (parseFloat(field.width) || 300) * ratio;
+                    const targetH = (parseFloat(field.height) || 2) * ratio;
+
+                    ctx.save();
+                    ctx.translate(pxX, pxY);
+                    ctx.rotate((field.rotation || 0) * Math.PI / 180);
+                    ctx.fillStyle = field.color || "#000000";
+                    ctx.fillRect(-targetW / 2, -targetH / 2, targetW, targetH);
+                    ctx.restore();
+                }
+
+                // 3. TEXTOS
+                const textFields = modelo.fields.filter(f => f.type !== 'image' && f.type !== 'line');
+                for (let field of textFields) {
+                    let pxX = (parseFloat(field.x) / 100) * w;
+                    let pxY = (parseFloat(field.y) / 100) * h;
+                    const fontSizePx = (parseFloat(field.fontSize) || 30) * ratio;
+
+                    let type = field.type || "";
+                    let originalText = String(field.label || field.text || "");
+                    let cleanText = originalText.toUpperCase().trim();
+
+                    let isName = type.includes('studentName') || cleanText.includes("NOME DO ALUNO") || cleanText === "NOME" || cleanText.includes("MACRO_NOME");
+                    let isCPF = type.includes('cpf') || cleanText.includes("CPF");
+                    let isCourse = type.includes('courseName') || cleanText.includes("NOME DO CURSO");
+                    let isDate = type.includes('date') || cleanText.includes("DATA");
+                    let isSignature = type.includes('signature') || cleanText.includes("ASSINATURA");
+                    let isDescription = type.includes('completionText') || cleanText.includes("TEXTO CONCLUS");
+                    
+                    let fontWeight = isSignature ? 'normal' : (field.fontWeight || 'bold');
+                    let fontStyle = isSignature ? 'italic' : 'normal';
+                    let fontFamily = isSignature ? "'Brush Script MT', 'Dancing Script', 'Great Vibes', cursive" : (field.fontFamily || 'Arial');
+                    
+                    ctx.textAlign = "center";
+                    ctx.textBaseline = "middle"; 
+                    ctx.fillStyle = field.color || "#000000";
+                    ctx.globalCompositeOperation = "multiply"; 
+                    ctx.globalAlpha = 0.92; 
+                    ctx.shadowColor = field.color || "#000000"; 
+                    ctx.shadowBlur = 1.5; 
+                    
+                    const alunoData = finalUser || user || {};
+                    const nomeAluno = alunoData.name || alunoData.displayName || user.displayName || "Aluno";
+                    const cpfStr = alunoData.cpf || "CPF não cadastrado";
+                    const cName = courseName || "Curso sem título";
+                    
+                    let dateStr = new Date().toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' });
+                    if (progressInfo?.completedAt) {
+                        const d = progressInfo.completedAt.seconds ? new Date(progressInfo.completedAt.seconds * 1000) : new Date(progressInfo.completedAt);
+                        if (!isNaN(d.getTime())) dateStr = d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' });
+                    }
+
+                    let textoFinal = originalText;
+                    if (isName) textoFinal = nomeAluno;
+                    else if (isCPF) textoFinal = `CPF: ${cpfStr}`;
+                    else if (isCourse) textoFinal = cName;
+                    else if (isDate) textoFinal = `Conclusão: ${dateStr}`;
+                    else if (isSignature) textoFinal = nomeAluno; 
+                    else if (isDescription) textoFinal = `Certificamos que o aluno(a) ${nomeAluno} concluiu com êxito o curso ${cName} no dia ${dateStr}.`;
+                    else if (field.type === 'custom_macro') {
+                        const macroName = field.label.trim();
+                        textoFinal = courseObj && courseObj[macroName] ? courseObj[macroName] : (alunoData && alunoData[macroName] ? alunoData[macroName] : ""); 
+                    } else if (field.type === 'fixedText' || field.type === 'customText') {
+                        textoFinal = field.label;
+                    }
+
+                    if (!textoFinal || String(textoFinal).trim() === "") continue;
+
+                    let maxAvailableWidth = Math.min(pxX, w - pxX) * 2 * 0.90; 
+
+                    ctx.save();
+                    ctx.translate(pxX, pxY);
+                    ctx.rotate((field.rotation || 0) * Math.PI / 180);
+
+                    if (isDescription || textoFinal.length > 50) {
+                        ctx.font = `${fontStyle} ${fontWeight} ${fontSizePx}px ${fontFamily}`;
+                        const words = textoFinal.split(' ');
+                        let line = ''; const lines = [];
+
+                        for(let n = 0; n < words.length; n++) {
+                            const testLine = line + words[n] + ' ';
+                            const metrics = ctx.measureText(testLine);
+                            if (metrics.width > maxAvailableWidth && n > 0) { 
+                                lines.push(line.trim()); line = words[n] + ' '; 
+                            } else { line = testLine; }
+                        }
+                        lines.push(line.trim());
+                        
+                        let currentY = 0 - (((lines.length - 1) * (fontSizePx * 1.5)) / 2);
+                        for(let i = 0; i < lines.length; i++) {
+                            ctx.fillText(lines[i], 0, currentY);
+                            currentY += (fontSizePx * 1.5);
+                        }
+                    } else {
+                        let currentFontSize = fontSizePx;
+                        ctx.font = `${fontStyle} ${fontWeight} ${currentFontSize}px ${fontFamily}`;
+                        let metrics = ctx.measureText(textoFinal);
+                        
+                        while (metrics.width > maxAvailableWidth && currentFontSize > 10) {
+                            currentFontSize -= 1;
+                            ctx.font = `${fontStyle} ${fontWeight} ${currentFontSize}px ${fontFamily}`;
+                            metrics = ctx.measureText(textoFinal);
+                        }
+                        ctx.fillText(textoFinal, 0, 0);
+                    }
+                    ctx.restore();
+                }
+                ctx.globalCompositeOperation = "source-over";
+                ctx.globalAlpha = 1.0;
+                ctx.shadowBlur = 0;
+            }
+
+            try {
+                const dataUrl = canvas.toDataURL('image/jpeg', 1.0); 
+                const link = document.createElement('a');
+                link.download = `Certificado_${courseName.replace(/\s+/g, '_')}.jpg`;
+                link.href = dataUrl;
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+                showNotification("Certificado baixado!", "success");
+            } catch (err) {
+                console.error(err);
+            }
+        };
+    };
 
        useEffect(() => {
             const checkPaymentReturn = async () => {
@@ -8486,54 +9126,132 @@ const MindMapSection = ({ user, courses, purchasedIds, setView }) => {
                 // 1. CAPTURA OS DADOS QUE O MERCADO PAGO ENVIA NA URL
                 const paymentStatus = params.get('payment_status');
                 const mpOrderStatus = params.get('mp_order_status');
-                const paymentId = params.get('payment_id') || params.get('collection_id'); // ESSE É O ID REAL DO PAGAMENTO
+                const paymentId = params.get('payment_id') || params.get('collection_id');
 
+                // =========================================================
                 // 2. VERIFICA COMPRA DE CURSOS
+                // =========================================================
                 if (paymentStatus === 'approved') {
                     const lastTransId = localStorage.getItem('last_transaction_id');
                     if (lastTransId && db) {
                         try {
-                            await updateDoc(doc(db, "transactions", lastTransId), { 
-                                status: 'pago', // <--- MUDANÇA: Alinhado com o Admin
-                                mpPaymentId: paymentId || 'N/A', 
-                                updatedAt: serverTimestamp() 
-                            });
+                            const transRef = doc(db, "transactions", lastTransId);
+                            const transSnap = await getDoc(transRef);
                             
-                            if(showNotification) showNotification("Pagamento do curso confirmado com sucesso!", "success");
+                            // 👇 A MÁGICA AQUI: Lê o documento do banco de dados primeiro
+                            if(transSnap.exists()) {
+                                const transData = transSnap.data();
+                                
+                                // 👇 VERIFICA SE O STATUS NO BANCO AINDA É PENDENTE 👇
+                                // Só executa o e-mail e atualiza se ainda não estiver "pago"
+                                if (transData.status !== 'pago' && transData.status !== 'approved' && transData.status !== 'liberado') {
+                                    
+                                    let nomeDoCurso = transData.courseTitle || "Seu Curso";
+                                    let capaDoCurso = "https://images.unsplash.com/photo-1616469829941-c7200edec809?q=80&w=600";
+                                    
+                                    const cursoInfo = allCourses.find(c => c.id === transData.courseId);
+                                    if (cursoInfo && (cursoInfo.cover || cursoInfo.thumbnailUrl)) {
+                                        capaDoCurso = cursoInfo.cover || cursoInfo.thumbnailUrl;
+                                    }
+
+                                    // ATUALIZA NO BANCO COMO LIBERADO
+                                    await updateDoc(transRef, { 
+                                        status: 'pago',
+                                        mpPaymentId: paymentId || 'N/A', 
+                                        updatedAt: serverTimestamp() 
+                                    });
+                                    
+                                    if(showNotification) showNotification("Pagamento do curso confirmado com sucesso!", "success");
+                                    
+                                    // Atualiza a tela
+                                    const qTrans = query(collection(db, "transactions"), where("userEmail", "==", user.email), where("status", "in", ["aprovado", "pago", "approved"]));
+                                    const transSnapList = await getDocs(qTrans);
+                                    setPurchasedIds(transSnapList.docs.map(d => d.data().courseId));
+
+                                   // 👇 DISPARA O E-MAIL BLINDADO CONTRA CORS 👇
+                                    fetch("https://script.google.com/macros/s/AKfycbyEiSTm2Xl2ZiOa7swyE06LbDvjcd9d4HBCQsUq8EzBvmYx6vPkga1s4f6TA66rMGI/exec", {
+                                        method: "POST",
+                                        mode: "no-cors", 
+                                        headers: { 
+                                            "Content-Type": "text/plain;charset=utf-8" // <-- O SEGREDO AQUI!
+                                        },
+                                        body: JSON.stringify({
+                                            to: user.email,
+                                            userName: user.displayName || 'Aluno',
+                                            itemName: nomeDoCurso,
+                                            itemImage: capaDoCurso,
+                                            itemPrice: transData.valor || "0,00" // <-- ADICIONADO PARA O SCRIPT FUNCIONAR
+                                        })
+                                    }).catch(e => console.log("E-mail Curso disparado: ", e));
+                                }
+                            }
+                            
+                            // Limpa o cache e remove os parâmetros feios da URL
                             localStorage.removeItem('last_transaction_id');
-                            
                             window.history.replaceState({}, document.title, window.location.pathname);
                             
-                            // Atualiza os cursos na tela usando a nova regra
-                            const qTrans = query(collection(db, "transactions"), where("userEmail", "==", user.email), where("status", "in", ["aprovado", "pago", "approved"]));
-                            const transSnap = await getDocs(qTrans);
-                            setPurchasedIds(transSnap.docs.map(d => d.data().courseId));
                         } catch (e) { console.error("Erro ao aprovar curso:", e); }
                     }
                 }
 
+                // =========================================================
                 // 3. VERIFICA COMPRA DO MARKETPLACE (LOJA DE PRODUTOS)
+                // =========================================================
                 if (mpOrderStatus === 'approved') {
                     const lastOrderId = localStorage.getItem('last_mp_order_id');
                     if (lastOrderId && db) {
                         try {
-                            await updateDoc(doc(db, "marketplace_orders", lastOrderId), { 
-                                status: 'pago', // <--- MUDANÇA: Alinhado com o Admin
-                                mpPaymentId: paymentId || 'N/A', 
-                                updatedAt: serverTimestamp() 
-                            });
+                            const orderRef = doc(db, "marketplace_orders", lastOrderId);
+                            const orderSnap = await getDoc(orderRef);
                             
-                            if(showNotification) showNotification("Sua compra na Loja foi confirmada!", "success");
+                            // 👇 LÊ O BANCO DA LOJA PRIMEIRO 👇
+                            if(orderSnap.exists()) {
+                                const orderData = orderSnap.data();
+                                
+                                // 👇 VERIFICA SE O PRODUTO AINDA É PENDENTE ANTES DE ENVIAR E-MAIL 👇
+                                if (orderData.status !== 'pago' && orderData.status !== 'approved' && orderData.status !== 'liberado') {
+                                    
+                                    let nomeDoProduto = orderData.productTitle || "Seu Produto";
+                                    let capaDoProduto = "https://images.unsplash.com/photo-1616469829941-c7200edec809?q=80&w=600";
+
+                                    // ATUALIZA NO BANCO COMO LIBERADO
+                                    await updateDoc(orderRef, { 
+                                        status: 'pago',
+                                        mpPaymentId: paymentId || 'N/A', 
+                                        updatedAt: serverTimestamp() 
+                                    });
+                                    
+                                    if(showNotification) showNotification("Sua compra na Loja foi confirmada!", "success");
+
+                                    // 👇 DISPARA O E-MAIL BLINDADO CONTRA CORS 👇
+                                    fetch("https://script.google.com/macros/s/AKfycbyEiSTm2Xl2ZiOa7swyE06LbDvjcd9d4HBCQsUq8EzBvmYx6vPkga1s4f6TA66rMGI/exec", {
+                                        method: "POST",
+                                        mode: "no-cors",
+                                        headers: { 
+                                            "Content-Type": "text/plain;charset=utf-8" // <-- O SEGREDO AQUI!
+                                        },
+                                        body: JSON.stringify({
+                                            to: user.email,
+                                            userName: user.displayName || 'Aluno',
+                                            itemName: nomeDoProduto,
+                                            itemImage: capaDoProduto,
+                                            itemPrice: orderData.valor || "0,00" // <-- ADICIONADO PARA O SCRIPT FUNCIONAR
+                                        })
+                                    }).catch(e => console.log("E-mail Loja disparado: ", e));
+                                }
+                            }
+                            
+                            // Limpa o cache e remove os parâmetros feios da URL
                             localStorage.removeItem('last_mp_order_id');
-                            
                             window.history.replaceState({}, document.title, window.location.pathname);
+
                         } catch (e) { console.error("Erro ao aprovar produto:", e); }
                     }
                 }
             };
             
             checkPaymentReturn();
-        }, [user, db]);
+        }, [user, db, allCourses]);
 
        useEffect(() => {
            if(!db || !user) return;
@@ -8616,6 +9334,21 @@ const MindMapSection = ({ user, courses, purchasedIds, setView }) => {
             // Atualiza os cursos que ele tem no mesmo segundo
             setPurchasedIds(prev => [...prev, courseToStart.id]);
             if (showNotification) showNotification("Curso gratuito adicionado aos seus portais!", "success");
+
+            // 👇 DISPARO DE E-MAIL (CURSO GRÁTIS) 👇
+            let capaDoCurso = courseToStart.cover || courseToStart.thumbnailUrl || "https://images.unsplash.com/photo-1616469829941-c7200edec809?q=80&w=600";
+            fetch("https://script.google.com/macros/s/AKfycbyEiSTm2Xl2ZiOa7swyE06LbDvjcd9d4HBCQsUq8EzBvmYx6vPkga1s4f6TA66rMGI/exec", {
+                method: "POST", mode: "no-cors", headers: { "Content-Type": "text/plain;charset=utf-8" },
+                body: JSON.stringify({
+                    to: user.email,
+                    userName: user.displayName || 'Aluno',
+                    itemName: courseToStart.title || courseToStart.titulo || 'Curso Gratuito',
+                    itemImage: capaDoCurso,
+                    itemType: "free_course" // Avisa o Google que foi resgate grátis
+                })
+            }).catch(e => console.log("Erro no e-mail grátis: ", e));
+            // 👆 FIM DO DISPARO 👇
+
         } catch (err) {
             console.error("Erro ao matricular no curso gratuito:", err);
         }
@@ -8626,7 +9359,7 @@ const MindMapSection = ({ user, courses, purchasedIds, setView }) => {
        
        const myCoursesList = allCourses.filter(c => purchasedIds.includes(c.id));
 
-       // 👇 INÍCIO DO BLOCO DO MENU (SUBSTITUA TUDO ISSO) 👇
+       // 👇 INÍCIO DO BLOCO DO MENU CORRIGIDO 👇
         const menuItems = [
             { id: 'home', label: 'Home do Aluno', icon: Home },
             { id: 'catalog', label: 'Portais', icon: Search },
@@ -8635,23 +9368,15 @@ const MindMapSection = ({ user, courses, purchasedIds, setView }) => {
             { id: 'favorites', label: 'Favoritos', icon: Heart },
             { id: 'certificates', label: 'Conquistas', icon: Award },
             { id: 'community', label: 'Comunidade', icon: User },
-            { id: 'support', label: 'Suporte', icon: MessageCircle, badge: unreadCount }
+            { id: 'support', label: 'Suporte', icon: MessageCircle, badge: unreadCount },
+            { id: 'informacoes', label: 'Sobre Nós', icon: FileText } // <-- ABA VOLTOU PARA O MENU AQUI
         ];
 
         if (currentSettings?.pontosAtivos !== false) {
             menuItems.splice(3, 0, { id: 'wallet', label: 'Pontos', icon: Star, badge: 0 });
         }
 
-        // Adiciona o botão da Live dinamicamente logo abaixo dos Cursos
-        if (currentSettings?.liveGlobalActive !== false) {
-            menuItems.splice(3, 0, { 
-                id: 'live', 
-                label: 'Live ao Vivo', 
-                icon: Video, 
-                badge: currentSettings?.liveActive ? 'REC' : 0 
-            });
-        }
-        // 👆 FIM DO BLOCO DO MENU 👆
+        
 
        useEffect(() => {
            // 👇 ISSO AVISA A IA GLOBAL ONDE ESTAMOS 👇
@@ -8858,7 +9583,6 @@ const MindMapSection = ({ user, courses, purchasedIds, setView }) => {
                             {view === 'wallet' && <PointsWalletSection user={updatedUser} courses={allCourses} purchasedIds={purchasedIds} userPoints={realProfile.pointsBalance} db={db} setPurchasedIds={setPurchasedIds} showNotification={showNotification} requestConfirmation={requestConfirmation} />}
                             
                             {view === 'informacoes' && <InformacoesSection db={db} />}
-                            {view === 'live' && <StudentLivePlayer db={db} settings={currentSettings} showNotification={showNotification} user={updatedUser} />}
                             
                             {view === 'course_details' && selectedCourse && (
                                 <CourseDetailsView 
@@ -8952,271 +9676,7 @@ const MindMapSection = ({ user, courses, purchasedIds, setView }) => {
     }
 
    
-// =================================================================================
-// INÍCIO DO COMPONENTE ALUNO: TRANSMISSÃO AO VIVO COM CHAT EM TEMPO REAL (DELAY 2s-3s LISO)
-// =================================================================================
-const StudentLivePlayer = ({ db, settings, showNotification, user }) => {
-    // --- LÓGICA DO VÍDEO E CHUNKS ---
-    const videoRef = React.useRef(null);
-    const mediaSourceRef = React.useRef(null);
-    const sourceBufferRef = React.useRef(null);
-    const queueRef = React.useRef([]);
-    const isAppendingRef = React.useRef(false);
-    const processedChunks = React.useRef(new Set());
-    
-    const [hasError, setHasError] = React.useState(false);
-    const [isConnected, setIsConnected] = React.useState(false);
 
-    // --- LÓGICA DO CHAT ---
-    const chatEndRef = React.useRef(null);
-    const [messages, setMessages] = React.useState([]);
-    const [newMessage, setNewMessage] = React.useState('');
-    const [isSending, setIsSending] = React.useState(false);
-
-    const isLiveActive = settings?.liveActive;
-    const currentLiveId = settings?.currentLiveId || 'live_global_default';
-    const isChatActive = settings?.liveChatActive !== false; 
-
-    // 1. CARREGA O VÍDEO VIA VERCEL (MÉTODO SLIDESHOW DE FRAMES)
-        React.useEffect(() => {
-            if (!isLiveActive) {
-                setIsConnected(false);
-                return;
-            }
-
-            // 👇 COLE AQUI O LINK DO SEU PROJETO NA VERCEL 👇
-            const URL_HTTP_VERCEL = 'https://site-curso-cliente.vercel.app/';
-
-            setIsConnected(true); // Define como conectado imediatamente
-            let intervalId;
-
-            const pullFrames = async () => {
-                try {
-                    const response = await fetch(URL_HTTP_VERCEL);
-                    const data = await response.json();
-                    
-                    // Atualiza a imagem na tela do aluno
-                    if (data && data.image && videoRef.current) {
-                        videoRef.current.src = data.image;
-                    }
-                } catch (error) {
-                    console.warn("Aguardando próximo frame da Vercel...");
-                }
-            };
-
-            // Puxa um novo frame a cada 1 segundo (1000 milissegundos)
-            intervalId = setInterval(pullFrames, 1000);
-            pullFrames(); // Puxa o primeiro logo de cara
-
-            return () => clearInterval(intervalId);
-        }, [isLiveActive, currentLiveId]);
-
-    const processQueue = () => {
-        if (isAppendingRef.current || queueRef.current.length === 0 || !sourceBufferRef.current || sourceBufferRef.current.updating) return;
-        const nextChunk = queueRef.current.shift();
-        isAppendingRef.current = true;
-        
-        try { 
-            sourceBufferRef.current.appendBuffer(nextChunk); 
-        } catch(e) { 
-            isAppendingRef.current = false; 
-            // PREVENÇÃO DE TELA PRETA: Se o buffer lotar (aulas de mais de 1h), apaga o passado do celular do aluno
-            if (e.name === 'QuotaExceededError' && sourceBufferRef.current && videoRef.current) {
-                try {
-                   sourceBufferRef.current.remove(0, videoRef.current.currentTime - 10);
-                } catch(err) {}
-            }
-        }
-    };
-
-    // 2. CARREGA O CHAT
-    React.useEffect(() => {
-        if (!db || !isLiveActive) return;
-
-        const q = query(
-            collection(db, "live_chat_messages"),
-            where("liveId", "==", currentLiveId),
-            orderBy("timestamp", "asc")
-        );
-
-        const unsub = onSnapshot(q, (snapshot) => {
-            const msgs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-            setMessages(msgs);
-            setTimeout(() => {
-                if (chatEndRef.current) chatEndRef.current.scrollIntoView({ behavior: "smooth" });
-            }, 100);
-        });
-
-        return () => unsub();
-    }, [db, isLiveActive, currentLiveId]);
-
-    const handleSendMessage = async (e) => {
-        e.preventDefault();
-        if (!newMessage.trim() || isSending) return;
-
-        setIsSending(true);
-        try {
-            await addDoc(collection(db, "live_chat_messages"), {
-                liveId: currentLiveId,
-                text: newMessage.trim(),
-                userId: user?.uid || 'anon',
-                userName: user?.displayName || 'Aluno',
-                userPhoto: user?.photoURL || null,
-                timestamp: serverTimestamp()
-            });
-            setNewMessage('');
-            
-            setTimeout(() => {
-                if (chatEndRef.current) chatEndRef.current.scrollIntoView({ behavior: "smooth" });
-            }, 100);
-        } catch (error) {
-            console.error(error);
-            if (showNotification) showNotification("Falha ao enviar mensagem.", "error");
-        } finally {
-            setIsSending(false);
-        }
-    };
-
-    if (hasError) {
-        return (
-            <div className="animate-fade-in space-y-6 pb-20 w-full max-w-4xl mx-auto pt-24 px-4 sm:px-6 lg:px-8 font-sans">
-                <div className="w-full aspect-video bg-[#111] rounded-2xl flex flex-col items-center justify-center text-red-500 border border-red-500/20 shadow-2xl">
-                    <AlertCircle className="w-12 h-12 mb-2 opacity-50" />
-                    <p className="font-bold text-center px-4">O sinal da Live foi perdido ou o seu navegador não suporta este formato.</p>
-                    <button onClick={() => window.location.reload()} className="mt-4 px-6 py-2.5 bg-red-600 hover:bg-red-700 text-white rounded-xl text-sm font-bold transition-colors">
-                        Tentar Novamente
-                    </button>
-                </div>
-            </div>
-        );
-    }
-
-    return (
-        <div className="animate-fade-in space-y-6 pb-20 w-full max-w-6xl mx-auto pt-24 px-4 sm:px-6 lg:px-8 font-sans">
-            
-            {/* CABEÇALHO DA LIVE */}
-            <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-slate-900 p-6 rounded-2xl border border-slate-800 shadow-sm">
-                <div>
-                    <h2 className="text-2xl font-bold text-white flex items-center gap-2">
-                        <Video className={`w-6 h-6 ${isLiveActive ? 'text-red-500 animate-pulse' : 'text-indigo-500'}`} />
-                        {settings?.liveTitle || 'Transmissão ao Vivo'}
-                    </h2>
-                    <p className="text-sm text-slate-400 mt-1">Acompanhe o conteúdo em tempo real.</p>
-                </div>
-                {isLiveActive && (
-                    <span className="bg-red-500/10 text-red-500 border border-red-500/20 px-4 py-2 rounded-xl font-black text-sm flex items-center gap-2 animate-pulse shadow-[0_0_15px_rgba(239,68,68,0.2)]">
-                        <span className="w-2.5 h-2.5 bg-red-500 rounded-full"></span> AO VIVO
-                    </span>
-                )}
-            </div>
-
-            {/* GRID: VÍDEO E CHAT YOUTUBE STYLE */}
-            <div className={`grid grid-cols-1 ${isChatActive ? 'lg:grid-cols-12' : ''} gap-6 items-start`}>
-                
-                {/* PLAYER DE VÍDEO */}
-                <div className={`w-full bg-black rounded-2xl border border-slate-800 overflow-hidden relative shadow-2xl ${isChatActive ? 'lg:col-span-8' : 'lg:col-span-12'} transition-all duration-500`}>
-                    {!isLiveActive ? (
-                        <div className="absolute inset-0 flex flex-col items-center justify-center p-6 z-30 bg-black animate-fade-in aspect-video">
-                            <div className="w-20 h-20 bg-slate-900 rounded-full border border-slate-800 flex items-center justify-center mx-auto mb-4 shadow-inner">
-                                <Video className="w-8 h-8 text-slate-500 opacity-50" />
-                            </div>
-                            <h3 className="text-xl font-bold text-white mb-2">A transmissão encerrou.</h3>
-                            <p className="text-sm text-slate-500">Aguarde o instrutor iniciar uma nova live.</p>
-                        </div>
-                    ) : (
-                        <div className="w-full aspect-video relative">
-                            {/* muted ajuda no autoplay do chrome */}
-                            <img ref={videoRef} className="w-full h-full object-contain bg-black" alt="Transmissão ao vivo" />
-                            
-                            {!isConnected && (
-                                <div className="absolute inset-0 bg-black/90 flex flex-col items-center justify-center z-10">
-                                    <div className="w-10 h-10 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin mb-4"></div>
-                                    <p className="text-sm font-bold text-white tracking-widest uppercase animate-pulse">Conectando ao Sinal...</p>
-                                    <p className="text-xs text-gray-500 mt-2 text-center px-4">Carregando e estabilizando a rede.</p>
-                                </div>
-                            )}
-                        </div>
-                    )}
-                </div>
-
-                {/* CHAT ESTILO YOUTUBE */}
-                {isChatActive && isLiveActive && (
-                    <div className="lg:col-span-4 bg-[#0f0f0f] rounded-2xl border border-white/10 shadow-xl h-[500px] lg:h-full min-h-[500px] max-h-[600px] flex flex-col overflow-hidden animate-fade-in relative z-20">
-                        
-                        {/* Header Minimalista */}
-                        <div className="p-4 border-b border-white/10 bg-[#0f0f0f] flex justify-between items-center shrink-0">
-                            <h3 className="text-white font-normal text-sm">Chat ao vivo</h3>
-                            <button className="text-white/50 hover:text-white transition-colors"><MoreVertical size={16}/></button>
-                        </div>
-
-                        {/* Listagem Estilo YouTube */}
-                        <div className="flex-1 p-3 overflow-y-auto custom-scrollbar space-y-1 bg-[#0f0f0f]">
-                            {messages.length === 0 ? (
-                                <div className="h-full flex flex-col items-center justify-center text-center opacity-50">
-                                    <MessageSquare className="w-10 h-10 text-white/30 mb-2" />
-                                    <p className="text-xs text-white/40">Bem-vindo ao chat ao vivo!</p>
-                                </div>
-                            ) : (
-                                messages.map(msg => {
-                                    const isMe = msg.userId === user?.uid;
-                                    const timeString = msg.timestamp ? new Date(msg.timestamp.seconds * 1000).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) : '';
-
-                                    return (
-                                        <div key={msg.id} className="flex items-start gap-3 hover:bg-white/5 p-1.5 rounded transition-colors break-words">
-                                            <div className="w-6 h-6 rounded-full bg-indigo-600 flex items-center justify-center shrink-0 overflow-hidden mt-0.5">
-                                                {msg.userPhoto ? <img src={msg.userPhoto} className="w-full h-full object-cover" /> : <span className="font-bold text-[10px] text-white">{(msg.userName || '?').charAt(0).toUpperCase()}</span>}
-                                            </div>
-                                            <div className="flex-1 min-w-0 text-[13px] leading-relaxed">
-                                                <span className="text-white/40 text-[11px] mr-2">{timeString}</span>
-                                                <span className={`font-medium mr-2 ${isMe ? 'text-indigo-400' : 'text-white/60'}`}>{msg.userName}</span>
-                                                <span className="text-white">{msg.text}</span>
-                                            </div>
-                                        </div>
-                                    );
-                                })
-                            )}
-                            <div ref={chatEndRef} />
-                        </div>
-
-                        {/* Input Estilo YouTube */}
-                        <div className="p-4 border-t border-white/10 bg-[#0f0f0f] shrink-0">
-                            <div className="flex items-center gap-3 mb-2">
-                                <div className="w-6 h-6 rounded-full overflow-hidden bg-slate-700 shrink-0">
-                                    {user?.photoURL ? <img src={user.photoURL} className="w-full h-full object-cover"/> : <div className="w-full h-full flex items-center justify-center text-[10px] text-white font-bold">{user?.displayName?.charAt(0) || 'A'}</div>}
-                                </div>
-                                <span className="text-xs text-white/60 font-medium truncate">{user?.displayName || 'Aluno'}</span>
-                            </div>
-                            <form onSubmit={handleSendMessage} className="flex flex-col">
-                                <input 
-                                    type="text" 
-                                    value={newMessage} 
-                                    onChange={e => setNewMessage(e.target.value)} 
-                                    placeholder="Diga algo..." 
-                                    maxLength={200}
-                                    className="w-full bg-transparent border-b border-white/20 text-white placeholder-white/30 pb-2 pt-1 focus:border-indigo-500 text-[13px] outline-none transition-colors"
-                                    disabled={isSending}
-                                />
-                                <div className="flex justify-between items-center mt-2">
-                                    <span className="text-[10px] text-white/30">{newMessage.length}/200</span>
-                                    <button 
-                                        type="submit" 
-                                        disabled={!newMessage.trim() || isSending} 
-                                        className="p-1.5 text-indigo-400 hover:bg-indigo-500/10 rounded-full transition-colors disabled:opacity-30 disabled:hover:bg-transparent"
-                                    >
-                                        {isSending ? <div className="w-4 h-4 border-2 border-indigo-400 border-t-transparent rounded-full animate-spin"></div> : <Send className="w-4 h-4" />}
-                                    </button>
-                                </div>
-                            </form>
-                        </div>
-                    </div>
-                )}
-            </div>
-        </div>
-    );
-};
-// =================================================================================
-// FIM DO COMPONENTE ALUNO: TRANSMISSÃO AO VIVO
-// =================================================================================
    
     // --- APP PRINCIPAL ---
     const App = () => {
@@ -9303,6 +9763,17 @@ const StudentLivePlayer = ({ db, settings, showNotification, user }) => {
                     
                     // Se o status mudou para PAGO, atualiza no Banco de Dados
                     if (novoStatus !== order.status) {
+                        
+                        // 👇 CÓDIGO NOVO: PEGANDO A FOTO DO CURSO 👇
+                        let capaDoCurso = "https://images.unsplash.com/photo-1616469829941-c7200edec809?q=80&w=600";
+                        try {
+                            const cursoInfo = allCourses.find(c => c.id === order.courseId);
+                            if (cursoInfo && (cursoInfo.cover || cursoInfo.thumbnailUrl)) {
+                                capaDoCurso = cursoInfo.cover || cursoInfo.thumbnailUrl;
+                            }
+                        } catch(e){}
+                        // 👆 FIM DA CAPA 👇
+
                         await updateDoc(doc(db, "transactions", order.id), { 
                             status: novoStatus, 
                             mpPaymentId: mpData ? String(mpData.id) : order.mpPaymentId, 
@@ -9312,6 +9783,18 @@ const StudentLivePlayer = ({ db, settings, showNotification, user }) => {
                         // Notifica o aluno e já libera!
                         if (novoStatus === 'pago') {
                             if(showNotification) showNotification(`🎉 Pagamento aprovado! O curso "${order.courseTitle || 'Adquirido'}" já está liberado.`, "success");
+                            
+                            // 👇 DISPARO DE E-MAIL (NOVO) 👇
+                            fetch("https://script.google.com/macros/s/AKfycbyEiSTm2Xl2ZiOa7swyE06LbDvjcd9d4HBCQsUq8EzBvmYx6vPkga1s4f6TA66rMGI/exec", {
+                                method: "POST", mode: "no-cors", headers: { "Content-Type": "application/json" },
+                                body: JSON.stringify({
+                                    to: order.userEmail,
+                                    userName: order.userName || 'Aluno',
+                                    itemName: order.courseTitle || 'Seu Curso',
+                                    itemImage: capaDoCurso
+                                })
+                            }).catch(e => console.log("Erro no e-mail: ", e));
+                            // 👆 FIM DO DISPARO 👇
                         }
                     }
                 }
@@ -10073,14 +10556,15 @@ ${conhecimentoExtra}
 [COMANDOS EXTRAS]:
 Se o aluno der uma ORDEM DIRETA (ex: "Abra o curso", "Vá para a loja", "Poste na comunidade"), responda conversando E inclua UM bloco JSON no final.
 Se for apenas bate-papo ou dúvida, APENAS converse, NÃO mande JSON.
-JSON Permitidos:
-1. NAVEGAR: {"action": "navigate", "target": "catalog|my_courses|loja|favorites|certificates|community|support|profile|informacoes"}
+JSON Permitidos (Siga exatamente estes formatos):
+1. NAVEGAR: {"action": "navigate", "target": "ID_DA_TELA"}
+   (Use APENAS um destes IDs: home = Início, catalog = Portais, my_courses = Meus Cursos, loja = Loja VIP, favorites = Favoritos, certificates = Conquistas, community = Comunidade, support = Suporte, profile = Perfil, wallet = Carteira/Pontos, informacoes = Sobre Nós/Políticas)
 2. ABRIR CURSO: {"action": "open_course", "courseName": "NOME DO CURSO"}
 3. COMPRAR/LOJA: {"action": "buy_course", "courseName": "NOME"} ou {"action": "buy_product", "productName": "NOME"}
-4. CONTROLAR VÍDEO: {"action": "video_control", "command": "play|pause|skip_forward|skip_backward"}
-5. ATUALIZAR PERFIL DO ALUNO: {"action": "edit_profile", "field": "name|bio|phone|address|city", "value": "NOVO VALOR"}
+4. CONTROLAR VÍDEO: {"action": "video_control", "command": "play"} (Opções: play, pause, skip_forward, skip_backward)
+5. ATUALIZAR PERFIL DO ALUNO: {"action": "edit_profile", "field": "name", "value": "NOVO VALOR"}
 6. POSTAR NA COMUNIDADE: {"action": "post_community", "text": "TEXTO DA POSTAGEM"}
-7. FAZER ANOTAÇÃO/RESUMO: {"action": "take_notes", "courseName": "NOME DO CURSO", "notes": "RESUMO GERADO AQUI EM HTML"}`;            
+7. FAZER ANOTAÇÃO/RESUMO: {"action": "take_notes", "courseName": "NOME DO CURSO", "notes": "RESUMO GERADO AQUI EM HTML"}`;         
             
             // 🧠 LÓGICA DE MEMÓRIA DA IA (HISTÓRICO)
             let chatHistory = JSON.parse(localStorage.getItem('aem_ia_chat_history')) || [];
@@ -10221,7 +10705,5 @@ JSON Permitidos:
     
 })();
   </script>
-
-</script>
 </body>
 </html>
