@@ -52,7 +52,8 @@
         "firebase/app": "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js",
         "firebase/auth": "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js",
         "firebase/firestore": "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js",
-        "jspdf": "https://cdn.jsdelivr.net/npm/jspdf@2.5.1/+esm"
+        "jspdf": "https://cdn.jsdelivr.net/npm/jspdf@2.5.1/+esm",
+        "transformers": "https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.1"
       }
     }
   </script>
@@ -358,62 +359,16 @@
 
   <link href="https://vjs.zencdn.net/8.10.0/video-js.css" rel="stylesheet" />
   <script src="https://vjs.zencdn.net/8.10.0/video.min.js"></script>
-
-
-
-
-
-
+  
+<link rel="manifest" href="data:application/json;charset=utf-8,%7B%22name%22%3A%22index.meu%20site%20de%20cursos%20aluno.html%22%2C%22short_name%22%3A%22index.meu%20site%20de%20cursos%20aluno.html%22%2C%22display%22%3A%22standalone%22%2C%22start_url%22%3A%22.%22%2C%22background_color%22%3A%22%230f111a%22%2C%22theme_color%22%3A%22%233b82f6%22%2C%22icons%22%3A%5B%7B%22src%22%3A%22https%3A%2F%2Fapi.dicebear.com%2F7.x%2Fbottts%2Fsvg%3Fseed%3Dindex.meu%2520site%2520de%2520cursos%2520aluno.html%22%2C%22sizes%22%3A%22192x192%22%2C%22type%22%3A%22image%2Fsvg%2Bxml%22%7D%2C%7B%22src%22%3A%22https%3A%2F%2Fapi.dicebear.com%2F7.x%2Fbottts%2Fsvg%3Fseed%3Dindex.meu%2520site%2520de%2520cursos%2520aluno.html%22%2C%22sizes%22%3A%22512x512%22%2C%22type%22%3A%22image%2Fsvg%2Bxml%22%7D%5D%7D">
+<meta name="theme-color" content="#3b82f6">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <script>
-        // Executa apenas após a página carregar, evitando a "tela branca"
-        window.addEventListener('DOMContentLoaded', (event) => {
-            
-            // 1. Bloqueia o botão direito (Menu de Contexto)
-            document.addEventListener('contextmenu', function(e) {
-                e.preventDefault();
-            });
-
-            // 2. Bloqueia atalhos F12, Inspecionar, Ver Código Fonte e Salvar
-            document.addEventListener('keydown', function(e) {
-                // F12
-                if (e.key === 'F12' || e.keyCode === 123) {
-                    e.preventDefault();
-                }
-                // Ctrl + Shift + I / J / C (Windows/Linux)
-                if (e.ctrlKey && e.shiftKey && ['I', 'J', 'C', 'i', 'j', 'c'].includes(e.key)) {
-                    e.preventDefault();
-                }
-                // Ctrl + U (Ver código fonte) / Ctrl + S (Salvar)
-                if (e.ctrlKey && ['U', 'S', 'u', 's'].includes(e.key)) {
-                    e.preventDefault();
-                }
-                // Cmd + Option + I / J / U (Mac)
-                if (e.metaKey && e.altKey && ['I', 'J', 'U', 'i', 'j', 'u'].includes(e.key)) {
-                    e.preventDefault();
-                }
-            });
-
-            // 3. Oculta o corpo da página se a impressão (Ctrl+P) for acionada para salvar em PDF
-            window.addEventListener('beforeprint', () => {
-                document.body.style.display = 'none';
-            });
-            window.addEventListener('afterprint', () => {
-                document.body.style.display = '';
-            });
-            
-            // 4. Limpa o console constantemente para evitar injeção de scripts
-            setInterval(() => {
-                console.clear();
-                console.log("%c⛔ ACESSO RESTRITO POR A&M PRODUÇÕES", "color: red; font-size: 24px; font-weight: bold; text-shadow: 1px 1px 0px black;");
-            }, 1000);
-        });
-    </script>
-    </head>
-
-
-
-
-  </head>
+let dP;window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();dP=e;const b=document.createElement('button');b.innerHTML='<svg style="width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:2;margin-right:6px" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg> Instalar App';b.style.cssText='position:fixed;bottom:20px;left:50%;transform:translateX(-50%);z-index:99999;background:#3b82f6;color:#fff;border:none;padding:12px 24px;border-radius:50px;font-family:sans-serif;font-weight:600;font-size:14px;box-shadow:0 4px 20px rgba(59,130,246,0.4);cursor:pointer;display:flex;align-items:center;white-space:nowrap;transition:transform 0.2s;';b.onclick=async()=>{if(!dP)return;dP.prompt();const{outcome}=await dP.userChoice;if(outcome==='accepted')b.remove();dP=null;};document.body.appendChild(b);});
+const isIos=(/iphone|ipad|ipod/).test(window.navigator.userAgent.toLowerCase());const isStandalone=()=>('standalone' in window.navigator)&&window.navigator.standalone;if(isIos()&&!isStandalone()){const ib=document.createElement('div');ib.innerHTML='Para instalar como App: toque em <b>Compartilhar</b> e depois <b>Adicionar ao Ecrã Principal</b><button style="position:absolute;right:10px;top:50%;transform:translateY(-50%);background:none;border:none;color:#a1a1aa;font-size:16px;" onclick="this.parentElement.remove()">✕</button>';ib.style.cssText='position:fixed;bottom:0;left:0;width:100%;background:#1c1e2b;color:#fff;padding:15px 30px 15px 15px;font-family:sans-serif;font-size:12px;text-align:center;z-index:99999;border-top:1px solid #2b2d3a;box-shadow:0 -5px 15px rgba(0,0,0,0.2);';setTimeout(()=>document.body.appendChild(ib),2000);}
+</script>
+</head>
 <body class="bg-slate-900 text-slate-100 transition-colors duration-300 selection:bg-blue-200 selection:text-blue-900">
   <div id="root"></div>
 
@@ -439,6 +394,10 @@
     import { getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, onAuthStateChanged, updateProfile, GoogleAuthProvider, signInWithPopup } from 'firebase/auth';
     import { getFirestore, doc, getDoc, getDocs, setDoc, collection, addDoc, query, orderBy, onSnapshot, serverTimestamp, updateDoc, arrayUnion, arrayRemove, deleteDoc, where, limit } from 'firebase/firestore';
     import { jsPDF } from "jspdf";
+    import { pipeline, env } from 'transformers';
+
+    // Desativar requisições locais para rodar puramente via CDN
+    env.allowLocalModels = false;
 
     // --- CONFIGURAÇÃO FIREBASE ---
     const firebaseConfig = {
@@ -515,16 +474,17 @@
         const [preferenceId, setPreferenceId] = useState(null);
 
         // Desconto aplicado (Vem da vitrine)
-    const discountInfo = course.appliedDiscount || {};
+        const discountInfo = course.appliedDiscount || {};
     
-    // CORREÇÃO: Garante que o preço final seja sempre um número matemático válido para o Mercado Pago
-    let finalPrice = discountInfo.finalPrice;
-    if (finalPrice === undefined) {
-        finalPrice = typeof course.price === 'number' 
-            ? course.price 
-            : parseFloat(String(course.price || "0").includes(',') ? String(course.price).replace(/\./g, '').replace(',', '.') : String(course.price));
-        if (isNaN(finalPrice)) finalPrice = 0;
-    }
+        // CORREÇÃO: Garante que o preço final seja sempre um número matemático válido para o Mercado Pago
+        let finalPrice = discountInfo.finalPrice;
+        if (finalPrice === undefined) {
+            const rawPrice = String(course.price || "0");
+            finalPrice = typeof course.price === 'number' 
+                ? course.price 
+                : parseFloat(rawPrice.includes(',') ? rawPrice.replace(/\./g, '').replace(',', '.') : rawPrice);
+            if (isNaN(finalPrice)) finalPrice = 0;
+        }
 
         const MP_PUBLIC_KEY = settings?.mercadoPagoPublicKey || 'APP_USR-9077f4be-099a-4d5e-80bf-2f156384a515';
         const MP_ACCESS_TOKEN = settings?.mercadopagoAccessToken || settings?.mercadoPagoAccessToken || 'APP_USR-5078406563096978-100721-63ed85c89b2cb57e85109eb14514462c-336516116';
@@ -887,21 +847,20 @@
     };
 
 const MarketplaceCheckoutModal = ({ product, user, onClose, settings, showNotification, db }) => {
-    const [isLoading, setIsLoading] = useState(true);
-    const [preferenceId, setPreferenceId] = useState(null);
-    const [initPoint, setInitPoint] = useState(null);
-    
-    // Desconto aplicado (Vem da vitrine)
-        const discountInfo = product.appliedDiscount || {};
-        
-        // CORREÇÃO: Garante que o preço final seja sempre um número matemático válido para o Mercado Pago
-        let finalPrice = discountInfo.finalPrice;
-        if (finalPrice === undefined) {
-            finalPrice = typeof product.price === 'number' 
-                ? product.price 
-                : parseFloat(String(product.price || "0").includes(',') ? String(product.price).replace(/\./g, '').replace(',', '.') : String(product.price));
-            if (isNaN(finalPrice)) finalPrice = 0;
-        }
+    const [isLoading, setIsLoading] = useState(true);
+    const [preferenceId, setPreferenceId] = useState(null);
+    const [initPoint, setInitPoint] = useState(null);
+
+    const discountInfo = product.appliedDiscount || {};
+
+    let finalPrice = discountInfo.finalPrice;
+    if (finalPrice === undefined) {
+        const rawPrice = String(product.price || "0");
+        finalPrice = typeof product.price === 'number'
+            ? product.price
+            : parseFloat(rawPrice.includes(',') ? rawPrice.replace(/\./g, '').replace(',', '.') : rawPrice);
+        if (isNaN(finalPrice)) finalPrice = 0;
+    }
 
     const MP_PUBLIC_KEY = settings?.mercadoPagoPublicKey || 'APP_USR-9077f4be-099a-4d5e-80bf-2f156384a515';
     const MP_ACCESS_TOKEN = settings?.mercadopagoAccessToken || settings?.mercadoPagoAccessToken || 'APP_USR-5078406563096978-100721-63ed85c89b2cb57e85109eb14514462c-336516116';
@@ -1197,13 +1156,14 @@ const StudentMarketplace = ({ db, user, settings, showNotification, promotions =
     const isCheckingRef = useRef(false);
 
     const handleForceDownload = async (url, fileName) => {
-        if (!url) return;
-        setIsDownloading(true);
-        if (showNotification) showNotification("Iniciando o download...", "info");
-        
-        try {
-            const fetchUrl = url + (url.includes('?') ? '&' : '?') + 'force_download=1&t=' + Date.now();
-            const response = await fetch(fetchUrl, { method: 'GET', mode: 'cors', cache: 'no-cache' });
+            if (!url) return;
+            setDownloadingUrl(url);
+            if (showNotification) showNotification("Iniciando o download...", "info");
+            
+            try {
+                const charAm = String.fromCharCode(38);
+                const fetchUrl = `${url}${url.includes('?') ? charAm : '?'}force_download=1${charAm}t=${Date.now()}`;
+                const response = await fetch(fetchUrl, { method: 'GET', mode: 'cors', cache: 'no-cache' });
             if (!response.ok) throw new Error("Erro na rede ao tentar baixar");
             
             const blob = await response.blob();
@@ -1372,7 +1332,7 @@ const StudentMarketplace = ({ db, user, settings, showNotification, promotions =
                             } catch(e){}
 
                             // 👇 DISPARO DE E-MAIL DE PRODUTO 👇
-                            fetch("https://script.google.com/macros/s/AKfycby6iVs46K0I-P5JgEtk5CYQYyNFZDQobWmJNQa3DvSLJlJiFnCuXlPoPVRDoG61ycg/exec", {
+                            fetch("https://script.google.com/macros/s/AKfycbzyuxuOw0fx5YiAWuE_PaN8JE9VrupAStYQfKk6fFDMiLMn7BARtbLagoF3sPbhg9A/exec", {
                                 method: "POST", 
                                 mode: "no-cors", 
                                 headers: { "Content-Type": "text/plain;charset=utf-8" },
@@ -1756,14 +1716,18 @@ const StudentMarketplace = ({ db, user, settings, showNotification, promotions =
 // =================================================================================
 const CustomVideoPlayer = ({ src, onEnded, poster, isCompleted, showNotification }) => {
     
-    // 1. LÓGICA DAS FONTES DE VÍDEO E QUALIDADE
-    const fontes = typeof src === 'string' ? {
+    // 1. LÓGICA DAS FONTES DE VÍDEO E QUALIDADE (SUPORTE 4K)
+    // Se o Admin cadastrou um objeto com links diferentes, ele usa. 
+    // Se cadastrou apenas um link, o player simula as opções para o usuário.
+    const fontes = (typeof src === 'object' && src !== null) ? src : {
+        '4K': src,
         '1080p': src,
         '720p': src,
         '480p': src
-    } : (src || { '1080p': '' });
+    };
 
-    const qualidadesDisponiveis = Object.keys(fontes).reverse();
+    // Ordem de exibição: do maior para o menor
+    const qualidadesDisponiveis = ['4K', '1080p', '720p', '480p'].filter(q => fontes[q]);
     const [qualidadeAtual, setQualidadeAtual] = React.useState(qualidadesDisponiveis[0]);
     const [mostrarMenuQualidade, setMostrarMenuQualidade] = React.useState(false);
     
@@ -2085,6 +2049,14 @@ const CustomVideoPlayer = ({ src, onEnded, poster, isCompleted, showNotification
         const [activeLessonIndex, setActiveLessonIndex] = useState(0);
         
         const [activeTab, setActiveTab] = useState('visao_geral');
+        const [transcriptionText, setTranscriptionText] = useState('');
+        const [streamingWords, setStreamingWords] = useState([]);
+        const [aiSummary, setAiSummary] = useState('');
+        const [isTranscribing, setIsTranscribing] = useState(false);
+        const [transcriptionProgress, setTranscriptionProgress] = useState(0);
+        const [statusText, setStatusText] = useState('');
+        const [isSummarizing, setIsSummarizing] = useState(false);
+        const transcriberRef = useRef(null); 
         const [note, setNote] = useState('');
         const [savedNote, setSavedNote] = useState(false);
         const [isCinemaMode, setIsCinemaMode] = useState(false);
@@ -2119,7 +2091,7 @@ const CustomVideoPlayer = ({ src, onEnded, poster, isCompleted, showNotification
             
             try {
                 // TRUQUE MÁGICO: Adiciona 't=' com a hora atual para ignorar o cache corrompido do navegador
-                const fetchUrl = url + (url.includes('?') ? '&' : '?') + 'force_download=1&t=' + Date.now();
+                const fetchUrl = url + (url.includes('?') ? '&amp;' : '?') + 'force_download=1&amp;t=' + Date.now();
                 
                 const response = await fetch(fetchUrl, {
                     method: 'GET',
@@ -2754,7 +2726,7 @@ const CustomVideoPlayer = ({ src, onEnded, poster, isCompleted, showNotification
                                 <button onClick={() => setActiveTab('visao_geral')} className={`pb-3 sm:pb-4 text-sm font-bold uppercase tracking-widest transition-colors border-b-2 ${activeTab === 'visao_geral' ? 'border-indigo-500 text-white' : 'border-transparent text-white/40 hover:text-white/80'}`}>Visão Geral</button>
                                 <button onClick={() => setActiveTab('materiais')} className={`pb-3 sm:pb-4 text-sm font-bold uppercase tracking-widest transition-colors border-b-2 ${activeTab === 'materiais' ? 'border-indigo-500 text-white' : 'border-transparent text-white/40 hover:text-white/80'}`}>Materiais ({(currentLesson.materiais || []).length})</button>
                                 <button onClick={() => setActiveTab('anotacoes')} className={`pb-3 sm:pb-4 text-sm font-bold uppercase tracking-widest transition-colors border-b-2 ${activeTab === 'anotacoes' ? 'border-indigo-500 text-white' : 'border-transparent text-white/40 hover:text-white/80'}`}>Minhas Anotações</button>
-                                
+                                <button onClick={() => setActiveTab('transcricao')} className={`pb-3 sm:pb-4 text-sm font-bold uppercase tracking-widest transition-colors border-b-2 ${activeTab === 'transcricao' ? 'border-indigo-500 text-white' : 'border-transparent text-white/40 hover:text-white/80'}`}>Transcrição por IA</button>
                             </div>
 
                             {activeTab === 'visao_geral' && (
@@ -2998,6 +2970,252 @@ const CustomVideoPlayer = ({ src, onEnded, poster, isCompleted, showNotification
                             )}
                             {/* 👆 FIM DA INTERFACE DO LIVRO AVANÇADO 👆 */}
 
+                            {/* 👇 NOVA ABA DE TRANSCRIÇÃO POR IA (WHISPER LOCAL) 👇 */}
+                            {activeTab === 'transcricao' && (
+                                <div className="animate-fade-in space-y-6">
+                                    <div className="bg-gradient-to-br from-[#0a0a15] to-[#050505] border border-white/10 rounded-[2.5rem] p-8 md:p-12 flex flex-col items-center text-center relative overflow-hidden shadow-2xl">
+                                        
+                                        {/* Barra de Progresso do Download do Modelo */}
+                                        {isTranscribing && (
+                                            <div className="absolute top-0 left-0 w-full h-1.5 bg-white/5">
+                                                <div className="h-full bg-indigo-500 transition-all duration-300 shadow-[0_0_15px_#6366f1]" style={{ width: `${transcriptionProgress}%` }}></div>
+                                            </div>
+                                        )}
+
+                                        <div className={`w-28 h-28 rounded-[2rem] flex items-center justify-center mb-8 transition-all duration-1000 ${isTranscribing ? 'bg-indigo-600 rotate-[360deg] shadow-[0_0_50px_rgba(99,102,241,0.5)]' : 'bg-white/5 border border-white/10'}`}>
+                                            {isTranscribing ? <Zap size={48} className="text-white animate-pulse"/> : <Mic size={48} className="text-indigo-400"/>}
+                                        </div>
+
+                                        <h3 className="text-3xl font-black text-white mb-3">Transcrição Avançada</h3>
+                                        <p className="text-slate-400 text-sm max-w-md mb-10 leading-relaxed">
+                                            O nosso sistema utiliza inteligência artificial de última geração para processar o áudio do vídeo e entregar uma transcrição precisa, limpa e organizada em tempo recorde.
+                                        </p>
+
+                                        <div className="flex flex-col items-center gap-4">
+                                            <button 
+                                                onClick={async () => {
+                                                    if (isTranscribing) return;
+                                                    setIsTranscribing(true);
+                                                    setStreamingWords([]);
+                                                    setTranscriptionText('');
+                                                    setAiSummary('');
+                                                    setTranscriptionProgress(0);
+                                                    
+                                                    try {
+                                                        setStatusText('Otimizando: Extraindo áudio de alta fidelidade...');
+                                                        
+                                                        // PASSO 1: EXTRAIR ÁUDIO A 16KHZ MONO (PADRÃO WHISPER)
+                                                        const videoResponse = await fetch(fixUrl(currentLesson.conteudo));
+                                                        const videoBlob = await videoResponse.blob();
+                                                        const arrayBuffer = await videoBlob.arrayBuffer();
+                                                        
+                                                        // Usamos um contexto de áudio limpo para evitar artefatos
+                                                        const audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
+                                                        const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
+                                                        
+                                                        // Garantimos o merge de canais para evitar duplicação de áudio espacial
+                                                        let audioData = audioBuffer.getChannelData(0);
+                                                        if (audioBuffer.numberOfChannels > 1) {
+                                                            const channel2 = audioBuffer.getChannelData(1);
+                                                            for (let i = 0; i < audioData.length; i++) {
+                                                                audioData[i] = (audioData[i] + channel2[i]) / 2;
+                                                            }
+                                                        }
+                                                        setTranscriptionProgress(20);
+
+                                                        // PASSO 2: CARREGAR MODELO BASE (ALTA FIDELIDADE)
+                                                        if (!transcriberRef.current) {
+                                                            setStatusText('Calibrando Motor de Voz Premium...');
+                                                            transcriberRef.current = await pipeline('automatic-speech-recognition', 'Xenova/whisper-base', {
+                                                                progress_callback: (data) => {
+                                                                    if (data.status === 'progress') {
+                                                                        setTranscriptionProgress(20 + (data.progress * 0.5));
+                                                                    }
+                                                                }
+                                                            });
+                                                        }
+
+                                                        setStatusText('Analizando fonemas e sotaques...');
+                                                        setTranscriptionProgress(70);
+
+                                                        // PASSO 3: TRANSCREVER COM PARÂMETROS DE ALTA PRECISÃO
+                                                        const output = await transcriberRef.current(audioData, {
+                                                            language: 'portuguese',
+                                                            task: 'transcribe',
+                                                            chunk_length_s: 30,
+                                                            stride_length_s: 5,
+                                                            return_timestamps: false,
+                                                            repetition_penalty: 1.2
+                                                        });
+
+                                                        let rawText = output.text.replace(/\s+/g, ' ').trim();
+                                                        if (!rawText || rawText.length < 3) throw new Error("Não detectamos fala legível.");
+
+                                                        // PASSO 4: POLIMENTO CIRÚRGICO POR IA (CORREÇÃO DE NOMES COMO STEPHANI ROLIN)
+                                                        setStatusText('Refinando nomes e gramática...');
+                                                        setTranscriptionProgress(90);
+                                                        
+                                                        const prompt = `CORREÇÃO CIRÚRGICA: O texto abaixo é uma transcrição de aula e pode conter erros fonéticos. 
+                                                        Ações: 
+                                                        1. Corrija nomes próprios (Ex: Stephani Rolin, e não Estefani Rolinho).
+                                                        2. Remova gaguejos e repetições.
+                                                        3. Mantenha a pontuação profissional.
+                                                        RETORNE APENAS O TEXTO FINAL:\n\n${rawText}`;
+                                                        
+                                                        const aiRes = await fetch("https://meu-backend-ia.vercel.app/api/chat", {
+                                                            method: "POST", headers: { "Content-Type": "application/json" },
+                                                            body: JSON.stringify({ message: prompt })
+                                                        });
+                                                        const aiData = await aiRes.json();
+                                                        const fullText = aiData.reply || rawText;
+
+                                                        setTranscriptionProgress(100);
+                                                        setStatusText('Transcrição Impecável Finalizada!');
+                                                        showNotification("Transcrição concluída com precisão máxima!", "success");
+
+                                                        // PASSO 5: STREAMING ULTRA RÁPIDO
+                                                        const words = fullText.split(' ').filter(w => w.length > 0);
+                                                        for (let i = 0; i < words.length; i++) {
+                                                            setStreamingWords(prev => [...prev, words[i]]);
+                                                            await new Promise(r => setTimeout(r, 35)); 
+                                                        }
+
+                                                        setTranscriptionText(fullText);
+                                                    } catch (err) {
+                                                        console.error("Whisper Error:", err);
+                                                        showNotification(err.message || "Erro ao transcrever arquivo.", "error");
+                                                        setStatusText('Falha no motor de voz.');
+                                                    } finally {
+                                                        setIsTranscribing(false);
+                                                    }
+                                                }}
+                                                disabled={isTranscribing}
+                                                className={`px-12 py-5 rounded-2xl font-black uppercase tracking-[0.2em] transition-all flex items-center gap-3 shadow-2xl ${isTranscribing ? 'bg-slate-800 text-slate-500 cursor-wait' : 'bg-indigo-600 hover:bg-indigo-500 text-white hover:scale-105 active:scale-95'}`}
+                                            >
+                                                {isTranscribing ? <div className="w-5 h-5 border-2 border-slate-500 border-t-white rounded-full animate-spin"></div> : <Zap size={20} fill="currentColor"/>}
+                                                {isTranscribing ? "A Processar..." : "Transcrever Vídeo"}
+                                            </button>
+                                            
+                                            {isTranscribing && <p className="text-indigo-400 text-[10px] font-bold uppercase tracking-[0.2em] animate-pulse">{statusText}</p>}
+                                        </div>
+                                    </div>
+
+                                    {/* ÁREA DE VISUALIZAÇÃO DAS PALAVRAS EM FLUXO */}
+                                    {(streamingWords.length > 0 || transcriptionText) && (
+                                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 animate-fade-in pb-20">
+                                            <div className="bg-[#050505] border border-white/10 rounded-[2.5rem] p-8 flex flex-col min-h-[400px] shadow-2xl relative overflow-hidden">
+                                                <div className="flex justify-between items-center mb-8">
+                                                    <div className="flex items-center gap-3">
+                                                        <div className={`w-3 h-3 rounded-full ${isTranscribing ? 'bg-indigo-500 animate-pulse' : 'bg-emerald-500'}`}></div>
+                                                        <h4 className="text-white font-bold uppercase text-xs tracking-widest">Texto Extraído</h4>
+                                                    </div>
+                                                    <button onClick={() => { navigator.clipboard.writeText(streamingWords.join(' ')); showNotification("Copiado!"); }} className="p-2 bg-white/5 hover:bg-white/10 rounded-xl text-slate-400 hover:text-white transition-all"><Copy size={18}/></button>
+                                                </div>
+                                                <div className="flex-1 text-slate-300 text-xl leading-relaxed font-medium">
+                                                    {streamingWords.map((word, i) => (
+                                                        <span key={i} className="inline-block mr-2 animate-fade-in text-white/90">
+                                                            {word}
+                                                        </span>
+                                                    ))}
+                                                    {isTranscribing && <span className="inline-block w-2 h-6 bg-indigo-500 animate-pulse ml-1 align-middle"></span>}
+                                                </div>
+                                            </div>
+
+                                            <div className="bg-gradient-to-br from-indigo-900/20 to-purple-900/10 border border-indigo-500/30 rounded-[2.5rem] p-8 md:p-10 relative overflow-hidden flex flex-col shadow-2xl">
+                                                <div className="flex flex-col md:flex-row justify-between md:items-center gap-4 mb-8">
+                                                    <div className="flex items-center gap-3">
+                                                        <div className="p-2 bg-indigo-500/20 rounded-lg text-indigo-400"><Sparkles size={20}/></div>
+                                                        <h4 className="text-white font-black uppercase text-sm tracking-[0.1em]">Resumo Inteligente</h4>
+                                                    </div>
+                                                    
+                                                    {transcriptionText && (
+                                                        <div className="flex flex-wrap gap-2">
+                                                            {!aiSummary ? (
+                                                                <button 
+                                                                    onClick={async () => {
+                                                                        setIsSummarizing(true);
+                                                                        try {
+                                                                            const prompt = `Aja como um Professor Acadêmico de alto nível. Analise o texto abaixo e gere um resumo NÍVEL UNIVERSITÁRIO. 
+                                                                            REGRAS: 
+                                                                            1. Use títulos em CAIXA ALTA para separar seções. 
+                                                                            2. Use emojis coloridos (🔵, 🟢, 🔴) como marcadores para criar um efeito visual de cores.
+                                                                            3. Utilize vocabulário técnico e preciso.
+                                                                            4. Estruture com Introdução Conceitual, Pontos de Análise e Síntese Executiva.
+                                                                            TEXTO:\n\n${transcriptionText}`;
+                                                                            
+                                                                            const response = await fetch("https://meu-backend-ia.vercel.app/api/chat", {
+                                                                                method: "POST", headers: { "Content-Type": "application/json" },
+                                                                                body: JSON.stringify({ message: prompt })
+                                                                            });
+                                                                            const data = await response.json();
+                                                                            setAiSummary(data.reply);
+                                                                        } catch(e) { showNotification("Erro ao processar resumo.", "error"); }
+                                                                        finally { setIsSummarizing(false); }
+                                                                    }}
+                                                                    disabled={isSummarizing}
+                                                                    className="px-6 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-black uppercase tracking-widest transition-all flex items-center gap-2 shadow-lg shadow-indigo-600/30"
+                                                                >
+                                                                    {isSummarizing ? <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div> : <Zap size={16}/>}
+                                                                    Gerar com IA
+                                                                </button>
+                                                            ) : (
+                                                                /* 👇 NOVAS OPÇÕES DE REFINAMENTO (NÍVEL ACADÊMICO) 👇 */
+                                                                <div className="flex flex-wrap gap-2 animate-fade-in">
+                                                                    {[
+                                                                        { id: 'short', label: 'Resumo Executivo', icon: <Zap size={14}/>, prompt: 'Gere uma Síntese Executiva de alto nível em 3 parágrafos densos e acadêmicos. Sem introduções informais. Use 🔵 para destacar.' },
+                                                                        { id: 'detailed', label: 'Análise Acadêmica', icon: <ListTodo size={14}/>, prompt: 'Produza uma análise detalhada por tópicos (Bullet Points), utilizando terminologia avançada da área. Use 🟢 para separar seções de estudo.' },
+                                                                        { id: 'mega', label: 'Tratado Técnico (Mega)', icon: <Sparkles size={14}/>, prompt: 'Gere um Tratado Técnico ultra-detalhado. Separe por CAPÍTULOS, use terminologia de Doutorado, aprofunde-se em cada nuance citada. Use 🔴 para títulos e 🟣 para sub-notas.' }
+                                                                    ].map((opt) => (
+                                                                        <button
+                                                                            key={opt.id}
+                                                                            disabled={isSummarizing}
+                                                                            onClick={async () => {
+                                                                                setIsSummarizing(true);
+                                                                                try {
+                                                                                    const response = await fetch("https://meu-backend-ia.vercel.app/api/chat", {
+                                                                                        method: "POST", headers: { "Content-Type": "application/json" },
+                                                                                        body: JSON.stringify({ message: `AÇÃO ACADÊMICA: ${opt.prompt}\n\nCONTEÚDO BASE PARA ANÁLISE:\n${transcriptionText}` })
+                                                                                    });
+                                                                                    const data = await response.json();
+                                                                                    setAiSummary(data.reply);
+                                                                                    showNotification(`Modo ${opt.label} ativado!`, "success");
+                                                                                } catch(e) { showNotification("Erro ao refinar.", "error"); }
+                                                                                finally { setIsSummarizing(false); }
+                                                                            }}
+                                                                            className={`px-4 py-2 rounded-xl text-[10px] font-bold uppercase tracking-widest flex items-center gap-2 transition-all border ${isSummarizing ? 'opacity-50 cursor-wait' : 'bg-white/5 hover:bg-white/10 text-white border-white/10'}`}
+                                                                        >
+                                                                            {opt.icon} {opt.label}
+                                                                        </button>
+                                                                    ))}
+                                                                </div>
+                                                            )}
+                                                        </div>
+                                                    )}
+                                                </div>
+                                                
+                                                <div className="flex-1 flex flex-col justify-center min-h-[300px]">
+                                                    {aiSummary ? (
+                                                        <div className={`bg-black/40 rounded-2xl p-6 md:p-8 text-slate-200 text-base leading-relaxed whitespace-pre-wrap animate-fade-in border border-white/10 relative ${isSummarizing ? 'opacity-40' : 'opacity-100'}`}>
+                                                            {isSummarizing && (
+                                                                <div className="absolute inset-0 flex items-center justify-center z-10">
+                                                                    <div className="bg-indigo-600 text-white px-6 py-2 rounded-full font-bold animate-bounce shadow-2xl">A IA está a pensar...</div>
+                                                                </div>
+                                                            )}
+                                                            {aiSummary}
+                                                        </div>
+                                                    ) : (
+                                                        <div className="text-center py-20 bg-white/5 rounded-[2rem] border border-dashed border-white/10">
+                                                            <Sparkles size={60} className="mx-auto mb-6 text-indigo-500/20"/>
+                                                            <p className="text-slate-500 text-xs font-bold uppercase tracking-[0.2em]">Finalize a transcrição para libertar o resumo</p>
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+                            {/* 👆 FIM DA ABA DE TRANSCRIÇÃO 👆 */}
                             
                         </div>
                     </div>
@@ -4093,8 +4311,8 @@ const CertificatesSection = ({ user, courses, userProgress, certificates, custom
         });
     };
 
-    // --- MINI PLAYER DE ÁUDIO (DESIGN WHATSAPP CLONE) ---
-    const MiniAudioPlayer = ({ src, isMe, avatarUrl }) => {
+    // --- MINI PLAYER DE ÁUDIO (DESIGN CLONE PIXEL PERFECT DA IMAGEM) ---
+    const MiniAudioPlayer = ({ src, isMe }) => {
         const audioRef = useRef(null);
         const [isPlaying, setIsPlaying] = useState(false);
         const [duration, setDuration] = useState(0);
@@ -4103,22 +4321,14 @@ const CertificatesSection = ({ user, courses, userProgress, certificates, custom
         useEffect(() => {
             const audio = audioRef.current;
             if (!audio) return;
-            
-            const setAudioData = () => {
-                if (audio.duration && audio.duration !== Infinity) setDuration(audio.duration);
-            };
-
+            const setAudioData = () => { if (audio.duration && audio.duration !== Infinity) setDuration(audio.duration); };
             const onTimeUpdate = () => setCurrentTime(audio.currentTime);
             const onEnded = () => { setIsPlaying(false); setCurrentTime(0); };
-            
-            // Força o carregamento do metadado para garantir a duração no Safari/iOS
             if (audio.readyState >= 1) setAudioData();
-            
             audio.addEventListener('loadedmetadata', setAudioData);
             audio.addEventListener('durationchange', setAudioData);
             audio.addEventListener('timeupdate', onTimeUpdate);
             audio.addEventListener('ended', onEnded);
-            
             return () => {
                 audio.removeEventListener('loadedmetadata', setAudioData);
                 audio.removeEventListener('durationchange', setAudioData);
@@ -4128,8 +4338,7 @@ const CertificatesSection = ({ user, courses, userProgress, certificates, custom
         }, [src]);
 
         const togglePlay = (e) => {
-            e.preventDefault();
-            e.stopPropagation();
+            e.preventDefault(); e.stopPropagation();
             const audio = audioRef.current;
             if (!audio) return;
             if (isPlaying) audio.pause();
@@ -4145,57 +4354,42 @@ const CertificatesSection = ({ user, courses, userProgress, certificates, custom
         };
 
         return (
-            <div className="flex items-center gap-3 pt-1 pb-1 min-w-[240px] md:min-w-[280px]" onClick={(e) => e.stopPropagation()}>
+            <div className={`flex items-center gap-3 py-3 px-4 min-w-[280px] md:min-w-[320px] rounded-[18px] bg-[#f8f9fa] dark:bg-[#202c33] shadow-sm border border-gray-200 dark:border-white/5`} onClick={(e) => e.stopPropagation()}>
                 <audio ref={audioRef} src={src} preload="metadata" />
                 
-                {/* Avatar do WhatsApp */}
-                <div className="relative shrink-0">
-                    <div className="w-10 h-10 md:w-12 md:h-12 rounded-full overflow-hidden bg-slate-200 dark:bg-slate-700 shadow-sm flex items-center justify-center border border-white/10">
-                        {avatarUrl ? (
-                            <img src={avatarUrl} className="w-full h-full object-cover" alt="Perfil" />
-                        ) : (
-                            <User size={24} className="text-slate-400" />
-                        )}
-                    </div>
-                    {isMe && (
-                        <div className="absolute -bottom-1 -right-1 text-[#00a884] dark:text-[#00a884] bg-white dark:bg-[#005c4b] rounded-full p-[2px] shadow-sm">
-                            <Mic size={12} fill="currentColor" />
-                        </div>
-                    )}
-                </div>
-
-                {/* Play/Pause Button */}
+                {/* BOTÃO PLAY CIRCULAR DESIGN IMAGEM */}
                 <button 
-                    onClick={togglePlay}
-                    type="button"
-                    className="text-slate-500 dark:text-slate-300 hover:opacity-80 transition-opacity shrink-0 ml-1"
+                    onClick={togglePlay} 
+                    className="w-14 h-14 rounded-full bg-[#5350e9] text-white flex items-center justify-center shrink-0 shadow-md hover:scale-105 active:scale-95 transition-all"
                 >
-                    {isPlaying ? <Pause size={28} fill="currentColor" /> : <Play size={28} fill="currentColor" />}
+                    {isPlaying ? <Pause size={28} fill="currentColor" /> : <Play size={28} fill="currentColor" className="ml-1" />}
                 </button>
 
-                {/* Linha do Tempo & Duração */}
                 <div className="flex flex-col flex-1 min-w-0 justify-center pr-2">
-                    <div className="flex items-center w-full h-6 relative">
-                        <input 
-                            type="range" min="0" max={duration || 100} value={currentTime} 
-                            onChange={(e) => { 
-                                e.stopPropagation(); 
-                                const audio = audioRef.current; 
-                                if(audio) { 
-                                    audio.currentTime = Number(e.target.value); 
-                                    setCurrentTime(Number(e.target.value)); 
-                                } 
-                            }}
-                            className={`w-full h-1 md:h-1.5 appearance-none bg-black/10 dark:bg-white/20 rounded-full outline-none cursor-pointer
-                                [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:rounded-full 
-                                ${isMe ? '[&::-webkit-slider-thumb]:bg-[#00a884] accent-[#00a884]' : '[&::-webkit-slider-thumb]:bg-blue-500 accent-blue-500'}
-                            `}
+                    {/* BARRA DE PROGRESSO COM BOLINHA DESIGN IMAGEM */}
+                    <div className="flex items-center w-full h-8 relative group">
+                        <div className="absolute inset-x-0 h-[3px] bg-[#cfd1d3] dark:bg-white/10 rounded-full"></div>
+                        <div className="absolute h-[3px] bg-[#5350e9] rounded-full" style={{ width: `${(currentTime/(duration || 1))*100}%` }}></div>
+                        <input type="range" min="0" max={duration || 100} value={currentTime} 
+                            step="0.1"
+                            onChange={(e) => { const audio = audioRef.current; if(audio) audio.currentTime = Number(e.target.value); }}
+                            className="absolute inset-x-0 h-1 appearance-none bg-transparent cursor-pointer z-10 
+                            [&::-webkit-slider-thumb]:appearance-none 
+                            [&::-webkit-slider-thumb]:w-4 
+                            [&::-webkit-slider-thumb]:h-4 
+                            [&::-webkit-slider-thumb]:rounded-full 
+                            [&::-webkit-slider-thumb]:bg-[#5350e9] 
+                            [&::-webkit-slider-thumb]:border-0
+                            [&::-moz-range-thumb]:w-4 
+                            [&::-moz-range-thumb]:h-4 
+                            [&::-moz-range-thumb]:bg-[#5350e9] 
+                            [&::-moz-range-thumb]:border-0"
                         />
                     </div>
-                    <div className="flex justify-between items-center -mt-1">
-                        <span className="text-[10px] md:text-[11px] font-medium text-slate-500 dark:text-white/60">
-                            {isPlaying ? formatTime(currentTime) : formatTime(duration)}
-                        </span>
+                    {/* TIMESTAMPS DESIGN IMAGEM (MAIS ESPAÇADOS E DISCRETOS) */}
+                    <div className="flex justify-between items-center -mt-2">
+                        <span className="text-[11px] font-medium text-gray-500 dark:text-gray-400">{formatTime(currentTime)}</span>
+                        <span className="text-[11px] font-medium text-gray-500 dark:text-gray-400">{formatTime(duration)}</span>
                     </div>
                 </div>
             </div>
@@ -4474,190 +4668,266 @@ const NotificationBell = ({ db, user }) => {
 // =================================================================================
 // FIM DO COMPONENTE: SINO DE NOTIFICAÇÕES (ÁREA DO ALUNO)
     
-    // =================================================================================
-    // COMPONENTE: ABA DE SUPORTE (WHATSAPP CLONE - ATUALIZADO)
-    // =================================================================================
-    const SupportSection = ({ user, settings }) => {
-        const [messages, setMessages] = useState([]);
-        const [input, setInput] = useState('');
-        
-        // Estados de Áudio e Mídia
-        const [isRecording, setIsRecording] = useState(false);
-        const [isLoadingMic, setIsLoadingMic] = useState(false);
-        const [recordingTime, setRecordingTime] = useState(0); 
-        const [audioPreview, setAudioPreview] = useState(null);
-        const [audioBlob, setAudioBlob] = useState(null);
-        const [isSending, setIsSending] = useState(false);
-        
-        // Estados de UI
-        const [showEmojiPicker, setShowEmojiPicker] = useState(false);
-        const [showAttachments, setShowAttachments] = useState(false);
-        const [msgToDelete, setMsgToDelete] = useState(null);
-        
-        // 👇 NOVO: Estado do Menu de Contexto Flutuante (estilo WhatsApp) 👇
-        const [contextMenuMsgId, setContextMenuMsgId] = useState(null);
+  // =================================================================================
+// COMPONENTE: ABA DE SUPORTE (TELA CHEIA SEM SIDEBAR)
+// =================================================================================
+const SupportSection = ({ user, settings }) => {
+    const [messages, setMessages] = useState([]);
+    const [input, setInput] = useState('');
+    
+    // Estados de Áudio e Mídia
+    const [isRecording, setIsRecording] = useState(false);
+    const [isLoadingMic, setIsLoadingMic] = useState(false);
+    const [recordingTime, setRecordingTime] = useState(0); 
+    const [audioPreview, setAudioPreview] = useState(null);
+    const [audioBlob, setAudioBlob] = useState(null);
+    const [isSending, setIsSending] = useState(false);
+    
+    // Estados de UI
+    const [showEmojiPicker, setShowEmojiPicker] = useState(false);
+    const [showAttachments, setShowAttachments] = useState(false);
+    const [msgToDelete, setMsgToDelete] = useState(null);
+    
+    // Menu Flutuante e Visualizador de Mídia
+    const [contextMenuMsgId, setContextMenuMsgId] = useState(null);
+    const [selectedMedia, setSelectedMedia] = useState(null);
 
-        // Estados de Edição
-        const [editingMsgId, setEditingMsgId] = useState(null);
-        const [editingText, setEditingText] = useState('');
+    // Estados de Edição
+    const [editingMsgId, setEditingMsgId] = useState(null);
+    const [editingText, setEditingText] = useState('');
 
-        const messagesEndRef = useRef(null);
-        const mediaRecorderRef = useRef(null);
-        const audioChunksRef = useRef([]);
-        const timerRef = useRef(null);
+    const messagesEndRef = useRef(null);
+    const mediaRecorderRef = useRef(null);
+    const audioChunksRef = useRef([]);
+    const timerRef = useRef(null);
 
-        // 1. Carregar Mensagens
-        useEffect(() => {
-            if (!user || !db) return;
-            const chatDocRef = doc(db, 'support_chats', user.uid);
-            const unsubscribe = onSnapshot(chatDocRef, (docSnap) => {
-                if (docSnap.exists()) { 
-                    const allMsgs = docSnap.data().messages || [];
-                    const visibleMsgs = allMsgs.filter(m => !m.hiddenFor || !m.hiddenFor.includes(user.uid));
-                    setMessages(visibleMsgs); 
-                    if (docSnap.data().unreadStudent > 0) updateDoc(chatDocRef, { unreadStudent: 0 });
-                } else { 
-                   setMessages([{ id: 'welcome', text: `Olá ${user.displayName}! Como podemos ajudar hoje?`, sender: 'admin', timestamp: new Date().toISOString() }]); 
-                }
+    // 1. Carregar Mensagens
+    useEffect(() => {
+        if (!user || !db) return;
+        const chatDocRef = doc(db, 'support_chats', user.uid);
+        const unsubscribe = onSnapshot(chatDocRef, (docSnap) => {
+            if (docSnap.exists()) { 
+                const allMsgs = docSnap.data().messages || [];
+                const visibleMsgs = allMsgs.filter(m => !m.hiddenFor || !m.hiddenFor.includes(user.uid));
+                setMessages(visibleMsgs); 
+                if (docSnap.data().unreadStudent > 0) updateDoc(chatDocRef, { unreadStudent: 0 });
+            } else { 
+               setMessages([{ id: 'welcome', text: `Olá ${user.displayName}! Como podemos ajudar hoje?`, sender: 'admin', timestamp: new Date().toISOString() }]); 
+            }
+        });
+        return () => unsubscribe();
+    }, [user]);
+
+    // 2. Scroll automático
+    useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages, audioPreview, isRecording, editingMsgId]);
+
+    // Download Forçado (Interno)
+    const handleForceDownload = async (url, fileName) => {
+        if (!url) return;
+        try {
+                const charAm = String.fromCharCode(38);
+                const fetchUrl = `${url}${url.includes('?') ? charAm : '?'}force_download=1${charAm}t=${Date.now()}`;
+                const response = await fetch(fetchUrl, { method: 'GET', mode: 'cors', cache: 'no-cache' });
+            
+            if (!response.ok) throw new Error("Erro na rede ao tentar baixar");
+            
+            const blob = await response.blob();
+            const blobUrl = window.URL.createObjectURL(blob);
+            
+            const link = document.createElement('a');
+            link.href = blobUrl;
+            link.download = fileName || 'download';
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            window.URL.revokeObjectURL(blobUrl);
+        } catch (error) {
+            console.error("Erro no download interno:", error);
+            window.open(url, '_blank'); 
+        }
+    };
+
+    // Reação de Mensagens
+    const handleReactToMessage = async (msgId, emoji) => {
+        try {
+            const chatRef = doc(db, 'support_chats', user.uid);
+            const docSnap = await getDoc(chatRef);
+            if (docSnap.exists()) {
+                const currentMsgs = docSnap.data().messages || [];
+                const updatedMsgs = currentMsgs.map(m => {
+                    if (m.id === msgId) {
+                        const reactions = m.reactions || {};
+                        if (reactions[user.uid] === emoji) {
+                            delete reactions[user.uid]; 
+                        } else {
+                            reactions[user.uid] = emoji; 
+                        }
+                        return { ...m, reactions };
+                    }
+                    return m;
+                });
+                await updateDoc(chatRef, { messages: updatedMsgs });
+            }
+        } catch (error) {
+            console.error("Erro ao reagir:", error);
+        }
+        setContextMenuMsgId(null);
+    };
+
+    // 3. Funções de Edição e Cópia
+    const startEditing = (msg) => {
+        setEditingMsgId(msg.id);
+        setEditingText(msg.text);
+        setShowEmojiPicker(false);
+    };
+
+    const cancelEditing = () => {
+        setEditingMsgId(null);
+        setEditingText('');
+    };
+
+    const saveEdit = async () => {
+        if (!editingText.trim()) return;
+        try {
+            const chatRef = doc(db, 'support_chats', user.uid);
+            const docSnap = await getDoc(chatRef);
+            if (docSnap.exists()) {
+                const currentMsgs = docSnap.data().messages;
+                const updatedMsgs = currentMsgs.map(m => {
+                    if (m.id === editingMsgId) { return { ...m, text: editingText, edited: true }; }
+                    return m;
+                });
+                await updateDoc(chatRef, { messages: updatedMsgs });
+                setEditingMsgId(null);
+                setEditingText('');
+            }
+        } catch (error) { console.error("Erro ao editar:", error); }
+    };
+
+    const handleCopy = (text) => {
+        navigator.clipboard.writeText(text);
+        setContextMenuMsgId(null);
+    };
+
+    // 4. Funções de Deletar
+    const handleDeleteForMe = async () => { 
+        if (!msgToDelete) return; 
+        const chatRef = doc(db, 'support_chats', user.uid); 
+        try { 
+            const docSnap = await getDoc(chatRef); 
+            if (docSnap.exists()) { 
+                const currentMsgs = docSnap.data().messages; 
+                const updatedMsgs = currentMsgs.map(m => m.id === msgToDelete.id ? { ...m, hiddenFor: [...(m.hiddenFor || []), user.uid] } : m); 
+                await updateDoc(chatRef, { messages: updatedMsgs }); 
+            } 
+            setMsgToDelete(null); 
+        } catch (e) { console.error(e); } 
+    };
+
+    const handleDeleteForEveryone = async () => { 
+        if (!msgToDelete) return; 
+        const chatRef = doc(db, 'support_chats', user.uid); 
+        try { 
+            const docSnap = await getDoc(chatRef); 
+            if (docSnap.exists()) { 
+                const currentMsgs = docSnap.data().messages; 
+                const updatedMsgs = currentMsgs.map(m => { 
+                    if (m.id === msgToDelete.id) { return { ...m, deleted: true, text: "", fileUrl: null }; } 
+                    return m; 
+                }); 
+                await updateDoc(chatRef, { messages: updatedMsgs }); 
+            } 
+            setMsgToDelete(null); 
+        } catch (e) { console.error(e); } 
+    };
+
+    // 5. Enviar Mensagem
+    const sendMessageToFirebase = async (msgData) => {
+         const chatDocRef = doc(db, 'support_chats', user.uid);
+         const docSnap = await getDoc(chatDocRef);
+         const newMessage = { id: Date.now().toString(), sender: 'student', studentName: user.displayName, timestamp: new Date().toISOString(), read: false, delivered: true, hiddenFor: [], reactions: {}, ...msgData };
+         const updateData = { studentName: user.displayName, studentEmail: user.email, userAvatar: user.photoURL, lastUpdated: serverTimestamp(), unreadAdmin: (docSnap.exists() ? (docSnap.data().unreadAdmin || 0) + 1 : 1) };
+         if (!docSnap.exists()) await setDoc(chatDocRef, { studentId: user.uid, createdAt: serverTimestamp(), messages: [newMessage], unreadStudent: 0, ...updateData });
+         else await updateDoc(chatDocRef, { messages: arrayUnion(newMessage), ...updateData });
+    };
+    
+    const handleSendText = async (e) => { 
+        e?.preventDefault(); 
+        if (!input.trim()) return; 
+        await sendMessageToFirebase({ text: input, type: 'text' }); 
+        setInput(''); 
+        setShowEmojiPicker(false); 
+    };
+    
+    const handleFileUpload = async (file) => {
+         if (!file) return; 
+         setIsSending(true); setShowAttachments(false); setAudioPreview(null); setAudioBlob(null);
+         try {
+            const data = await uploadToCustomDrive(file, 'Chat/Aluno/');
+            const finalType = data.type || 'file';
+            const msgText = finalType === 'file' ? data.name : '';
+
+            await sendMessageToFirebase({ 
+                text: msgText, 
+                fileUrl: data.url, 
+                fileType: finalType, 
+                fileName: data.name 
             });
-            return () => unsubscribe();
-        }, [user]);
+         } catch (e) { alert("Erro envio: " + e.message); } finally { setIsSending(false); }
+    };
 
-        // 2. Scroll automático
-        useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages, audioPreview, isRecording, editingMsgId]);
+    const startRecording = async () => {
+        if (!navigator.mediaDevices) return alert("Sem suporte.");
+        setIsLoadingMic(true);
+        try { 
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: true }); 
+            let options = { mimeType: 'audio/webm' };
+            if (MediaRecorder.isTypeSupported('audio/webm;codecs=opus')) { options = { mimeType: 'audio/webm;codecs=opus' }; }
+            const recorder = new MediaRecorder(stream, options); 
+            audioChunksRef.current = []; 
+            recorder.ondataavailable = e => { if (e.data.size > 0) audioChunksRef.current.push(e.data); }; 
+            recorder.onstop = () => { 
+                const blob = new Blob(audioChunksRef.current, { type: 'audio/webm' }); 
+                if (blob.size > 100) { setAudioPreview(URL.createObjectURL(blob)); setAudioBlob(blob); } 
+                stream.getTracks().forEach(t => t.stop()); 
+                clearInterval(timerRef.current); setRecordingTime(0);
+            }; 
+            recorder.start(); mediaRecorderRef.current = recorder; setIsRecording(true); setIsLoadingMic(false);
+            setRecordingTime(0); timerRef.current = setInterval(() => { setRecordingTime(prev => prev + 1); }, 1000);
+        } catch (e) { alert("Erro mic."); setIsLoadingMic(false); setIsRecording(false); }
+    };
 
-        // 3. Funções de Edição e Cópia
-        const startEditing = (msg) => {
-            setEditingMsgId(msg.id);
-            setEditingText(msg.text);
-            setShowEmojiPicker(false);
-        };
+    const stopRecording = () => { if (mediaRecorderRef.current?.state === "recording") mediaRecorderRef.current.stop(); setIsRecording(false); clearInterval(timerRef.current); };
+    const cancelAudio = () => { setAudioPreview(null); setAudioBlob(null); setRecordingTime(0); };
+    const sendAudio = () => { if (audioBlob) handleFileUpload(new File([audioBlob], `voice_${Date.now()}.webm`, { type: 'audio/webm' })); };
+    
+    const formatDuration = (sec) => { const m = Math.floor(sec / 60); const s = sec % 60; return `${m}:${s < 10 ? '0' : ''}${s}`; };
+    const addEmoji = (emoji) => setInput(prev => prev + emoji);
+    const quickEmojis = ["😀", "😂", "🥰", "👍", "🙏", "✅", "🔥", "🤔"];
+    const reactionEmojis = ['👍', '❤️', '😂', '😮', '😢', '🙏'];
 
-        const cancelEditing = () => {
-            setEditingMsgId(null);
-            setEditingText('');
-        };
-
-        const saveEdit = async () => {
-            if (!editingText.trim()) return;
-            try {
-                const chatRef = doc(db, 'support_chats', user.uid);
-                const docSnap = await getDoc(chatRef);
-                if (docSnap.exists()) {
-                    const currentMsgs = docSnap.data().messages;
-                    const updatedMsgs = currentMsgs.map(m => {
-                        if (m.id === editingMsgId) { return { ...m, text: editingText, edited: true }; }
-                        return m;
-                    });
-                    await updateDoc(chatRef, { messages: updatedMsgs });
-                    setEditingMsgId(null);
-                    setEditingText('');
-                }
-            } catch (error) { console.error("Erro ao editar:", error); }
-        };
-
-        const handleCopy = (text) => {
-            navigator.clipboard.writeText(text);
-            setContextMenuMsgId(null);
-        };
-
-        // 4. Funções de Deletar
-        const handleDeleteForMe = async () => { 
-            if (!msgToDelete) return; 
-            const chatRef = doc(db, 'support_chats', user.uid); 
-            try { 
-                const docSnap = await getDoc(chatRef); 
-                if (docSnap.exists()) { 
-                    const currentMsgs = docSnap.data().messages; 
-                    const updatedMsgs = currentMsgs.map(m => m.id === msgToDelete.id ? { ...m, hiddenFor: [...(m.hiddenFor || []), user.uid] } : m); 
-                    await updateDoc(chatRef, { messages: updatedMsgs }); 
-                } 
-                setMsgToDelete(null); 
-            } catch (e) { console.error(e); } 
-        };
-
-        const handleDeleteForEveryone = async () => { 
-            if (!msgToDelete) return; 
-            const chatRef = doc(db, 'support_chats', user.uid); 
-            try { 
-                const docSnap = await getDoc(chatRef); 
-                if (docSnap.exists()) { 
-                    const currentMsgs = docSnap.data().messages; 
-                    const updatedMsgs = currentMsgs.map(m => { 
-                        if (m.id === msgToDelete.id) { return { ...m, deleted: true, text: "", fileUrl: null }; } 
-                        return m; 
-                    }); 
-                    await updateDoc(chatRef, { messages: updatedMsgs }); 
-                } 
-                setMsgToDelete(null); 
-            } catch (e) { console.error(e); } 
-        };
-
-        // 5. Enviar Mensagem
-        const sendMessageToFirebase = async (msgData) => {
-             const chatDocRef = doc(db, 'support_chats', user.uid);
-             const docSnap = await getDoc(chatDocRef);
-             // Adicionado status: delivered: true
-             const newMessage = { id: Date.now().toString(), sender: 'student', studentName: user.displayName, timestamp: new Date().toISOString(), read: false, delivered: true, hiddenFor: [], ...msgData };
-             const updateData = { studentName: user.displayName, studentEmail: user.email, userAvatar: user.photoURL, lastUpdated: serverTimestamp(), unreadAdmin: (docSnap.exists() ? (docSnap.data().unreadAdmin || 0) + 1 : 1) };
-             if (!docSnap.exists()) await setDoc(chatDocRef, { studentId: user.uid, createdAt: serverTimestamp(), messages: [newMessage], unreadStudent: 0, ...updateData });
-             else await updateDoc(chatDocRef, { messages: arrayUnion(newMessage), ...updateData });
-        };
-        
-        const handleSendText = async (e) => { 
-            e?.preventDefault(); 
-            if (!input.trim()) return; 
-            await sendMessageToFirebase({ text: input, type: 'text' }); 
-            setInput(''); 
-            setShowEmojiPicker(false); 
-        };
-        
-        const handleFileUpload = async (file) => {
-             if (!file) return; 
-             setIsSending(true); setShowAttachments(false); setAudioPreview(null); setAudioBlob(null);
-             try {
-                const data = await uploadToCustomDrive(file, 'Chat/Aluno/');
-                let type = 'file'; 
-                if (file.type.includes('image')) type = 'image'; 
-                else if (file.type.includes('video')) type = 'video'; 
-                else if (file.type.includes('audio') || file.name.endsWith('.webm')) type = 'audio';
+    return (
+        <div className="w-full h-full flex flex-col bg-white dark:bg-[#111b21] rounded-2xl shadow-2xl border border-slate-200 dark:border-white/10 overflow-hidden animate-fade-in font-sans" onClick={() => setContextMenuMsgId(null)}>
+            
+            {/* ÁREA DO CHAT PRINCIPAL (AGORA OCUPA 100% DA LARGURA) */}
+            <div className="flex-1 flex flex-col relative h-full w-full">
                 
-                await sendMessageToFirebase({ text: type === 'image' ? '📷 Imagem' : (type === 'audio' ? '🎤 Áudio' : file.name), fileUrl: data.url, fileType: type, fileName: data.name });
-             } catch (e) { alert("Erro envio: " + e.message); } finally { setIsSending(false); }
-        };
+                {/* MODAL DE VISUALIZAÇÃO DE MÍDIA */}
+                {selectedMedia && (
+                    <div className="absolute inset-0 z-[100] flex items-center justify-center p-4 bg-black/95 backdrop-blur-md animate-fade-in" onClick={(e) => { e.stopPropagation(); setSelectedMedia(null); }}>
+                        <button onClick={() => setSelectedMedia(null)} className="absolute top-4 right-4 z-[110] bg-white/10 hover:bg-red-500 text-white p-3 rounded-full border border-white/20 transition-all shadow-2xl backdrop-blur-md"><X size={24} /></button>
+                        <div className="relative z-10 flex items-center justify-center w-full h-full" onClick={e => e.stopPropagation()}>
+                            {selectedMedia.type === 'video' ? (
+                                <video src={selectedMedia.url} controls autoPlay className="max-w-full max-h-[80vh] object-contain rounded-xl shadow-2xl border border-white/10 bg-black" />
+                            ) : selectedMedia.type === 'file' || selectedMedia.url.includes('.pdf') ? (
+                                <iframe src={`${selectedMedia.url}#view=FitH`} className="w-full h-[80vh] rounded-xl shadow-2xl bg-white border-none" />
+                            ) : (
+                                <img src={selectedMedia.url} className="max-w-full max-h-[80vh] object-contain rounded-xl shadow-2xl border border-white/10" alt="Mídia" />
+                            )}
+                        </div>
+                    </div>
+                )}
 
-        const startRecording = async () => {
-            if (!navigator.mediaDevices) return alert("Sem suporte.");
-            setIsLoadingMic(true);
-            try { 
-                const stream = await navigator.mediaDevices.getUserMedia({ audio: true }); 
-                let options = { mimeType: 'audio/webm' };
-                if (MediaRecorder.isTypeSupported('audio/webm;codecs=opus')) { options = { mimeType: 'audio/webm;codecs=opus' }; }
-                const recorder = new MediaRecorder(stream, options); 
-                audioChunksRef.current = []; 
-                recorder.ondataavailable = e => { if (e.data.size > 0) audioChunksRef.current.push(e.data); }; 
-                recorder.onstop = () => { 
-                    const blob = new Blob(audioChunksRef.current, { type: 'audio/webm' }); 
-                    if (blob.size > 100) { setAudioPreview(URL.createObjectURL(blob)); setAudioBlob(blob); } 
-                    stream.getTracks().forEach(t => t.stop()); 
-                    clearInterval(timerRef.current); setRecordingTime(0);
-                }; 
-                recorder.start(); mediaRecorderRef.current = recorder; setIsRecording(true); setIsLoadingMic(false);
-                setRecordingTime(0); timerRef.current = setInterval(() => { setRecordingTime(prev => prev + 1); }, 1000);
-            } catch (e) { alert("Erro mic."); setIsLoadingMic(false); setIsRecording(false); }
-        };
-
-        const stopRecording = () => { if (mediaRecorderRef.current?.state === "recording") mediaRecorderRef.current.stop(); setIsRecording(false); clearInterval(timerRef.current); };
-        const cancelAudio = () => { setAudioPreview(null); setAudioBlob(null); setRecordingTime(0); };
-        const sendAudio = () => { if (audioBlob) handleFileUpload(new File([audioBlob], `voice_${Date.now()}.webm`, { type: 'audio/webm' })); };
-        
-        const formatDuration = (sec) => { const m = Math.floor(sec / 60); const s = sec % 60; return `${m}:${s < 10 ? '0' : ''}${s}`; };
-        const addEmoji = (emoji) => setInput(prev => prev + emoji);
-        const quickEmojis = ["😀", "😂", "🥰", "👍", "🙏", "✅", "🔥", "🤔"];
-        
-        return (
-            <div className="max-w-4xl mx-auto h-[60vh] md:h-[70vh] min-h-[450px] max-h-[800px] mt-2 md:mt-24 lg:mt-32 mb-4 md:mb-12 animate-fade-in flex flex-col relative drop-shadow-2xl font-sans" onClick={() => setContextMenuMsgId(null)}>
-                
                 {/* MODAL DE CONFIRMAÇÃO DE EXCLUSÃO */}
                 {msgToDelete && (
                     <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4 animate-fade-in">
@@ -4674,89 +4944,127 @@ const NotificationBell = ({ db, user }) => {
                     </div>
                 )}
 
-                {/* HEADER DO CHAT WHATSAPP CLONE */}
-                <div className="bg-[#00a884] dark:bg-[#1f2c34] p-4 md:p-5 rounded-t-2xl shadow-sm flex items-center gap-3 shrink-0 z-20">
-                    <div className="w-10 h-10 bg-white/20 text-white rounded-full flex items-center justify-center shrink-0"><MessageCircle size={22} /></div>
-                    <div>
-                        <h2 className="text-lg font-bold text-white leading-tight">Suporte Técnico</h2>
-                        <p className="text-xs text-white/80">Online agora</p>
+                {/* HEADER DO CHAT */}
+                <div className="h-[70px] bg-[#f0f2f5] dark:bg-[#202c33] px-4 md:px-8 border-b border-slate-200 dark:border-white/5 flex items-center gap-4 shrink-0 z-20 shadow-sm">
+                    <div className="w-12 h-12 bg-[#00a884] text-white rounded-full flex items-center justify-center shrink-0 shadow-md border-2 border-white/10">
+                        <ShieldCheck size={26} />
+                    </div>
+                    <div className="flex-1">
+                        <h2 className="text-lg font-bold text-slate-800 dark:text-white leading-tight">Suporte Oficial</h2>
+                        <p className="text-sm text-emerald-600 dark:text-emerald-400 font-medium">Online agora</p>
                     </div>
                 </div>
                 
                 {/* CORPO DO CHAT */}
-                <div className="flex-1 bg-[#efeae2] dark:bg-[#0b141a] overflow-y-auto p-3 md:p-6 space-y-3 relative custom-scrollbar z-10">
-                    <div className="absolute inset-0 opacity-10 pointer-events-none" style={{backgroundImage: "url('https://user-images.githubusercontent.com/15075759/28719144-86dc0f70-73b1-11e7-911d-60d70fcded21.png')", backgroundRepeat: 'repeat', backgroundSize: '400px'}}></div>
+                <div className="flex-1 bg-[#efeae2] dark:bg-[#0b141a] overflow-y-auto p-4 md:p-8 space-y-4 relative custom-scrollbar z-10">
+                    <div className="absolute inset-0 opacity-[0.08] dark:opacity-10 pointer-events-none" style={{backgroundImage: "url('https://user-images.githubusercontent.com/15075759/28719144-86dc0f70-73b1-11e7-911d-60d70fcded21.png')", backgroundRepeat: 'repeat', backgroundSize: '400px'}}></div>
                     
                     {messages.map((msg, i) => {
                         if (msg.deleted) return null;
 
                         const isMe = msg.sender === 'student';
                         const isEditingThis = editingMsgId === msg.id;
+                        const isMenuOpen = contextMenuMsgId === msg.id;
+                        const hasReactions = msg.reactions && Object.keys(msg.reactions).length > 0;
 
                         return (
-                            <div key={i} className={`flex flex-col max-w-[85%] sm:max-w-[75%] ${isMe ? 'self-end items-end ml-auto' : 'self-start items-start'} relative z-10 group`}>
-                                <div className={`p-2 rounded-2xl text-sm shadow-[0_1px_1px_rgba(0,0,0,0.1)] min-w-[120px] relative ${isMe ? 'bg-[#d9fdd3] dark:bg-[#005c4b] text-slate-900 dark:text-white rounded-tr-none' : 'bg-white dark:bg-[#202c33] text-slate-800 dark:text-slate-200 rounded-tl-none'}`}>
+                            <div key={i} className={`flex flex-col max-w-[85%] sm:max-w-[70%] ${isMe ? 'self-end items-end ml-auto' : 'self-start items-start'} relative ${isMenuOpen ? 'z-[999]' : 'z-10'} group ${hasReactions ? 'mb-4' : ''}`}>
+                                {/* BOLHA WHATSAPP COM TAIL DESIGN */}
+                                <div className={`p-1 rounded-2xl text-[15px] shadow-[0_1px_2px_rgba(0,0,0,0.15)] min-w-[130px] relative ${isMe ? 'bg-[#d9fdd3] dark:bg-[#005c4b] text-slate-900 dark:text-white rounded-tr-none' : 'bg-white dark:bg-[#202c33] text-slate-800 dark:text-slate-200 rounded-tl-none'}`}>
                                     
-                                    {/* Botão de Opções do WhatsApp (Seta pra Baixo) */}
-                                    <button 
-                                        onClick={(e) => { e.stopPropagation(); setContextMenuMsgId(contextMenuMsgId === msg.id ? null : msg.id); }}
-                                        className={`absolute top-1 right-2 p-1 text-slate-400 hover:text-slate-600 dark:text-white/50 dark:hover:text-white transition-opacity z-20 ${contextMenuMsgId === msg.id ? 'opacity-100 bg-black/5 dark:bg-white/5 rounded-full' : 'opacity-0 group-hover:opacity-100'}`}
-                                    >
-                                        <ChevronDown size={18} />
-                                    </button>
+                                    {/* Botão de Opções Discreto */}
+                                    <div className="absolute top-1 right-1 z-30">
+                                        <button 
+                                            onClick={(e) => { e.stopPropagation(); setContextMenuMsgId(contextMenuMsgId === msg.id ? null : msg.id); }}
+                                            className={`p-1 transition-opacity rounded-full ${contextMenuMsgId === msg.id ? 'opacity-100 bg-black/5 dark:bg-white/10' : 'opacity-0 group-hover:opacity-100 hover:bg-black/5'}`}
+                                        >
+                                            <ChevronDown size={18} className="text-slate-500/70 dark:text-slate-300/70" />
+                                        </button>
 
-                                    {/* Context Menu Flutuante Estilo WhatsApp */}
-                                    {contextMenuMsgId === msg.id && (
-                                        <div className={`absolute top-8 ${isMe ? 'right-0' : 'left-0'} w-40 bg-white dark:bg-[#233138] rounded-xl shadow-2xl border border-slate-200 dark:border-white/5 py-2 z-[999] animate-fade-in`}>
-                                            <button onClick={(e) => { e.stopPropagation(); setInput(`> Respondendo:\n${msg.text || 'Arquivo'}\n\n`); setContextMenuMsgId(null); }} className="w-full text-left px-4 py-2.5 hover:bg-slate-100 dark:hover:bg-[#111b21] text-sm flex items-center gap-3 text-slate-700 dark:text-slate-200"><CornerUpLeft size={16}/> Responder</button>
-                                            {msg.text && <button onClick={(e) => { e.stopPropagation(); handleCopy(msg.text); }} className="w-full text-left px-4 py-2.5 hover:bg-slate-100 dark:hover:bg-[#111b21] text-sm flex items-center gap-3 text-slate-700 dark:text-slate-200"><Copy size={16}/> Copiar</button>}
-                                            {isMe && !msg.fileUrl && <button onClick={(e) => { e.stopPropagation(); startEditing(msg); setContextMenuMsgId(null); }} className="w-full text-left px-4 py-2.5 hover:bg-slate-100 dark:hover:bg-[#111b21] text-sm flex items-center gap-3 text-slate-700 dark:text-slate-200"><Edit size={16}/> Editar</button>}
-                                            {isMe && <button onClick={(e) => { e.stopPropagation(); setMsgToDelete(msg); setContextMenuMsgId(null); }} className="w-full text-left px-4 py-2.5 hover:bg-slate-100 dark:hover:bg-[#111b21] text-sm flex items-center gap-3 text-red-500"><Trash2 size={16}/> Apagar</button>}
-                                        </div>
-                                    )}
+                                        {/* Context Menu Premium */}
+                                        {contextMenuMsgId === msg.id && (
+                                            <>
+                                                <div className="fixed inset-0 z-30 cursor-default" onClick={(e) => { e.stopPropagation(); setContextMenuMsgId(null); }}></div>
+                                                <div className={`absolute top-9 ${isMe ? 'right-0' : 'left-0'} w-48 bg-white dark:bg-[#233138] rounded-xl shadow-2xl border border-slate-200 dark:border-slate-700 z-[60] py-2 flex flex-col overflow-hidden animate-fade-in`}>
+                                                    <div className="flex justify-between items-center px-3 py-2 border-b border-slate-200 dark:border-slate-700 mb-1 bg-slate-50 dark:bg-[#111b21]">
+                                                        {reactionEmojis.map(emoji => (
+                                                            <button key={emoji} onClick={(e) => { e.stopPropagation(); handleReactToMessage(msg.id, emoji); }} className="hover:scale-125 transition-transform text-lg">{emoji}</button>
+                                                        ))}
+                                                    </div>
+                                                    <button onClick={(e) => { e.stopPropagation(); setInput(`> Respondendo:\n${msg.text || 'Arquivo'}\n\n`); setContextMenuMsgId(null); }} className="w-full text-left px-5 py-2.5 text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-[#111b21] transition-colors flex items-center gap-3 font-medium"><CornerUpLeft size={16} className="opacity-60"/> Responder</button>
+                                                    {msg.text && <button onClick={(e) => { e.stopPropagation(); handleCopy(msg.text); }} className="w-full text-left px-5 py-2.5 text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-[#111b21] transition-colors flex items-center gap-3 font-medium"><Copy size={16} className="opacity-60"/> Copiar</button>}
+                                                    {isMe && !msg.fileUrl && <button onClick={(e) => { e.stopPropagation(); startEditing(msg); setContextMenuMsgId(null); }} className="w-full text-left px-5 py-2.5 text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-[#111b21] transition-colors flex items-center gap-3 font-medium"><Edit size={16} className="opacity-60"/> Editar</button>}
+                                                    {isMe && <button onClick={(e) => { e.stopPropagation(); setMsgToDelete(msg); setContextMenuMsgId(null); }} className="w-full text-left px-5 py-2.5 text-sm hover:bg-red-50 dark:hover:bg-red-900/20 text-red-600 transition-colors flex items-center gap-3 font-medium"><Trash2 size={16} className="opacity-60"/> Apagar</button>}
+                                                </div>
+                                            </>
+                                        )}
+                                    </div>
 
-                                    <div className="pr-6 pl-1 pt-1 pb-0">
+                                    {/* CONTEÚDO DA MENSAGEM WHATSAPP CLONE */}
+                                    <div className="relative z-10">
                                         {isEditingThis ? (
-                                            <div className="flex flex-col gap-2 min-w-[200px]">
-                                                <input 
+                                            <div className="p-2 flex flex-col gap-2 min-w-[200px]">
+                                                <textarea 
                                                     value={editingText} 
                                                     onChange={(e) => setEditingText(e.target.value)} 
-                                                    className="w-full px-2 py-1.5 rounded border border-blue-400 text-slate-900 text-sm focus:outline-none bg-white"
+                                                    className="w-full px-3 py-2 rounded-lg border border-blue-400 text-slate-900 text-sm focus:outline-none bg-white min-h-[60px]"
                                                     autoFocus
-                                                    onKeyDown={(e) => e.key === 'Enter' && saveEdit()}
                                                 />
-                                                <div className="flex justify-end gap-2 mt-1">
+                                                <div className="flex justify-end gap-2">
                                                     <button onClick={cancelEditing} className="text-xs text-red-500 font-bold px-2">Cancelar</button>
-                                                    <button onClick={saveEdit} className="bg-green-500 text-white p-1 rounded-full"><CheckCircle size={14}/></button>
+                                                    <button onClick={saveEdit} className="bg-green-500 text-white p-1.5 rounded-full shadow-md"><CheckCircle size={16}/></button>
                                                 </div>
                                             </div>
                                         ) : (
                                             <div className="flex flex-col">
                                                 {msg.fileUrl && (
-                                                    <div className="mb-2 mt-1">
-                                                        {msg.fileType === 'audio' ? (
-                                                            <div className="min-w-[200px]"><MiniAudioPlayer src={msg.fileUrl} isMe={isMe} avatarUrl={isMe ? user.photoURL : 'https://ui-avatars.com/api/?name=Suporte&background=00a884&color=fff'} /></div>
+                                                    <div className="mb-1">
+                                                        {(msg.fileType === 'audio' || (msg.fileType === 'video' && msg.fileUrl.toLowerCase().includes('voice'))) ? (
+                                                            <div className="p-1 min-w-[260px] md:min-w-[300px]">
+                                                                <MiniAudioPlayer 
+                                                                    src={msg.fileUrl} 
+                                                                    isMe={isMe} 
+                                                                    avatarUrl={isMe ? user.photoURL : "https://cdn-icons-png.flaticon.com/512/681/681494.png"} 
+                                                                />
+                                                            </div>
                                                         ) : msg.fileType === 'image' ? (
-                                                            <a href={msg.fileUrl} target="_blank" rel="noopener noreferrer">
-                                                                <img src={msg.fileUrl} className="w-full h-auto max-h-64 object-cover rounded-lg" alt="Imagem"/>
-                                                            </a>
-                                                        ) : (
-                                                            <a href={msg.fileUrl} target="_blank" rel="noopener noreferrer" className={`flex items-center gap-3 p-3 rounded-lg ${isMe ? 'bg-black/10' : 'bg-slate-100 dark:bg-black/20'}`}>
-                                                                <div className="bg-white/50 dark:bg-white/10 p-2 rounded-full"><FileText size={20} /></div>
-                                                                <div className="overflow-hidden">
-                                                                    <p className="text-xs font-bold truncate">{msg.fileName || 'Documento'}</p>
-                                                                    <p className="text-[10px] opacity-70 uppercase mt-0.5">{msg.fileType}</p>
+                                                            <div className="p-0.5">
+                                                                <img src={msg.fileUrl} className="rounded-xl max-w-full h-auto max-h-[450px] object-cover cursor-pointer border border-black/5 shadow-sm" onClick={(e) => { e.stopPropagation(); setSelectedMedia({url: msg.fileUrl, type: 'image'}); }} alt="Imagem"/>
+                                                            </div>
+                                                        ) : msg.fileType === 'video' ? (
+                                                            <div className="p-0.5 relative cursor-pointer group" onClick={(e) => { e.stopPropagation(); setSelectedMedia({url: msg.fileUrl, type: 'video'}); }}>
+                                                                <video src={msg.fileUrl} className="rounded-xl max-w-full h-auto max-h-[450px] object-cover bg-black border border-black/5" />
+                                                                <div className="absolute inset-0 flex items-center justify-center bg-black/20 rounded-xl group-hover:bg-black/40 transition-all">
+                                                                    <div className="bg-white/20 backdrop-blur-md p-4 rounded-full"><Play size={32} className="text-white fill-white" /></div>
                                                                 </div>
-                                                            </a>
+                                                            </div>
+                                                        ) : (
+                                                            /* CARTÃO DE DOCUMENTO WHATSAPP CLONE */
+                                                            <div onClick={(e) => { e.stopPropagation(); handleForceDownload(msg.fileUrl, msg.fileName); }} className={`flex items-center gap-4 p-2.5 rounded-xl cursor-pointer transition-all border border-black/5 ${isMe ? 'bg-[#cce8c8] dark:bg-[#004d40] hover:bg-[#c0e0bc]' : 'bg-[#f0f2f5] dark:bg-[#111b21] hover:bg-[#e6e8eb]'}`}>
+                                                                <div className="bg-[#027eb5] text-white p-3 rounded-xl shadow-md shrink-0 flex items-center justify-center">
+                                                                    <FileText size={24} />
+                                                                </div>
+                                                                <div className="flex-1 min-w-0 pr-4">
+                                                                    <p className="text-[13px] font-bold truncate leading-tight text-slate-800 dark:text-slate-100">{msg.fileName || 'Documento'}</p>
+                                                                    <p className="text-[10px] opacity-60 uppercase font-black tracking-tighter mt-0.5 text-slate-600 dark:text-slate-400">PDF • Toque para baixar</p>
+                                                                </div>
+                                                                <div className="text-slate-400 dark:text-slate-500 pr-2"><Download size={18}/></div>
+                                                            </div>
                                                         )}
                                                     </div>
                                                 )}
-                                                {msg.text && <p className="whitespace-pre-wrap leading-relaxed text-[15px]">{msg.text}</p>}
+                                                {msg.text && (
+                                                    <div className={`px-2.5 py-1.5 ${msg.fileUrl ? 'mt-1' : ''}`}>
+                                                        <p className={`whitespace-pre-wrap leading-relaxed break-words text-[14.5px] ${msg.text.includes('🚫') ? 'italic opacity-60' : ''}`}>
+                                                            {msg.text}
+                                                        </p>
+                                                    </div>
+                                                )}
                                             </div>
                                         )}
                                     </div>
 
-                                    {/* Metadados e Vzinhos */}
+                                    {/* Metadados */}
                                     <div className="flex items-center justify-end gap-1 mt-1 opacity-70 select-none pr-1">
                                         {msg.edited && <span className="text-[9px] italic">editado</span>}
                                         <span className="text-[10px]">
@@ -4774,6 +5082,15 @@ const NotificationBell = ({ db, user }) => {
                                             </span>
                                         )}
                                     </div>
+
+                                    {/* Mostrar Reações de Emojis */}
+                                    {hasReactions && (
+                                        <div className={`absolute -bottom-3.5 ${isMe ? 'right-4' : 'left-4'} bg-white dark:bg-[#111b21] rounded-full px-1.5 py-0.5 shadow-md text-xs border border-slate-200 dark:border-slate-700 flex gap-1 z-20`}>
+                                            {Object.values(msg.reactions).map((emoji, idx) => (
+                                                <span key={idx} className="drop-shadow-sm">{emoji}</span>
+                                            ))}
+                                        </div>
+                                    )}
                                 </div>
                             </div>
                         );
@@ -4781,66 +5098,69 @@ const NotificationBell = ({ db, user }) => {
                     <div ref={messagesEndRef} />
                 </div>
                 
-                {/* FOOTER DE INPUT */}
-                <div className="bg-[#f0f2f5] dark:bg-[#202c33] px-3 py-3 flex items-end gap-2 rounded-b-2xl shadow-sm z-20 shrink-0">
+                {/* FOOTER DE INPUT COM BOTÕES LADO A LADO - WHATSAPP STYLE */}
+                <div className="bg-[#f0f2f5] dark:bg-[#202c33] px-3 md:px-6 py-3 flex items-center gap-2 shrink-0 z-20 border-t border-slate-200 dark:border-white/5">
                     {isLoadingMic ? (
-                        <div className="flex-1 flex items-center justify-center gap-2 text-slate-500 animate-pulse text-sm py-2"><Mic size={18} /> <span>Iniciando gravação...</span></div>
+                        <div className="flex-1 flex items-center justify-center gap-2 text-slate-500 animate-pulse text-sm py-2"><Mic size={18} /> <span>Acedendo ao microfone...</span></div>
                     ) : audioPreview ? (
-                        <div className="flex items-center gap-3 w-full bg-white dark:bg-[#2a3942] p-2 rounded-2xl animate-fade-in">
-                            <button onClick={cancelAudio} className="p-2 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-full transition-colors"><Trash2 size={20} /></button>
-                            <div className="flex-1"><MiniAudioPlayer src={audioPreview} isMe={true} avatarUrl={user?.photoURL} /></div>
-                            <button onClick={sendAudio} disabled={isSending} className="p-3 bg-[#00a884] text-white rounded-full shadow-md transition-transform hover:scale-105 active:scale-95">{isSending ? '...' : <Send size={18} className="ml-0.5"/>}</button>
+                        <div className="flex-1 flex items-center gap-3 bg-white dark:bg-[#2a3942] p-2 rounded-2xl animate-fade-in">
+                            <button onClick={cancelAudio} className="p-2.5 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/10 rounded-full transition-colors"><Trash2 size={22} /></button>
+                            <div className="flex-1 px-2 border-l border-slate-200 dark:border-slate-700">
+                                <MiniAudioPlayer src={audioPreview} isMe={true} avatarUrl={user.photoURL} />
+                            </div>
+                            <button onClick={sendAudio} disabled={isSending} className="w-12 h-12 bg-[#00a884] text-white rounded-full shadow-lg flex items-center justify-center transition-all hover:scale-105 active:scale-95">
+                                {isSending ? <div className="w-5 h-5 border-2 border-white/50 border-t-white rounded-full animate-spin"></div> : <Send size={20} className="ml-1" />}
+                            </button>
+                        </div>
+                    ) : isRecording ? (
+                        <div className="flex-1 bg-white dark:bg-[#2a3942] rounded-full flex items-center justify-between p-1.5 shadow-sm animate-fade-in pl-4 pr-1 border border-red-200 dark:border-red-900/30">
+                            <div className="flex items-center gap-3">
+                                <Mic size={20} className="text-red-500 animate-pulse" />
+                                <span className="text-base font-mono font-bold text-slate-800 dark:text-white w-12">{formatDuration(recordingTime)}</span>
+                                <div className="flex items-center gap-1 ml-2">
+                                    <div className="w-1 h-4 bg-red-500 rounded-full animate-sound-wave"></div>
+                                    <div className="w-1 h-6 bg-red-500 rounded-full animate-sound-wave" style={{animationDelay:'0.2s'}}></div>
+                                    <div className="w-1 h-3 bg-red-500 rounded-full animate-sound-wave" style={{animationDelay:'0.4s'}}></div>
+                                </div>
+                            </div>
+                            <button onClick={stopRecording} className="w-11 h-11 bg-red-500 text-white rounded-full flex items-center justify-center hover:bg-red-600 transition-colors shadow-md group">
+                                <Square size={16} fill="currentColor" className="group-hover:scale-110 transition-transform" />
+                            </button>
                         </div>
                     ) : (
                         <>
-                            {!isRecording ? (
-                                <>
-                                    <div className="relative shrink-0 flex gap-1">
-                                        <button onClick={() => setShowEmojiPicker(!showEmojiPicker)} className="p-2 text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 rounded-full"><Smile size={24}/></button>
-                                        <button onClick={() => { setShowAttachments(!showAttachments); setShowEmojiPicker(false); }} className="p-2 text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 rounded-full"><Paperclip size={22} className="-rotate-45"/></button>
-                                        
-                                        {/* Menus Flutuantes de Anexo */}
-                                        {showAttachments && <div className="absolute bottom-full left-0 mb-3 bg-white dark:bg-[#233138] p-2 rounded-xl shadow-xl flex flex-col gap-2 w-40 animate-fade-in-up z-50">
-                                            <label className="cursor-pointer flex items-center gap-3 p-3 hover:bg-slate-100 dark:hover:bg-white/5 rounded-lg text-sm text-slate-700 dark:text-slate-200"><div className="bg-purple-100 text-purple-600 p-2 rounded-full"><Camera size={18}/></div> Galeria <input type="file" className="hidden" accept="image/*,video/*" onChange={(e) => handleFileUpload(e.target.files[0])} /></label>
-                                            <label className="cursor-pointer flex items-center gap-3 p-3 hover:bg-slate-100 dark:hover:bg-white/5 rounded-lg text-sm text-slate-700 dark:text-slate-200"><div className="bg-blue-100 text-blue-600 p-2 rounded-full"><FileText size={18}/></div> Documento <input type="file" className="hidden" accept=".pdf,.doc,.docx" onChange={(e) => handleFileUpload(e.target.files[0])} /></label>
-                                        </div>}
-                                        
-                                        {showEmojiPicker && <div className="absolute bottom-full left-0 mb-3 bg-white dark:bg-[#233138] p-3 rounded-xl shadow-xl grid grid-cols-4 gap-2 w-64 animate-fade-in-up z-50">
-                                            {quickEmojis.map(e => <button key={e} onClick={() => { addEmoji(e); setShowEmojiPicker(false); }} className="text-2xl hover:bg-slate-100 dark:hover:bg-white/5 rounded p-1 transition-colors">{e}</button>)}
-                                        </div>}
-                                    </div>
-
-                                    <form onSubmit={handleSendText} className="flex-1 bg-white dark:bg-[#2a3942] rounded-full flex items-center px-4 shadow-sm min-h-[44px]">
-                                        <input value={input} onChange={(e) => setInput(e.target.value)} className="w-full py-2 bg-transparent border-none focus:ring-0 text-sm dark:text-white placeholder-slate-400 outline-none" placeholder="Mensagem" />
-                                    </form>
-
-                                    <div className="shrink-0">
-                                        {input.trim() ? (
-                                            <button onClick={handleSendText} disabled={isSending} className="w-11 h-11 bg-[#00a884] text-white rounded-full shadow-md flex items-center justify-center transition-transform hover:scale-105 active:scale-95 disabled:opacity-50"><Send size={20} className="ml-1" /></button>
-                                        ) : (
-                                            <button onClick={startRecording} className="w-11 h-11 bg-[#00a884] text-white rounded-full shadow-md flex items-center justify-center transition-transform hover:scale-105 active:scale-95"><Mic size={22} /></button>
-                                        )}
-                                    </div>
-                                </>
-                            ) : (
-                                <div className="flex-1 bg-white dark:bg-[#2a3942] rounded-full flex items-center justify-between p-1.5 shadow-sm animate-fade-in pl-4 pr-1">
-                                    <div className="flex items-center gap-3 text-red-500">
-                                        <Mic size={18} className="animate-pulse" />
-                                        <span className="text-sm font-mono text-slate-800 dark:text-white w-12">{formatDuration(recordingTime)}</span>
-                                        <div className="text-xs text-slate-400">Gravando...</div>
-                                    </div>
-                                    <button onClick={stopRecording} className="w-10 h-10 bg-red-500 text-white rounded-full flex items-center justify-center hover:bg-red-600 transition-colors shadow-md"><Square size={14} fill="currentColor" /></button>
-                                </div>
-                            )}
+                            <div className="relative shrink-0 flex gap-1">
+                                <button onClick={() => setShowEmojiPicker(!showEmojiPicker)} className="p-2 text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 rounded-full transition-colors"><Smile size={26}/></button>
+                                <button onClick={() => setShowAttachments(!showAttachments)} className="p-2 text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 rounded-full transition-colors"><Paperclip size={24} className="-rotate-45"/></button>
+                                {showAttachments && <div className="absolute bottom-full left-0 mb-4 bg-white dark:bg-[#233138] p-2 rounded-2xl shadow-2xl flex flex-col gap-2 w-48 animate-fade-in-up z-50 border border-slate-200 dark:border-slate-700">
+                                    <label className="cursor-pointer flex items-center gap-3 p-3 hover:bg-slate-100 dark:hover:bg-[#111b21] rounded-xl text-sm font-medium text-slate-700 dark:text-slate-200"><div className="bg-purple-100 text-purple-600 p-2.5 rounded-full"><Camera size={18}/></div> Galeria <input type="file" className="hidden" accept="image/*,video/*" onChange={(e) => handleFileUpload(e.target.files[0])} /></label>
+                                    <label className="cursor-pointer flex items-center gap-3 p-3 hover:bg-slate-100 dark:hover:bg-[#111b21] rounded-xl text-sm font-medium text-slate-700 dark:text-slate-200"><div className="bg-blue-100 text-blue-600 p-2.5 rounded-full"><FileText size={18}/></div> Documento <input type="file" className="hidden" accept=".pdf" onChange={(e) => handleFileUpload(e.target.files[0])} /></label>
+                                </div>}
+                            </div>
+                            <form onSubmit={handleSendText} className="flex-1 bg-white dark:bg-[#2a3942] rounded-xl flex items-center px-4 shadow-sm min-h-[48px]">
+                                <input value={input} onChange={(e) => setInput(e.target.value)} className="w-full py-3 bg-transparent border-none focus:ring-0 text-[15px] dark:text-white placeholder-slate-400 outline-none" placeholder="Escreva uma mensagem" disabled={isSending} />
+                            </form>
+                            <div className="flex gap-1">
+                                {input.trim() ? (
+                                    <button onClick={handleSendText} className="w-12 h-12 bg-[#00a884] text-white rounded-full shadow-md flex items-center justify-center transition-all hover:scale-105 active:scale-95">
+                                        <Send size={20} className="ml-1" />
+                                    </button>
+                                ) : (
+                                    <button onClick={startRecording} className="w-12 h-12 bg-[#00a884] text-white rounded-full shadow-md flex items-center justify-center transition-all hover:scale-105 active:scale-95">
+                                        <Mic size={22} />
+                                    </button>
+                                )}
+                            </div>
                         </>
                     )}
                 </div>
             </div>
-        );
-    };
-    // =================================================================================
-    // FIM DO COMPONENTE: ABA DE SUPORTE
-    // =================================================================================
+        </div>
+    );
+};
+// =================================================================================
+// FIM DO COMPONENTE: ABA DE SUPORTE
+// =================================================================================
 
     
 
@@ -5890,22 +6210,26 @@ const HomeSection = ({ user, courses, purchasedIds, userProgress, db, setView, o
         try {
             const backendUrl = "https://meu-backend-ia.vercel.app";
             const baseDeConhecimento = window.AemIaSystemPrompt || "";
+            const enrolledCourses = myActiveCourses.map(c => c.title).join(', ');
             
-            // SUPER PROMPT DE DISTINÇÃO
-            const context = `Você é a IA assistente da plataforma. O aluno está na tela Home.
+            // SUPER PROMPT DE MENTORIA HUMANA (SEM CONVERSA DE JSON)
+            const context = `Você é o Mentor Pessoal do aluno ${user.displayName}. Seu tom deve ser motivador, inteligente e humano.
+            O aluno está atualmente a estudar estes cursos: [${enrolledCourses}].
+            
             ${baseDeConhecimento}
-            
-            REGRAS DE OURO PARA AÇÕES: 
-            1. SE FOR SAUDAÇÃO OU BATE-PAPO (ex: "Oi", "Tudo bem?"): Responda normalmente SEM JSON.
-            2. SE FOR ORDEM (ex: "Me leve", "Faça resumo", "Mude meu nome", "Abra o curso"): Responda e INCLUA OBRIGATORIAMENTE um bloco JSON no final.
-            
-            AÇÕES JSON (Siga exatamente estes formatos):
-            - Navegar: {"action": "navigate", "target": "ID_DA_TELA"}
-              (Use APENAS um destes IDs: home = Início, catalog = Portais, my_courses = Meus Cursos, loja = Loja VIP, favorites = Favoritos, certificates = Conquistas, community = Comunidade, support = Suporte, profile = Perfil, wallet = Carteira/Pontos, informacoes = Sobre Nós/Políticas)
+
+            DIRETRIZES DE MENTORIA:
+            1. CONHECIMENTO DOS CURSOS: Se o aluno tiver dúvidas sobre os cursos que ele já faz (${enrolledCourses}), responda como um professor especialista neles.
+            2. EXPLORAÇÃO: Se ele estiver entediado ou quiser algo novo, recomende ele visitar o 'Catálogo de Portais' ou a 'Loja VIP' para ver outros produtos.
+            3. SEM JARGÕES: NUNCA mencione que você está a usar JSON, códigos ou comandos. Fale apenas o texto humano.
+            4. AÇÕES INVISÍVEIS: Se o aluno pedir para fazer algo (ex: "quero ver meus certificados", "abre o curso de marketing"), responda de forma entusiasmada e coloque o JSON de ação no final. A interface vai esconder o JSON automaticamente.
+
+            AÇÕES PERMITIDAS (Apenas se o aluno pedir uma ação):
+            - Navegar: {"action": "navigate", "target": "ID_DA_TELA"} (IDs: home, catalog, my_courses, loja, favorites, certificates, community, support, profile, wallet, informacoes)
             - Abrir Curso: {"action": "open_course", "courseName": "NOME"}
-            - Editar Perfil: {"action": "edit_profile", "field": "name|bio|city", "value": "NOVO VALOR"}
+            - Editar Perfil: {"action": "edit_profile", "field": "name|bio|city", "value": "VALOR"}
             - Postar Comunidade: {"action": "post_community", "text": "MENSAGEM"}
-            - Fazer Anotação Resumo: {"action": "take_notes", "courseName": "CURSO", "notes": "Resumo detalhado..."}`;
+            - Anotação Inteligente: {"action": "take_notes", "courseName": "NOME", "notes": "Resumo em HTML"}`;
 
             const response = await fetch(`${backendUrl}/api/chat`, {
                 method: "POST", headers: { "Content-Type": "application/json" },
@@ -7158,6 +7482,21 @@ const CommunityTab = ({ user, showNotification }) => {
         if (activeCommentId === postId) { setActiveCommentId(null); } else { setActiveCommentId(postId); setCommentText(''); }
     };
 
+    const handleReplyToComment = (userName, postId) => {
+        if (activeCommentId !== postId) setActiveCommentId(postId);
+        setCommentText(`@${userName} `);
+        // Pequeno delay para garantir que o input existe caso estivesse fechado
+        setTimeout(() => {
+            const input = document.getElementById(`comment-input-${postId}`);
+            if (input) {
+                input.focus();
+                // Colocar cursor no fim
+                const len = input.value.length;
+                input.setSelectionRange(len, len);
+            }
+        }, 100);
+    };
+
     const handleSendComment = async (postId, currentComments) => {
         if (!commentText.trim()) return;
         setIsCommenting(true);
@@ -7278,8 +7617,9 @@ const CommunityTab = ({ user, showNotification }) => {
         try {
             const uploadResult = await uploadToCustomDrive(file, 'Chat/Alunos/');
             if (uploadResult && uploadResult.url) {
-                let type = file.type.includes('image') ? 'image' : (file.type.includes('video') ? 'video' : 'file');
-                sendChatMessage(type, uploadResult.url, { fileName: file.name });
+                // Usa a detecção inteligente do Uploader
+                const finalType = uploadResult.type || 'file';
+                sendChatMessage(finalType, uploadResult.url, { fileName: uploadResult.name, fileUrl: uploadResult.url });
             }
         } catch (error) {} finally { setIsUploadingChat(false); }
     };
@@ -7306,7 +7646,7 @@ const CommunityTab = ({ user, showNotification }) => {
         const msgType = msg.type || msg.fileType || 'text';
         const msgSource = msg.content || msg.fileUrl || msg.text || '';
 
-        if (msgType === 'audio') return <audio src={msgSource} controls className="h-8 max-w-[200px] mt-1 mb-1" />;
+        if (msgType === 'audio' || (msgType === 'video' && msgSource.toLowerCase().includes('voice'))) return <div className="min-w-[260px]"><MiniAudioPlayer src={msgSource} isMe={isMe} avatarUrl={isMe ? user.photoURL : (selectedChatUser?.photoBase64 || null)} /></div>;
         if (msgType === 'image') return <img src={msgSource} className="rounded-lg max-w-full h-auto max-h-64 object-cover cursor-pointer mb-1 mt-1 border border-black/10" onClick={(e) => { e.stopPropagation(); setChatSelectedMedia({url: msgSource, type: 'image'}); }}/>;
         if (msgType === 'video') return (
             <div className="relative cursor-pointer group mb-1 mt-1" onClick={(e) => { e.stopPropagation(); setChatSelectedMedia({url: msgSource, type: 'video'}); }}>
@@ -7458,16 +7798,30 @@ const CommunityTab = ({ user, showNotification }) => {
                                 return (
                                     <div key={msg.id} className={`flex flex-col max-w-[85%] sm:max-w-[75%] ${isMe ? 'self-end items-end ml-auto' : 'self-start items-start'} relative ${isMenuOpen ? 'z-[999]' : 'z-10'} group`}>
                                         <div className={`p-2 rounded-2xl text-sm shadow-[0_1px_1px_rgba(0,0,0,0.1)] min-w-[120px] relative ${isMe ? 'bg-[#d9fdd3] dark:bg-[#005c4b] text-slate-900 dark:text-white rounded-tr-none' : 'bg-white dark:bg-[#202c33] text-slate-800 dark:text-slate-200 rounded-tl-none'}`}>
-                                            <button onClick={(e) => { e.stopPropagation(); setContextMenuMsgIdChat(contextMenuMsgIdChat === msg.id ? null : msg.id); }} className={`absolute top-1 right-2 p-1 text-slate-400 hover:text-slate-600 dark:text-white/50 dark:hover:text-white transition-opacity z-20 ${contextMenuMsgIdChat === msg.id ? 'opacity-100 bg-black/5 dark:bg-white/5 rounded-full' : 'opacity-0 group-hover:opacity-100'}`}><ChevronDown size={18} /></button>
-                                            
-                                            {isMenuOpen && (
-                                                <div className={`absolute top-8 ${isMe ? 'right-0' : 'left-0'} w-40 bg-white dark:bg-[#233138] rounded-xl shadow-2xl border border-slate-200 dark:border-white/5 py-2 z-[9999] animate-fade-in`}>
-                                                    <button onClick={(e) => { e.stopPropagation(); setChatInput(`> Respondendo:\n${msg.content || 'Arquivo'}\n\n`); setContextMenuMsgIdChat(null); document.getElementById('chatInputFocus')?.focus(); }} className="w-full text-left px-4 py-2.5 hover:bg-slate-100 dark:hover:bg-[#111b21] text-sm flex items-center gap-3 text-slate-700 dark:text-slate-200"><CornerUpLeft size={16}/> Responder</button>
-                                                    {msg.type === 'text' && <button onClick={(e) => { e.stopPropagation(); navigator.clipboard.writeText(msg.content); setContextMenuMsgIdChat(null); }} className="w-full text-left px-4 py-2.5 hover:bg-slate-100 dark:hover:bg-[#111b21] text-sm flex items-center gap-3 text-slate-700 dark:text-slate-200"><Copy size={16}/> Copiar</button>}
-                                                    {isMe && msg.type === 'text' && <button onClick={(e) => { e.stopPropagation(); startEditingChat(msg); setContextMenuMsgIdChat(null); }} className="w-full text-left px-4 py-2.5 hover:bg-slate-100 dark:hover:bg-[#111b21] text-sm flex items-center gap-3 text-slate-700 dark:text-slate-200"><Edit size={16}/> Editar</button>}
-                                                    {isMe && <button onClick={(e) => { e.stopPropagation(); setMsgToDeleteChat(msg); setContextMenuMsgIdChat(null); }} className="w-full text-left px-4 py-2.5 hover:bg-slate-100 dark:hover:bg-[#111b21] text-sm flex items-center gap-3 text-red-500"><Trash2 size={16}/> Apagar</button>}
-                                                </div>
-                                            )}
+                                            {/* Botão de Opções e Menu Flutuante - Chat Comunidade */}
+                                            <div className="absolute top-0 right-0 z-20">
+                                                <button 
+                                                    onClick={(e) => { e.stopPropagation(); setContextMenuMsgIdChat(contextMenuMsgIdChat === msg.id ? null : msg.id); }} 
+                                                    className={`p-1 transition-opacity ${contextMenuMsgIdChat === msg.id ? 'opacity-100 text-slate-600 dark:text-white bg-black/5 dark:bg-white/5 rounded-full' : 'opacity-0 group-hover:opacity-100 text-slate-400 hover:text-slate-600 dark:text-white/50 dark:hover:text-white'}`}
+                                                >
+                                                    <ChevronDown size={18} />
+                                                </button>
+                                                
+                                                {isMenuOpen && (
+                                                    <>
+                                                        {/* Camada invisível para fechar ao clicar fora e proteger o layout */}
+                                                        <div className="fixed inset-0 z-30 cursor-default" onClick={(e) => { e.stopPropagation(); setContextMenuMsgIdChat(null); }}></div>
+                                                        
+                                                        {/* MUDANÇA AQUI: top-8 em vez de bottom-8 */}
+                                                        <div className={`absolute top-8 ${isMe ? 'right-2' : 'left-2'} w-48 bg-white dark:bg-[#233138] rounded-xl shadow-2xl border border-slate-200 dark:border-slate-700 z-[9999] py-2 flex flex-col overflow-hidden animate-fade-in`}>
+                                                            <button onClick={(e) => { e.stopPropagation(); setChatInput(`> Respondendo:\n${msg.content || 'Arquivo'}\n\n`); setContextMenuMsgIdChat(null); document.getElementById('chatInputFocus')?.focus(); }} className="w-full text-left px-5 py-2.5 text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-[#111b21] transition-colors flex items-center gap-3 font-medium"><CornerUpLeft size={16} className="opacity-60"/> Responder</button>
+                                                            {msg.type === 'text' && <button onClick={(e) => { e.stopPropagation(); navigator.clipboard.writeText(msg.content); setContextMenuMsgIdChat(null); }} className="w-full text-left px-5 py-2.5 text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-[#111b21] transition-colors flex items-center gap-3 font-medium"><Copy size={16} className="opacity-60"/> Copiar</button>}
+                                                            {isMe && msg.type === 'text' && <button onClick={(e) => { e.stopPropagation(); startEditingChat(msg); setContextMenuMsgIdChat(null); }} className="w-full text-left px-5 py-2.5 text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-[#111b21] transition-colors flex items-center gap-3 font-medium"><Edit size={16} className="opacity-60"/> Editar</button>}
+                                                            {isMe && <button onClick={(e) => { e.stopPropagation(); setMsgToDeleteChat(msg); setContextMenuMsgIdChat(null); }} className="w-full text-left px-5 py-2.5 text-sm hover:bg-red-50 dark:hover:bg-red-900/20 text-red-600 transition-colors flex items-center gap-3 font-medium"><Trash2 size={16} className="opacity-60"/> Apagar</button>}
+                                                        </div>
+                                                    </>
+                                                )}
+                                            </div>
 
                                             <div className="pr-6 pl-1 pt-1 pb-0">
                                                 {isEditingThis ? (
@@ -7498,45 +7852,55 @@ const CommunityTab = ({ user, showNotification }) => {
                             {isLoadingMicChat ? (
                                 <div className="flex-1 flex items-center justify-center gap-2 text-slate-500 animate-pulse text-sm py-2"><Mic size={18} /> <span>Iniciando gravação...</span></div>
                             ) : audioPreviewChat ? (
-                                <div className="flex items-center gap-3 w-full bg-white dark:bg-[#2a3942] p-2 rounded-2xl animate-fade-in">
-                                    <button onClick={cancelAudioChat} className="p-2 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-full transition-colors"><Trash2 size={20} /></button>
-                                    <audio src={audioPreviewChat} controls className="h-8 w-full" />
-                                    <button onClick={sendAudioChat} disabled={isUploadingChat} className="p-3 bg-[#00a884] text-white rounded-full shadow-md transition-transform hover:scale-105 active:scale-95">{isUploadingChat ? '...' : <Send size={18} className="ml-0.5"/>}</button>
+                                <div className="flex items-center gap-2 w-full bg-white dark:bg-[#2a3942] p-2 rounded-2xl animate-fade-in">
+                                    <button onClick={cancelAudioChat} className="p-2.5 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-full transition-colors shrink-0" title="Apagar áudio"><Trash2 size={22} /></button>
+                                    <div className="flex-1 overflow-hidden">
+                                        <MiniAudioPlayer src={audioPreviewChat} isMe={true} />
+                                    </div>
+                                    <button onClick={sendAudioChat} disabled={isUploadingChat} className="w-12 h-12 shrink-0 bg-[#00a884] text-white rounded-full shadow-md transition-transform hover:scale-105 active:scale-95 flex items-center justify-center">
+                                        {isUploadingChat ? <div className="w-5 h-5 border-2 border-white/50 border-t-white rounded-full animate-spin"></div> : <Send size={20} className="ml-1"/>}
+                                    </button>
                                 </div>
                             ) : (
                                 <>
                                     {!isRecordingChat ? (
                                         <>
-                                            <div className="relative shrink-0 flex gap-1">
-                                                <button onClick={(e) => { e.stopPropagation(); setShowEmojiPickerChat(!showEmojiPickerChat); setShowAttachmentsChat(false); }} className="p-2 text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 rounded-full"><Smile size={24}/></button>
-                                                <button onClick={(e) => { e.stopPropagation(); setShowAttachmentsChat(!showAttachmentsChat); setShowEmojiPickerChat(false); }} className="p-2 text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 rounded-full"><Paperclip size={22} className="-rotate-45"/></button>
-                                                {showAttachmentsChat && <div className="absolute bottom-full left-0 mb-3 bg-white dark:bg-[#233138] p-2 rounded-xl shadow-xl flex flex-col gap-2 w-40 animate-fade-in-up z-50">
-                                                    <label className="cursor-pointer flex items-center gap-3 p-3 hover:bg-slate-100 dark:hover:bg-[#111b21] rounded-lg text-sm text-slate-700 dark:text-slate-200"><div className="bg-purple-100 text-purple-600 p-2 rounded-full"><Camera size={18}/></div> Galeria <input type="file" className="hidden" accept="image/*,video/*" onChange={handleChatFileUpload} disabled={isUploadingChat} /></label>
-                                                    <label className="cursor-pointer flex items-center gap-3 p-3 hover:bg-slate-100 dark:hover:bg-[#111b21] rounded-lg text-sm text-slate-700 dark:text-slate-200"><div className="bg-blue-100 text-blue-600 p-2 rounded-full"><FileText size={18}/></div> Documento <input type="file" className="hidden" accept=".pdf,.doc,.docx" onChange={handleChatFileUpload} disabled={isUploadingChat} /></label>
+                                            <div className="relative shrink-0 flex gap-1 items-center">
+                                                <button onClick={(e) => { e.stopPropagation(); setShowEmojiPickerChat(!showEmojiPickerChat); setShowAttachmentsChat(false); }} className="p-2 text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 rounded-full"><Smile size={26}/></button>
+                                                <button onClick={(e) => { e.stopPropagation(); setShowAttachmentsChat(!showAttachmentsChat); setShowEmojiPickerChat(false); }} className="p-2 text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 rounded-full"><Paperclip size={24} className="-rotate-45"/></button>
+                                                {showAttachmentsChat && <div className="absolute bottom-full left-0 mb-4 bg-white dark:bg-[#233138] p-2 rounded-2xl shadow-2xl flex flex-col gap-2 w-48 animate-fade-in-up z-50 border border-slate-200 dark:border-slate-700">
+                                                    <label className="cursor-pointer flex items-center gap-3 p-3 hover:bg-slate-100 dark:hover:bg-[#111b21] rounded-xl text-sm font-medium text-slate-700 dark:text-slate-200"><div className="bg-purple-100 text-purple-600 p-2.5 rounded-full"><Camera size={18}/></div> Galeria <input type="file" className="hidden" accept="image/*,video/*" onChange={handleChatFileUpload} disabled={isUploadingChat} /></label>
+                                                    <label className="cursor-pointer flex items-center gap-3 p-3 hover:bg-slate-100 dark:hover:bg-[#111b21] rounded-xl text-sm font-medium text-slate-700 dark:text-slate-200"><div className="bg-blue-100 text-blue-600 p-2.5 rounded-full"><FileText size={18}/></div> Documento <input type="file" className="hidden" accept=".pdf,.doc,.docx" onChange={handleChatFileUpload} disabled={isUploadingChat} /></label>
                                                 </div>}
-                                                {showEmojiPickerChat && <div className="absolute bottom-full left-0 mb-3 bg-white dark:bg-[#233138] p-3 rounded-xl shadow-xl grid grid-cols-4 gap-2 w-64 animate-fade-in-up z-50">
+                                                {showEmojiPickerChat && <div className="absolute bottom-full left-0 mb-4 bg-white dark:bg-[#233138] p-3 rounded-2xl shadow-2xl grid grid-cols-4 gap-2 w-64 animate-fade-in-up z-50 border border-slate-200 dark:border-slate-700">
                                                     {quickEmojis.map(e => <button key={e} onClick={(ev) => { ev.stopPropagation(); setChatInput(prev => prev + e); setShowEmojiPickerChat(false); }} className="text-2xl hover:bg-slate-100 dark:hover:bg-[#111b21] rounded p-1 transition-colors">{e}</button>)}
                                                 </div>}
                                             </div>
-                                            <form onSubmit={(e) => { e.preventDefault(); sendChatMessage('text'); }} className="flex-1 bg-white dark:bg-[#2a3942] rounded-full flex items-center px-4 shadow-sm min-h-[44px]">
-                                                <input id="chatInputFocus" value={chatInput} onChange={(e) => setChatInput(e.target.value)} className="w-full py-2 bg-transparent border-none focus:ring-0 text-sm dark:text-white placeholder-slate-400 outline-none" placeholder={isUploadingChat ? "Enviando arquivo..." : "Mensagem"} disabled={isUploadingChat} />
+                                            <form onSubmit={(e) => { e.preventDefault(); sendChatMessage('text'); }} className="flex-1 bg-white dark:bg-[#2a3942] rounded-xl flex items-center px-4 shadow-sm min-h-[48px]">
+                                                <input id="chatInputFocus" value={chatInput} onChange={(e) => setChatInput(e.target.value)} className="w-full py-2 bg-transparent border-none focus:ring-0 text-[15px] dark:text-white placeholder-slate-400 outline-none" placeholder={isUploadingChat ? "A enviar..." : "Mensagem"} disabled={isUploadingChat} />
                                             </form>
                                             <div className="shrink-0">
                                                 {chatInput.trim() ? (
-                                                    <button onClick={() => sendChatMessage('text')} disabled={isUploadingChat} className="w-11 h-11 bg-[#00a884] text-white rounded-full shadow-md flex items-center justify-center transition-transform hover:scale-105 active:scale-95 disabled:opacity-50"><Send size={20} className="ml-1" /></button>
+                                                    <button onClick={() => sendChatMessage('text')} disabled={isUploadingChat} className="w-12 h-12 bg-[#00a884] text-white rounded-full shadow-md flex items-center justify-center transition-transform hover:scale-105 active:scale-95 disabled:opacity-50"><Send size={20} className="ml-1" /></button>
                                                 ) : (
-                                                    <button onClick={startRecordingChat} className="w-11 h-11 bg-[#00a884] text-white rounded-full shadow-md flex items-center justify-center transition-transform hover:scale-105 active:scale-95"><Mic size={22} /></button>
+                                                    <button onClick={startRecordingChat} className="w-12 h-12 bg-[#00a884] text-white rounded-full shadow-md flex items-center justify-center transition-transform hover:scale-105 active:scale-95"><Mic size={24} /></button>
                                                 )}
                                             </div>
                                         </>
                                     ) : (
-                                        <div className="flex-1 bg-white dark:bg-[#2a3942] rounded-full flex items-center justify-between p-1.5 shadow-sm animate-fade-in pl-4 pr-1">
+                                        <div className="flex-1 bg-white dark:bg-[#2a3942] rounded-full flex items-center justify-between p-1.5 shadow-sm animate-fade-in pl-4 pr-1 border border-red-200 dark:border-red-900/30">
                                             <div className="flex items-center gap-3 text-red-500">
-                                                <Mic size={18} className="animate-pulse" />
-                                                <span className="text-sm font-mono text-slate-800 dark:text-white w-12">{formatDuration(recordingTimeChat)}</span>
-                                                <div className="text-xs text-slate-400 hidden sm:block">Gravando...</div>
+                                                <Mic size={20} className="animate-pulse" />
+                                                <span className="text-base font-mono font-bold text-slate-800 dark:text-white w-12">{formatDuration(recordingTimeChat)}</span>
+                                                <div className="flex items-center gap-1 ml-2">
+                                                    <div className="w-1 h-4 bg-red-500 rounded-full animate-sound-wave"></div>
+                                                    <div className="w-1 h-6 bg-red-500 rounded-full animate-sound-wave" style={{animationDelay:'0.2s'}}></div>
+                                                    <div className="w-1 h-3 bg-red-500 rounded-full animate-sound-wave" style={{animationDelay:'0.4s'}}></div>
+                                                </div>
                                             </div>
-                                            <button onClick={stopRecordingChat} className="w-10 h-10 bg-red-500 text-white rounded-full flex items-center justify-center hover:bg-red-600 transition-colors shadow-md"><Square size={14} fill="currentColor" /></button>
+                                            <button onClick={stopRecordingChat} className="w-11 h-11 bg-red-500 text-white rounded-full flex items-center justify-center hover:bg-red-600 transition-colors shadow-md group">
+                                                <Square size={16} fill="currentColor" className="group-hover:scale-110 transition-transform" />
+                                            </button>
                                         </div>
                                     )}
                                 </>
@@ -7945,14 +8309,36 @@ const CommunityTab = ({ user, showNotification }) => {
                                                                                             <div className="flex justify-between items-center mb-1"><span className="font-bold text-xs text-white">{cName}</span></div>
                                                                                             <p className="text-slate-300 leading-relaxed text-[13px]">{comment.text}</p>
                                                                                         </div>
-                                                                                        {comment.userId === user.uid && <button onClick={() => setCommentToDelete({ postId: post.id, commentId: comment.id, currentComments: post.comments })} className="text-[10px] font-bold text-red-400 hover:text-red-500 mt-1 ml-2 opacity-0 group-hover/comment:opacity-100 transition-opacity">Excluir</button>}
+                                                                                        <div className="flex items-center gap-4 mt-1 ml-2">
+                                                                                            <button 
+                                                                                                onClick={() => handleReplyToComment(cName, post.id)} 
+                                                                                                className="text-[10px] font-bold text-slate-400 hover:text-white transition-colors uppercase tracking-tight"
+                                                                                            >
+                                                                                                Responder
+                                                                                            </button>
+                                                                                            {comment.userId === user.uid && (
+                                                                                                <button 
+                                                                                                    onClick={() => setCommentToDelete({ postId: post.id, commentId: comment.id, currentComments: post.comments })} 
+                                                                                                    className="text-[10px] font-bold text-red-400 hover:text-red-500 transition-colors uppercase tracking-tight opacity-0 group-hover/comment:opacity-100"
+                                                                                                >
+                                                                                                    Excluir
+                                                                                                </button>
+                                                                                            )}
+                                                                                        </div>
                                                                                     </div>
                                                                                 </div>
                                                                             );
                                                                         })}
                                                                     </div>
                                                                     <div className="flex gap-2 relative">
-                                                                        <input value={commentText} onChange={(e) => setCommentText(e.target.value)} placeholder="Escreva um comentário..." className="w-full bg-black/40 border border-white/10 rounded-full py-3 px-4 pr-12 focus:ring-2 focus:ring-indigo-500 text-sm outline-none text-white placeholder-slate-500" onKeyDown={(e) => e.key === 'Enter' && handleSendComment(post.id, post.comments)} />
+                                                                        <input 
+                                                                            id={`comment-input-${post.id}`}
+                                                                            value={commentText} 
+                                                                            onChange={(e) => setCommentText(e.target.value)} 
+                                                                            placeholder="Escreva um comentário..." 
+                                                                            className="w-full bg-black/40 border border-white/10 rounded-full py-3 px-4 pr-12 focus:ring-2 focus:ring-indigo-500 text-sm outline-none text-white placeholder-slate-500" 
+                                                                            onKeyDown={(e) => e.key === 'Enter' && handleSendComment(post.id, post.comments)} 
+                                                                        />
                                                                         <button onClick={() => handleSendComment(post.id, post.comments)} disabled={!commentText.trim() || isCommenting} className="absolute right-1 top-1 bottom-1 aspect-square bg-indigo-600 hover:bg-indigo-700 text-white rounded-full transition-all disabled:opacity-50 flex items-center justify-center"><Send size={16}/></button>
                                                                     </div>
                                                                 </div>
@@ -8299,7 +8685,7 @@ const PointsWalletSection = ({ user, courses, purchasedIds, userPoints, db, setP
 
                     // 👇 DISPARO DE E-MAIL (RESGATE POR PONTOS) 👇
                     let capaDoCurso = course.cover || course.thumbnailUrl || "https://images.unsplash.com/photo-1616469829941-c7200edec809?q=80&w=600";
-                    fetch("https://script.google.com/macros/s/AKfycbyEiSTm2Xl2ZiOa7swyE06LbDvjcd9d4HBCQsUq8EzBvmYx6vPkga1s4f6TA66rMGI/exec", {
+                    fetch("https://script.google.com/macros/s/AKfycbzyuxuOw0fx5YiAWuE_PaN8JE9VrupAStYQfKk6fFDMiLMn7BARtbLagoF3sPbhg9A/exec", {
                         method: "POST", mode: "no-cors", headers: { "Content-Type": "text/plain;charset=utf-8" },
                         body: JSON.stringify({
                             to: user.email,
@@ -8836,7 +9222,7 @@ const MindMapSection = ({ user, courses, purchasedIds, setView }) => {
                                if (novoStatus === 'pago') {
                                    if(showNotification) showNotification(`🎉 Pagamento aprovado! O curso "${order.courseTitle || 'Adquirido'}" já está liberado.`, "success");
                                    
-                                   fetch("https://script.google.com/macros/s/AKfycbyEiSTm2Xl2ZiOa7swyE06LbDvjcd9d4HBCQsUq8EzBvmYx6vPkga1s4f6TA66rMGI/exec", {
+                                   fetch("https://script.google.com/macros/s/AKfycbzyuxuOw0fx5YiAWuE_PaN8JE9VrupAStYQfKk6fFDMiLMn7BARtbLagoF3sPbhg9A/exec", {
                                        method: "POST", mode: "no-cors", headers: { "Content-Type": "text/plain;charset=utf-8" },
                                        body: JSON.stringify({
                                            to: order.userEmail,
@@ -9224,7 +9610,7 @@ const MindMapSection = ({ user, courses, purchasedIds, setView }) => {
                                     setPurchasedIds(transSnapList.docs.map(d => d.data().courseId));
 
                                    // 👇 DISPARA O E-MAIL BLINDADO CONTRA CORS 👇
-                                    fetch("https://script.google.com/macros/s/AKfycbyEiSTm2Xl2ZiOa7swyE06LbDvjcd9d4HBCQsUq8EzBvmYx6vPkga1s4f6TA66rMGI/exec", {
+                                    fetch("https://script.google.com/macros/s/AKfycbzyuxuOw0fx5YiAWuE_PaN8JE9VrupAStYQfKk6fFDMiLMn7BARtbLagoF3sPbhg9A/exec", {
                                         method: "POST",
                                         mode: "no-cors", 
                                         headers: { 
@@ -9279,7 +9665,7 @@ const MindMapSection = ({ user, courses, purchasedIds, setView }) => {
                                     if(showNotification) showNotification("Sua compra na Loja foi confirmada!", "success");
 
                                     // 👇 DISPARA O E-MAIL BLINDADO CONTRA CORS 👇
-                                    fetch("https://script.google.com/macros/s/AKfycbyEiSTm2Xl2ZiOa7swyE06LbDvjcd9d4HBCQsUq8EzBvmYx6vPkga1s4f6TA66rMGI/exec", {
+                                    fetch("https://script.google.com/macros/s/AKfycbzyuxuOw0fx5YiAWuE_PaN8JE9VrupAStYQfKk6fFDMiLMn7BARtbLagoF3sPbhg9A/exec", {
                                         method: "POST",
                                         mode: "no-cors",
                                         headers: { 
@@ -9392,7 +9778,7 @@ const MindMapSection = ({ user, courses, purchasedIds, setView }) => {
 
             // 👇 DISPARO DE E-MAIL (CURSO GRÁTIS) 👇
             let capaDoCurso = courseToStart.cover || courseToStart.thumbnailUrl || "https://images.unsplash.com/photo-1616469829941-c7200edec809?q=80&w=600";
-            fetch("https://script.google.com/macros/s/AKfycbyEiSTm2Xl2ZiOa7swyE06LbDvjcd9d4HBCQsUq8EzBvmYx6vPkga1s4f6TA66rMGI/exec", {
+            fetch("https://script.google.com/macros/s/AKfycbzyuxuOw0fx5YiAWuE_PaN8JE9VrupAStYQfKk6fFDMiLMn7BARtbLagoF3sPbhg9A/exec", {
                 method: "POST", mode: "no-cors", headers: { "Content-Type": "text/plain;charset=utf-8" },
                 body: JSON.stringify({
                     to: user.email,
@@ -9840,7 +10226,7 @@ const MindMapSection = ({ user, courses, purchasedIds, setView }) => {
                             if(showNotification) showNotification(`🎉 Pagamento aprovado! O curso "${order.courseTitle || 'Adquirido'}" já está liberado.`, "success");
                             
                             // 👇 DISPARO DE E-MAIL (NOVO) 👇
-                            fetch("https://script.google.com/macros/s/AKfycbyEiSTm2Xl2ZiOa7swyE06LbDvjcd9d4HBCQsUq8EzBvmYx6vPkga1s4f6TA66rMGI/exec", {
+                            fetch("https://script.google.com/macros/s/AKfycbzyuxuOw0fx5YiAWuE_PaN8JE9VrupAStYQfKk6fFDMiLMn7BARtbLagoF3sPbhg9A/exec", {
                                 method: "POST", mode: "no-cors", headers: { "Content-Type": "application/json" },
                                 body: JSON.stringify({
                                     to: order.userEmail,
