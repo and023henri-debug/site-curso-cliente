@@ -287,6 +287,71 @@
         if (theme.textDark) root.style.setProperty('--text-dark', theme.textDark);
       };
 
+
+window.applyPwaManifest = function(settings) {
+        if (!settings) return;
+
+        // Pegamos os valores ou definimos um fallback padrão
+        const appName = settings.pwaName || settings.siteName || "Sua Plataforma";
+        const shortName = settings.pwaShortName || appName.substring(0, 12); // PWA precisa de nome curto
+        const themeColor = settings.primaryColor || "#4f46e5";
+        const bgColor = settings.backgroundDark || "#0a0a0a";
+        const iconUrl = settings.siteLogoUrl || settings.logoUrl || "https://api.dicebear.com/7.x/bottts/svg?seed=default";
+
+        // Cria o objeto JSON do manifesto
+        const manifestData = {
+          name: appName,
+          short_name: shortName,
+          start_url: ".",
+          display: "standalone",
+          background_color: bgColor,
+          theme_color: themeColor,
+          icons: [
+            {
+              src: iconUrl,
+              sizes: "192x192",
+              type: "image/png" // Ajuste se quiser suportar SVGs corretamente
+            },
+            {
+              src: iconUrl,
+              sizes: "512x512",
+              type: "image/png"
+            }
+          ]
+        };
+
+        // Converte o JSON para uma string
+        const manifestString = JSON.stringify(manifestData);
+
+        // Transforma a string em um URL no formato "data:"
+        const manifestUrl = 'data:application/manifest+json;charset=utf-8,' + encodeURIComponent(manifestString);
+
+        // Procura se já existe uma tag <link rel="manifest">
+        let manifestLink = document.querySelector('link[rel="manifest"]');
+
+        // Se não existir, cria uma nova e adiciona no <head>
+        if (!manifestLink) {
+          manifestLink = document.createElement('link');
+          manifestLink.rel = 'manifest';
+          document.head.appendChild(manifestLink);
+        }
+
+        // Atualiza a tag com o novo manifesto gerado
+        manifestLink.href = manifestUrl;
+
+        // Atualiza também a tag meta theme-color para combinar com o celular
+        let themeColorMeta = document.querySelector('meta[name="theme-color"]');
+        if(!themeColorMeta){
+             themeColorMeta = document.createElement('meta');
+             themeColorMeta.name = 'theme-color';
+             document.head.appendChild(themeColorMeta);
+        }
+        themeColorMeta.content = themeColor;
+        
+        console.log("Manifesto PWA atualizado dinamicamente.");
+      };
+
+
       // 2. Define o Tema Padrão (Fallback de Segurança)
       const defaultTheme = {
         primaryColor: '#4f46e5',
@@ -10592,6 +10657,16 @@ const MindMapSection = ({ user, courses, purchasedIds, setView }) => {
                   if (docSnap.exists()) {
                       const data = docSnap.data();
                       setGenSettings(data);
+
+
+// Atualiza o tema global
+                    if (window.applyTheme) window.applyTheme(data);
+
+                    // 👇👇👇 ADICIONE ESTA LINHA AQUI 👇👇👇
+                    // Aplica as configurações do PWA (Nome, Ícone, Cores) no manifesto
+                    if (window.applyPwaManifest) window.applyPwaManifest(data);
+                    //
+
 
                       // 👇 MOTOR DE IDENTIDADE DINÂMICA: ATUALIZA O ÍCONE DO APP (PWA) 👇
                       const siteLogo = data.siteLogoUrl || data.logoUrl;
