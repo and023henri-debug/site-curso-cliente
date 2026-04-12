@@ -3033,16 +3033,31 @@ const CustomVideoPlayer = ({ src, onEnded, poster, isCompleted, showNotification
                                                     setTranscriptionProgress(0);
                                                     
                                                     try {
+                                                        const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+                                                        const modelName = isMobile ? 'Xenova/whisper-tiny' : 'Xenova/whisper-base';
+                                                        
                                                         setStatusText('Otimizando: Extraindo áudio de alta fidelidade...');
+                                                        await new Promise(r => setTimeout(r, 100)); // Breather para UI
                                                         
                                                         // PASSO 1: EXTRAIR ÁUDIO A 16KHZ MONO (PADRÃO WHISPER)
                                                         const videoResponse = await fetch(fixUrl(currentLesson.conteudo));
                                                         const videoBlob = await videoResponse.blob();
+                                                        
+                                                        // Trava de segurança para mobile para evitar crash por falta de RAM
+                                                        if (isMobile && videoBlob.size > 80 * 1024 * 1024) {
+                                                            throw new Error("Vídeo muito longo para processar no telemóvel. Por favor, use um computador.");
+                                                        }
+
                                                         const arrayBuffer = await videoBlob.arrayBuffer();
                                                         
                                                         // Usamos um contexto de áudio limpo para evitar artefatos
                                                         const audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
-                                                        const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
+                                                        let audioBuffer;
+                                                        try {
+                                                            audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
+                                                        } catch (e) {
+                                                            throw new Error("O telemóvel ficou sem memória para processar este vídeo.");
+                                                        }
                                                         
                                                         // Garantimos o merge de canais para evitar duplicação de áudio espacial
                                                         let audioData = audioBuffer.getChannelData(0);
@@ -3052,12 +3067,18 @@ const CustomVideoPlayer = ({ src, onEnded, poster, isCompleted, showNotification
                                                                 audioData[i] = (audioData[i] + channel2[i]) / 2;
                                                             }
                                                         }
+                                                        
+                                                        // Fecha o contexto para libertar memória imediatamente
+                                                        audioCtx.close();
                                                         setTranscriptionProgress(20);
+                                                        await new Promise(r => setTimeout(r, 100));
 
-                                                        // PASSO 2: CARREGAR MODELO BASE (ALTA FIDELIDADE)
+                                                        // PASSO 2: CARREGAR MODELO (OTIMIZADO PARA DISPOSITIVO)
                                                         if (!transcriberRef.current) {
-                                                            setStatusText('Calibrando Motor de Voz Premium...');
-                                                            transcriberRef.current = await pipeline('automatic-speech-recognition', 'Xenova/whisper-base', {
+                                                            setStatusText(isMobile ? 'Iniciando Motor de Voz Ultra-Leve...' : 'Calibrando Motor de Voz Premium...');
+                                                            await new Promise(r => setTimeout(r, 50));
+
+                                                            transcriberRef.current = await pipeline('automatic-speech-recognition', modelName, {
                                                                 progress_callback: (data) => {
                                                                     if (data.status === 'progress') {
                                                                         setTranscriptionProgress(20 + (data.progress * 0.5));
@@ -9246,7 +9267,8 @@ const MindMapSection = ({ user, courses, purchasedIds, setView }) => {
                        }
 
                        if (!mpStatus) {
-                           const searchUrl = `https://api.mercadopago.com/v1/payments/search?sort=date_created&criteria=desc&external_reference=${order.id}`;
+                           const am = String.fromCharCode(38);
+                           const searchUrl = `https://api.mercadopago.com/v1/payments/search?sort=date_created${am}criteria=desc${am}external_reference=${order.id}`;
                            const resSearch = await fetch(searchUrl, { 
                                headers: { 'Authorization': `Bearer ${mpToken}` } 
                            });
