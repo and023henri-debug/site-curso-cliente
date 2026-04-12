@@ -2121,8 +2121,9 @@ const CustomVideoPlayer = ({ src, onEnded, poster, isCompleted, showNotification
             if (showNotification) showNotification("Iniciando o download...", "info");
             
             try {
+                const am = String.fromCharCode(38);
                 // TRUQUE MÁGICO: Adiciona 't=' com a hora atual para ignorar o cache corrompido do navegador
-                const fetchUrl = url + (url.includes('?') ? '&amp;' : '?') + 'force_download=1&amp;t=' + Date.now();
+                const fetchUrl = url + (url.includes('?') ? am : '?') + 'force_download=1' + am + 't=' + Date.now();
                 
                 const response = await fetch(fetchUrl, {
                     method: 'GET',
@@ -2525,6 +2526,37 @@ const CustomVideoPlayer = ({ src, onEnded, poster, isCompleted, showNotification
                 if (editorRef.current) editorRef.current.contentEditable = "true";
                 setIsAiCorrecting(false); 
             }
+        };
+
+        // ENVIAR RESUMO IA PARA AS ANOTAÇÕES
+        const handleSendSummaryToNotes = () => {
+            if (!aiSummary) return;
+            
+            // Formatação do bloco de resumo para o diário (estilo folha de papel)
+            const summaryHtml = `
+                <div style="margin: 20px 0; border: 2px solid #6366f1; border-radius: 12px; overflow: hidden; background: #fdfbf7; box-shadow: 0 4px 12px rgba(0,0,0,0.1);">
+                    <div style="background: #6366f1; color: white; padding: 8px 15px; font-size: 10px; font-weight: 900; text-transform: uppercase; letter-spacing: 1px; display: flex; align-items: center; gap: 8px;">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z"/></svg>
+                        Resumo Gerado por IA • ${new Date().toLocaleDateString('pt-BR')}
+                    </div>
+                    <div style="padding: 15px; font-size: 14px; line-height: 1.6; color: #1f2937; font-weight: 500;">
+                        ${aiSummary.replace(/\n/g, '<br>')}
+                    </div>
+                </div>
+                <p><em>Continue suas anotações aqui...</em></p>
+                <br>
+            `;
+            
+            const updatedNote = (note && note !== '<div><br></div>' ? note : '') + summaryHtml;
+            setNote(updatedNote);
+            
+            // Atualiza o editor visual se ele estiver aberto
+            if (editorRef.current) {
+                editorRef.current.innerHTML = updatedNote;
+            }
+            
+            setActiveTab('anotacoes');
+            if (showNotification) showNotification("Resumo enviado com sucesso para o seu Diário!", "success");
         };
 
         // VIRAR PÁGINA
@@ -3103,16 +3135,19 @@ const CustomVideoPlayer = ({ src, onEnded, poster, isCompleted, showNotification
                                                         let rawText = output.text.replace(/\s+/g, ' ').trim();
                                                         if (!rawText || rawText.length < 3) throw new Error("Não detectamos fala legível.");
 
-                                                        // PASSO 4: POLIMENTO CIRÚRGICO POR IA (CORREÇÃO DE NOMES COMO STEPHANI ROLIN)
+                                                        // PASSO 4: POLIMENTO CIRÚRGICO POR IA (INJEÇÃO DE CONTEXTO BIOMÉTRICO)
                                                         setStatusText('Refinando nomes e gramática...');
                                                         setTranscriptionProgress(90);
                                                         
-                                                        const prompt = `CORREÇÃO CIRÚRGICA: O texto abaixo é uma transcrição de aula e pode conter erros fonéticos. 
-                                                        Ações: 
-                                                        1. Corrija nomes próprios (Ex: Stephani Rolin, e não Estefani Rolinho).
-                                                        2. Remova gaguejos e repetições.
-                                                        3. Mantenha a pontuação profissional.
-                                                        RETORNE APENAS O TEXTO FINAL:\n\n${rawText}`;
+                                                        const prompt = `PRECISÃO MÁXIMA DE TRANSCRIÇÃO: O texto abaixo é uma transcrição bruta.
+                                                        Contexto do Aluno: ${user.displayName}. 
+                                                        Instruções Imperativas:
+                                                        1. CORRIJA NOMES PRÓPRIOS: Identifique fonemas de nomes brasileiros e corrija para a grafia correta (Ex: se ouvir algo como "Estefani Rolim", corrija para "Stephanie Rolim" obrigatoriamente).
+                                                        2. LIMPEZA TÉCNICA: Remova hesitações (hã, é, né, tipo) e repetições acidentais.
+                                                        3. PONTUAÇÃO: Adicione vírgulas e pontos para tornar a leitura profissional e fluida.
+                                                        4. FIDELIDADE: Mantenha todas as palavras de conteúdo, apenas corrija a grafia e estrutura.
+                                                        
+                                                        RETORNE APENAS O TEXTO FINAL POLIDO:\n\n${rawText}`;
                                                         
                                                         const aiRes = await fetch("https://meu-backend-ia.vercel.app/api/chat", {
                                                             method: "POST", headers: { "Content-Type": "application/json" },
@@ -3213,6 +3248,14 @@ const CustomVideoPlayer = ({ src, onEnded, poster, isCompleted, showNotification
                                                             ) : (
                                                                 /* 👇 NOVAS OPÇÕES DE REFINAMENTO (NÍVEL ACADÊMICO) 👇 */
                                                                 <div className="flex flex-wrap gap-2 animate-fade-in">
+                                                                    {aiSummary && (
+                                                                        <button
+                                                                            onClick={handleSendSummaryToNotes}
+                                                                            className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-[10px] font-black uppercase tracking-widest transition-all flex items-center gap-2 shadow-lg shadow-emerald-600/30 border border-emerald-400/30 mr-2"
+                                                                        >
+                                                                            <StickyNote size={14}/> Gravar no Diário
+                                                                        </button>
+                                                                    )}
                                                                     {[
                                                                         { id: 'short', label: 'Resumo Executivo', icon: <Zap size={14}/>, prompt: 'Gere uma Síntese Executiva de alto nível em 3 parágrafos densos e acadêmicos. Sem introduções informais. Use 🔵 para destacar.' },
                                                                         { id: 'detailed', label: 'Análise Acadêmica', icon: <ListTodo size={14}/>, prompt: 'Produza uma análise detalhada por tópicos (Bullet Points), utilizando terminologia avançada da área. Use 🟢 para separar seções de estudo.' },
