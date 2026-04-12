@@ -365,7 +365,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <script>
-let dP;window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();dP=e;const b=document.createElement('button');b.innerHTML='<svg style="width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:2;margin-right:6px" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg> Instalar App';b.style.cssText='position:fixed;bottom:20px;left:50%;transform:translateX(-50%);z-index:99999;background:#3b82f6;color:#fff;border:none;padding:12px 24px;border-radius:50px;font-family:sans-serif;font-weight:600;font-size:14px;box-shadow:0 4px 20px rgba(59,130,246,0.4);cursor:pointer;display:flex;align-items:center;white-space:nowrap;transition:transform 0.2s;';b.onclick=async()=>{if(!dP)return;dP.prompt();const{outcome}=await dP.userChoice;if(outcome==='accepted')b.remove();dP=null;};document.body.appendChild(b);});
+window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();window.deferredPrompt=e;if(window.AemTriggerInstallBtn)window.AemTriggerInstallBtn();});
 const isIos=(/iphone|ipad|ipod/).test(window.navigator.userAgent.toLowerCase());const isStandalone=()=>('standalone' in window.navigator)&&window.navigator.standalone;if(isIos()&&!isStandalone()){const ib=document.createElement('div');ib.innerHTML='Para instalar como App: toque em <b>Compartilhar</b> e depois <b>Adicionar ao Ecrã Principal</b><button style="position:absolute;right:10px;top:50%;transform:translateY(-50%);background:none;border:none;color:#a1a1aa;font-size:16px;" onclick="this.parentElement.remove()">✕</button>';ib.style.cssText='position:fixed;bottom:0;left:0;width:100%;background:#1c1e2b;color:#fff;padding:15px 30px 15px 15px;font-family:sans-serif;font-size:12px;text-align:center;z-index:99999;border-top:1px solid #2b2d3a;box-shadow:0 -5px 15px rgba(0,0,0,0.2);';setTimeout(()=>document.body.appendChild(ib),2000);}
 </script>
 </head>
@@ -494,20 +494,34 @@ const isIos=(/iphone|ipad|ipod/).test(window.navigator.userAgent.toLowerCase());
                 if (!MP_ACCESS_TOKEN) return;
 
                 try {
-                    // 1. CRIA TRANSAÇÃO NO BANCO COM O VALOR COM DESCONTO
-                    const docRef = await addDoc(collection(db, "transactions"), {
-                        courseId: course.id,
-                        courseTitle: course.title,
-                        userId: user.uid,
-                        userName: user.displayName || 'Aluno',
-                        userEmail: user.email,
-                        valor: finalPrice, // SALVA O PREÇO REAL PAGO
-                        status: 'pendente',
-                        method: 'mercado_pago',
-                        createdAt: serverTimestamp(),
-                        updatedAt: serverTimestamp()
-                    });
+                   // 👇 LÓGICA DE AFILIADOS: Captura o ID da URL ou da Memória do Navegador
+                const params = new URLSearchParams(window.location.search);
+                const currentRef = params.get('ref') || localStorage.getItem('affiliate_ref');
+                
+                // Se veio pelo link agora, salva na memória para não perder se o aluno recarregar a página
+                if (params.get('ref')) {
+                    localStorage.setItem('affiliate_ref', params.get('ref'));
+                }
 
+                // Calcula o valor exato da comissão baseada na porcentagem definida pelo Admin
+                const affiliatePercent = course.affiliatePercent ? Number(course.affiliatePercent) : 0;
+                const affiliateCommission = currentRef ? (finalPrice * (affiliatePercent / 100)) : 0;
+
+                // 1. CRIA TRANSAÇÃO NO BANCO COM O VALOR COM DESCONTO + AFILIADO
+                const docRef = await addDoc(collection(db, "transactions"), {
+                    courseId: course.id,
+                    courseTitle: course.title,
+                    userId: user.uid,
+                    userName: user.displayName || 'Aluno',
+                    userEmail: user.email,
+                    valor: finalPrice, // SALVA O PREÇO REAL PAGO
+                    status: 'pendente',
+                    method: 'mercado_pago',
+                    ref: currentRef || null, // 👈 INJETA O CPF/ID DO AFILIADO AQUI
+                    affiliateCommission: affiliateCommission, // 👈 INJETA O VALOR DA COMISSÃO AQUI
+                    createdAt: serverTimestamp(),
+                    updatedAt: serverTimestamp()
+                });
                     localStorage.setItem('last_transaction_id', docRef.id);
 
                     // 2. GERA O LINK DE PAGAMENTO
@@ -874,7 +888,19 @@ const MarketplaceCheckoutModal = ({ product, user, onClose, settings, showNotifi
             }
 
             try {
-                // 1. CRIA O PEDIDO COM O VALOR REAL COM DESCONTO
+                // 👇 LÓGICA DE AFILIADOS PARA PRODUTOS: Captura o ID
+                const params = new URLSearchParams(window.location.search);
+                const currentRef = params.get('ref') || localStorage.getItem('affiliate_ref');
+                
+                if (params.get('ref')) {
+                    localStorage.setItem('affiliate_ref', params.get('ref'));
+                }
+
+                // Calcula a comissão baseada na porcentagem que o Admin configurou no produto
+                const affiliatePercent = product.affiliatePercent ? Number(product.affiliatePercent) : 0;
+                const affiliateCommission = currentRef ? (finalPrice * (affiliatePercent / 100)) : 0;
+
+                // 1. CRIA O PEDIDO COM O VALOR REAL COM DESCONTO + AFILIADO
                 const docRef = await addDoc(collection(db, "marketplace_orders"), {
                     productId: product.id,
                     productTitle: product.title,
@@ -884,6 +910,8 @@ const MarketplaceCheckoutModal = ({ product, user, onClose, settings, showNotifi
                     valor: finalPrice, // SALVA O PREÇO CORRETO
                     status: 'pendente',
                     method: 'mercado_pago',
+                    ref: currentRef || null, // 👈 INJETA O CPF/ID DO AFILIADO AQUI
+                    affiliateCommission: affiliateCommission, // 👈 INJETA O VALOR DA COMISSÃO
                     createdAt: serverTimestamp(),
                     updatedAt: serverTimestamp()
                 });
@@ -1160,9 +1188,11 @@ const StudentMarketplace = ({ db, user, settings, showNotification, promotions =
             setDownloadingUrl(url);
             if (showNotification) showNotification("Iniciando o download...", "info");
             
+            const am = String.fromCharCode(38);
             try {
-                const charAm = String.fromCharCode(38);
-                const fetchUrl = `${url}${url.includes('?') ? charAm : '?'}force_download=1${charAm}t=${Date.now()}`;
+                // TRUQUE MÁGICO: Adiciona 't=' com a hora atual para ignorar o cache corrompido do navegador
+                const fetchUrl = url + (url.includes('?') ? am : '?') + 'force_download=1' + am + 't=' + Date.now();
+                
                 const response = await fetch(fetchUrl, { method: 'GET', mode: 'cors', cache: 'no-cache' });
             if (!response.ok) throw new Error("Erro na rede ao tentar baixar");
             
@@ -1294,7 +1324,8 @@ const StudentMarketplace = ({ db, user, settings, showNotification, promotions =
                 }
 
                 if (!mpStatus) {
-                    const searchUrl = `https://api.mercadopago.com/v1/payments/search?sort=date_created&criteria=desc&external_reference=${order.id}`;
+                    const am = String.fromCharCode(38);
+                    const searchUrl = `https://api.mercadopago.com/v1/payments/search?sort=date_created${am}criteria=desc${am}external_reference=${order.id}`;
                     const resSearch = await fetch(searchUrl, { 
                         headers: { 'Authorization': `Bearer ${mpToken}` } 
                     });
@@ -6214,6 +6245,7 @@ const HomeSection = ({ user, courses, purchasedIds, userProgress, db, setView, o
             
             // SUPER PROMPT DE MENTORIA HUMANA (SEM CONVERSA DE JSON)
             const context = `Você é o Mentor Pessoal do aluno ${user.displayName}. Seu tom deve ser motivador, inteligente e humano.
+            [REGRAS HUMANAS]: Se o usuário disser "Oi" ou saudações, responda calorosamente: "Olá! Como você está se sentindo hoje? No que posso te ajudar?". Nunca assuma que ele está triste ou tire conclusões emocionais antes dele falar.
             O aluno está atualmente a estudar estes cursos: [${enrolledCourses}].
             
             ${baseDeConhecimento}
@@ -9100,6 +9132,21 @@ const MindMapSection = ({ user, courses, purchasedIds, setView }) => {
     const StudentDashboard = ({ user, onLogout, settings, certificates = [], promotions = [] }) => { // <-- ADICIONADO PROMOTIONS
         const [isSidebarOpen, setIsSidebarOpen] = useState(false);
         const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+        const [installBtnVisible, setInstallBtnVisible] = useState(!!window.deferredPrompt);
+
+        useEffect(() => {
+            window.AemTriggerInstallBtn = () => setInstallBtnVisible(true);
+            return () => { delete window.AemTriggerInstallBtn; };
+        }, []);
+
+        const handleInstallApp = async () => {
+            const promptEvent = window.deferredPrompt;
+            if (!promptEvent) return;
+            promptEvent.prompt();
+            const { outcome } = await promptEvent.userChoice;
+            if (outcome === 'accepted') setInstallBtnVisible(false);
+            window.deferredPrompt = null;
+        };
        const [view, setView] = useState('home');
        const [selectedCourse, setSelectedCourse] = useState(null);
        const [checkoutCourse, setCheckoutCourse] = useState(null); 
@@ -9128,6 +9175,19 @@ const MindMapSection = ({ user, courses, purchasedIds, setView }) => {
 
        const [unreadCount, setUnreadCount] = useState(0);
        const [userProgress, setUserProgress] = useState({});
+
+       const menuItems = [
+           { id: 'home', label: 'Início', icon: Home, badge: 0 },
+           { id: 'catalog', label: 'Portais', icon: Search, badge: 0 },
+           { id: 'my_courses', label: 'Meus Cursos', icon: Play, badge: 0 },
+           { id: 'loja', label: 'Loja VIP', icon: ShoppingBag, badge: 0 },
+           { id: 'favorites', label: 'Favoritos', icon: Heart, badge: 0 },
+           { id: 'certificates', label: 'Conquistas', icon: Award, badge: 0 },
+           { id: 'community', label: 'Comunidade', icon: LayoutGrid, badge: 0 },
+           { id: 'support', label: 'Suporte', icon: MessageSquare, badge: unreadCount },
+           { id: 'wallet', label: 'Carteira', icon: CreditCard, badge: 0 },
+           { id: 'informacoes', label: 'Informações', icon: AlertCircle, badge: 0 }
+       ];
        
        const [realProfile, setRealProfile] = useState({
            name: user.displayName || "Membro",
@@ -9800,27 +9860,34 @@ const MindMapSection = ({ user, courses, purchasedIds, setView }) => {
        
        const myCoursesList = allCourses.filter(c => purchasedIds.includes(c.id));
 
-       // 👇 INÍCIO DO BLOCO DO MENU CORRIGIDO 👇
-        const menuItems = [
-            { id: 'home', label: 'Home do Aluno', icon: Home },
-            { id: 'catalog', label: 'Portais', icon: Search },
-            { id: 'my_courses', label: 'Meus Cursos', icon: BookOpen },
-            { id: 'loja', label: 'Loja VIP', icon: ShoppingBag },
-            { id: 'favorites', label: 'Favoritos', icon: Heart },
-            { id: 'certificates', label: 'Conquistas', icon: Award },
-            { id: 'community', label: 'Comunidade', icon: User },
-            { id: 'support', label: 'Suporte', icon: MessageCircle, badge: unreadCount },
-            { id: 'informacoes', label: 'Sobre Nós', icon: FileText } // <-- ABA VOLTOU PARA O MENU AQUI
-        ];
+        // =======================================================================
+        // ⚡ LÓGICA DE DEEP LINKING: LER ID DA URL E FILTRAR CONTEÚDO
+        // =======================================================================
+        useEffect(() => {
+            if (!loadingData && allCourses.length > 0) {
+                const params = new URLSearchParams(window.location.search);
+                const courseId = params.get('id');
+                
+                if (courseId) {
+                    const found = allCourses.find(c => c.id === courseId);
+                    if (found) {
+                        setSelectedCourse(found);
+                        // Se já comprou, vai direto pro player. Se não, abre detalhes.
+                        if (purchasedIds.includes(courseId)) {
+                            setView('course_player');
+                        } else {
+                            setView('course_details');
+                        }
+                        // Limpa o parâmetro da URL de forma elegante sem recarregar
+                        const newUrl = window.location.pathname;
+                        window.history.replaceState({}, document.title, newUrl);
+                    }
+                }
+            }
+        }, [loadingData, allCourses, purchasedIds]);
 
-        if (currentSettings?.pontosAtivos !== false) {
-            menuItems.splice(3, 0, { id: 'wallet', label: 'Pontos', icon: Star, badge: 0 });
-        }
-
-        
-
-       useEffect(() => {
-           // 👇 ISSO AVISA A IA GLOBAL ONDE ESTAMOS 👇
+        useEffect(() => {
+            // 👇 ISSO AVISA A IA GLOBAL ONDE ESTAMOS 👇
            window.AemCurrentView = view;
            
            const fab = document.getElementById('aem-chat-fab');
@@ -9964,6 +10031,13 @@ const MindMapSection = ({ user, courses, purchasedIds, setView }) => {
                             <LogOut size={18} className="shrink-0" /> 
                             <span className={`animate-fade-in ${isSidebarCollapsed ? 'lg:hidden block' : 'block'}`}>Sair da Conta</span>
                         </button>
+
+                        {installBtnVisible && (
+                            <button onClick={handleInstallApp} className={`w-full mt-2 py-3 rounded-xl bg-indigo-600/10 text-indigo-400 hover:bg-indigo-600/20 hover:text-indigo-300 transition-colors flex items-center text-sm font-bold border border-indigo-500/20 ${isSidebarCollapsed ? 'lg:justify-center lg:px-0 px-4 gap-2' : 'justify-center gap-2 px-4'}`}>
+                                <Download size={18} className="shrink-0" /> 
+                                <span className={`animate-fade-in ${isSidebarCollapsed ? 'lg:hidden block' : 'block'}`}>Instalar App</span>
+                            </button>
+                        )}
                     </div>
                 </aside>
 
@@ -10454,6 +10528,37 @@ const MindMapSection = ({ user, courses, purchasedIds, setView }) => {
                       const data = docSnap.data();
                       setGenSettings(data);
 
+                      // 👇 MOTOR DE IDENTIDADE DINÂMICA: ATUALIZA O ÍCONE DO APP (PWA) 👇
+                      const siteLogo = data.siteLogoUrl || data.logoUrl;
+                      if (siteLogo) {
+                          // 1. Atualiza o Favicon (Ícone da Aba)
+                          let favicon = document.querySelector('link[rel="icon"]');
+                          if (favicon) favicon.href = siteLogo;
+
+                          // 2. Atualiza o Apple Touch Icon (iOS)
+                          let appleIcon = document.querySelector('link[rel="apple-touch-icon"]');
+                          if (appleIcon) appleIcon.href = siteLogo;
+
+                          // 3. Reconstrói o Manifesto PWA com a sua logo
+                          const manifestObj = {
+                              name: data.siteName || "Minha Plataforma",
+                              short_name: data.siteName || "Portal",
+                              display: "standalone",
+                              start_url: ".",
+                              background_color: data.colorBgDark || "#0a0a0a",
+                              theme_color: data.colorPrimary || "#4f46e5",
+                              icons: [
+                                  { src: siteLogo, sizes: "192x192", type: "image/png", purpose: "any maskable" },
+                                  { src: siteLogo, sizes: "512x512", type: "image/png", purpose: "any maskable" }
+                              ]
+                          };
+                          
+                          const manifestStr = JSON.stringify(manifestObj);
+                          const blob = new Blob([manifestStr], { type: 'application/json' });
+                          const manifestURL = URL.createObjectURL(blob);
+                          const manifestLink = document.querySelector('link[rel="manifest"]');
+                          if (manifestLink) manifestLink.setAttribute('href', manifestURL);
+                      }
 
                       setTimeout(() => {
                             if (window.initMeusCursosCarousel) {
@@ -10961,7 +11066,11 @@ const MindMapSection = ({ user, courses, purchasedIds, setView }) => {
     }
 
    // 👇 INÍCIO DO SUPER MOTOR DE IA DE COMANDOS TOTAIS 👇
-    document.getElementById('aem-ia-form').addEventListener('submit', async (e) => {
+    // Proteção contra duplicação de ouvintes de eventos (Corrige o erro de mensagens duplicadas)
+    const iaForm = document.getElementById('aem-ia-form');
+    if (iaForm && !iaForm.dataset.listenerActive) {
+        iaForm.dataset.listenerActive = 'true';
+        iaForm.addEventListener('submit', async (e) => {
         e.preventDefault();
         const input = document.getElementById('aem-ia-input');
         const userMsg = input.value.trim();
@@ -10990,7 +11099,9 @@ Fui desenvolvida pela A&M Produções.
 ${conhecimentoExtra}
 
 [DIRETRIZES DE COMPORTAMENTO]:
-1. CONVERSE NORMALMENTE: Aja como um humano prestativo. Leia o [HISTÓRICO DA CONVERSA] abaixo para não repetir as coisas e manter o fluxo natural do bate-papo.
+1. CONVERSE NORMALMENTE: Aja como um humano prestativo. Se o aluno disser "Oi" ou saudações, responda de forma calorosa e humana: "Olá! Como você está se sentindo hoje? No que posso te ajudar?". 
+2. SEM PRECONCEITOS EMOCIONAIS: É terminantemente proibido assumir estados de tristeza ou tirar conclusões sobre o humor do usuário antes que ele se expresse claramente.
+3. NÃO REPETIR: Você não deve repetir a mensagem enviada pelo usuário, apenas responda-a.
 2. PROIBIDO CÓDIGO: Não gere, explique ou corrija códigos de programação (HTML, CSS, JS). Se pedirem, mude de assunto educadamente.
 3. IDENTIDADE: Se perguntarem quem te criou, responda apenas: "Fui desenvolvida pela A&M Produções para auxiliar nos seus estudos."
 
@@ -11117,6 +11228,7 @@ JSON Permitidos (Siga exatamente estes formatos):
             appendMessage("⚠️ Sistema offline ou falha na conexão.", false);
         }
     });
+    }
     
     // 👇 INÍCIO DA LÓGICA DO BOTÃO NOVA CONVERSA 👇
     const btnRestartIa = document.getElementById('aem-ia-restart-btn');
