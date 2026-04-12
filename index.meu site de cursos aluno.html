@@ -425,7 +425,7 @@ window.applyPwaManifest = function(settings) {
   <link href="https://vjs.zencdn.net/8.10.0/video-js.css" rel="stylesheet" />
   <script src="https://vjs.zencdn.net/8.10.0/video.min.js"></script>
   
-<link rel="manifest" href="data:application/json;charset=utf-8,%7B%22name%22%3A%22index.meu%20site%20de%20cursos%20aluno.html%22%2C%22short_name%22%3A%22index.meu%20site%20de%20cursos%20aluno.html%22%2C%22display%22%3A%22standalone%22%2C%22start_url%22%3A%22.%22%2C%22background_color%22%3A%22%230f111a%22%2C%22theme_color%22%3A%22%233b82f6%22%2C%22icons%22%3A%5B%7B%22src%22%3A%22https%3A%2F%2Fapi.dicebear.com%2F7.x%2Fbottts%2Fsvg%3Fseed%3Dindex.meu%2520site%2520de%2520cursos%2520aluno.html%22%2C%22sizes%22%3A%22192x192%22%2C%22type%22%3A%22image%2Fsvg%2Bxml%22%7D%2C%7B%22src%22%3A%22https%3A%2F%2Fapi.dicebear.com%2F7.x%2Fbottts%2Fsvg%3Fseed%3Dindex.meu%2520site%2520de%2520cursos%2520aluno.html%22%2C%22sizes%22%3A%22512x512%22%2C%22type%22%3A%22image%2Fsvg%2Bxml%22%7D%5D%7D">
+
 <meta name="theme-color" content="#3b82f6">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -10668,16 +10668,26 @@ const MindMapSection = ({ user, courses, purchasedIds, setView }) => {
                     //
 
 
-                      // 👇 MOTOR DE IDENTIDADE DINÂMICA: ATUALIZA O ÍCONE DO APP (PWA) 👇
+                     // 👇 MOTOR DE IDENTIDADE DINÂMICA: ATUALIZA O ÍCONE DO APP (PWA) 👇
                       const siteLogo = data.siteLogoUrl || data.logoUrl;
                       if (siteLogo) {
-                          // 1. Atualiza o Favicon (Ícone da Aba)
+                          // 1. Atualiza ou cria o Favicon (Ícone da Aba)
                           let favicon = document.querySelector('link[rel="icon"]');
-                          if (favicon) favicon.href = siteLogo;
+                          if (!favicon) {
+                              favicon = document.createElement('link');
+                              favicon.rel = 'icon';
+                              document.head.appendChild(favicon);
+                          }
+                          favicon.href = siteLogo;
 
-                          // 2. Atualiza o Apple Touch Icon (iOS)
+                          // 2. Atualiza ou cria o Apple Touch Icon (ESSE É O SEGREDO PARA O IPHONE!)
                           let appleIcon = document.querySelector('link[rel="apple-touch-icon"]');
-                          if (appleIcon) appleIcon.href = siteLogo;
+                          if (!appleIcon) {
+                              appleIcon = document.createElement('link');
+                              appleIcon.rel = 'apple-touch-icon';
+                              document.head.appendChild(appleIcon);
+                          }
+                          appleIcon.href = siteLogo;
 
                           // 3. Reconstrói o Manifesto PWA com a sua logo
                           const manifestObj = {
