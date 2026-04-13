@@ -291,11 +291,12 @@
 window.applyPwaManifest = function(settings) {
         if (!settings) return;
 
-        const appName = settings.siteName || "Sua Plataforma";
-        const shortName = appName.substring(0, 12); // PWA precisa de nome curto
-        const themeColor = settings.colorPrimary || "#4f46e5";
+        // Prioriza as configurações específicas de PWA definidas no Admin
+        const appName = settings.pwaName || settings.siteName || "Sua Plataforma";
+        const shortName = settings.pwaShortName || (settings.siteName ? settings.siteName.substring(0, 12) : "Portal");
+        const themeColor = settings.pwaThemeColor || settings.colorPrimary || "#4f46e5";
         const bgColor = settings.colorBgDark || "#0a0a0a";
-        const iconUrl = settings.siteLogoUrl || settings.logoUrl || "https://api.dicebear.com/7.x/bottts/svg?seed=default";
+        const iconUrl = settings.pwaIconUrl || settings.siteLogoUrl || settings.logoUrl || "https://api.dicebear.com/7.x/bottts/svg?seed=default";
 
         // 1. Detecta o tipo da imagem para o Android não bloquear a logo
         let imgType = "image/png";
@@ -348,7 +349,25 @@ window.applyPwaManifest = function(settings) {
              document.head.appendChild(themeColorMeta);
         }
         themeColorMeta.content = themeColor;
-        console.log("Manifesto App Android/iOS atualizado com sucesso.");
+
+        // Suporte iOS (Apple)
+        let appleTitle = document.querySelector('meta[name="apple-mobile-web-app-title"]');
+        if(!appleTitle) {
+            appleTitle = document.createElement('meta');
+            appleTitle.name = 'apple-mobile-web-app-title';
+            document.head.appendChild(appleTitle);
+        }
+        appleTitle.content = shortName;
+
+        let appleCapable = document.querySelector('meta[name="apple-mobile-web-app-capable"]');
+        if(!appleCapable) {
+            appleCapable = document.createElement('meta');
+            appleCapable.name = 'apple-mobile-web-app-capable';
+            document.head.appendChild(appleCapable);
+        }
+        appleCapable.content = 'yes';
+
+        console.log("Manifesto App Android/iOS atualizado com as configurações do Admin.");
       };
 
 
@@ -431,7 +450,14 @@ window.applyPwaManifest = function(settings) {
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <script>
 window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();window.deferredPrompt=e;if(window.AemTriggerInstallBtn)window.AemTriggerInstallBtn();});
-const isIos=(/iphone|ipad|ipod/).test(window.navigator.userAgent.toLowerCase());const isStandalone=()=>('standalone' in window.navigator)&&window.navigator.standalone;if(isIos()&&!isStandalone()){const ib=document.createElement('div');ib.innerHTML='Para instalar como App: toque em <b>Compartilhar</b> e depois <b>Adicionar ao Ecrã Principal</b><button style="position:absolute;right:10px;top:50%;transform:translateY(-50%);background:none;border:none;color:#a1a1aa;font-size:16px;" onclick="this.parentElement.remove()">✕</button>';ib.style.cssText='position:fixed;bottom:0;left:0;width:100%;background:#1c1e2b;color:#fff;padding:15px 30px 15px 15px;font-family:sans-serif;font-size:12px;text-align:center;z-index:99999;border-top:1px solid #2b2d3a;box-shadow:0 -5px 15px rgba(0,0,0,0.2);';setTimeout(()=>document.body.appendChild(ib),2000);}
+const isIos = () => (/iphone|ipad|ipod/).test(window.navigator.userAgent.toLowerCase());
+const isStandalone = () => ('standalone' in window.navigator) && window.navigator.standalone;
+if(isIos() && !isStandalone()){
+    const ib=document.createElement('div');
+    ib.innerHTML='Para instalar como App: toque em <b>Partilhar</b> e depois <b>Adicionar ao Ecrã Principal</b><button style="position:absolute;right:10px;top:50%;transform:translateY(-50%);background:none;border:none;color:#a1a1aa;font-size:16px;" onclick="this.parentElement.remove()">✕</button>';
+    ib.style.cssText='position:fixed;bottom:0;left:0;width:100%;background:#1c1e2b;color:#fff;padding:15px 30px 15px 15px;font-family:sans-serif;font-size:12px;text-align:center;z-index:99999;border-top:1px solid #2b2d3a;box-shadow:0 -5px 15px rgba(0,0,0,0.2);';
+    setTimeout(()=>document.body.appendChild(ib),2000);
+}
 </script>
 </head>
 <body class="bg-slate-900 text-slate-100 transition-colors duration-300 selection:bg-blue-200 selection:text-blue-900">
@@ -9913,6 +9939,8 @@ const MindMapSection = ({ user, courses, purchasedIds, setView }) => {
 
            const loadData = async () => {
                try {
+                   // Correção de ampersand para evitar erro de Named Entity
+                   const am = String.fromCharCode(38);
                    // 1. Cursos em Tempo Real
                    const qCourses = query(collection(db, "courses"), where("ativo", "==", true));
                    unsubCourses = onSnapshot(qCourses, (snap) => {
@@ -10635,11 +10663,12 @@ const MindMapSection = ({ user, courses, purchasedIds, setView }) => {
           const loadGoogleFont = (fontName) => {
               if (!fontName) return;
               const fontId = `gfont-${fontName.replace(/\s+/g, '-').toLowerCase()}`;
+              const am = String.fromCharCode(38);
               if (!document.getElementById(fontId)) {
                   const link = document.createElement('link');
                   link.id = fontId; 
                   link.rel = 'stylesheet';
-                  link.href = `https://fonts.googleapis.com/css2?family=${fontName.replace(/\s+/g, '+')}:wght@300;400;500;600;700;800;900&display=swap`;
+                  link.href = `https://fonts.googleapis.com/css2?family=${fontName.replace(/\s+/g, '+')}:wght@300;400;500;600;700;800;900${am}display=swap`;
                   document.head.appendChild(link);
               }
           };
@@ -10658,17 +10687,12 @@ const MindMapSection = ({ user, courses, purchasedIds, setView }) => {
                       const data = docSnap.data();
                       setGenSettings(data);
 
-                    // Atualiza o tema global
-                    if (window.applyTheme) window.applyTheme(data);
+                      // Atualiza o tema e o manifesto
+                      if (window.applyTheme) window.applyTheme(data);
+                      if (window.applyPwaManifest) window.applyPwaManifest(data);
 
-                    // 👇👇👇 ADICIONE ESTA LINHA AQUI 👇👇👇
-                    // Aplica as configurações do PWA (Nome, Ícone, Cores) no manifesto
-                    if (window.applyPwaManifest) window.applyPwaManifest(data);
-                    //
-
-
-                      // 👇 MOTOR DE IDENTIDADE DINÂMICA: ATUALIZA O ÍCONE DO APP (PWA) 👇
-                      const siteLogo = data.siteLogoUrl || data.logoUrl;
+                      // MOTOR DE IDENTIDADE DINÂMICA (FAVICON = LOGÓTIPO DO SITE)
+                      const siteLogo = data.siteLogoUrl || data.logoUrl || data.pwaIconUrl;
                       if (siteLogo) {
                           // 1. Atualiza ou cria o Favicon (Ícone da Aba)
                           let favicon = document.querySelector('link[rel="icon"]');
@@ -10679,7 +10703,7 @@ const MindMapSection = ({ user, courses, purchasedIds, setView }) => {
                           }
                           favicon.href = siteLogo;
 
-                          // 2. Atualiza ou cria o Apple Touch Icon (ESSE É O SEGREDO PARA O IPHONE!)
+                          // 2. Atualiza ou cria o Apple Touch Icon (iOS)
                           let appleIcon = document.querySelector('link[rel="apple-touch-icon"]');
                           if (!appleIcon) {
                               appleIcon = document.createElement('link');
@@ -10687,18 +10711,13 @@ const MindMapSection = ({ user, courses, purchasedIds, setView }) => {
                               document.head.appendChild(appleIcon);
                           }
                           appleIcon.href = siteLogo;
-
-                          // O bloco de manifesto duplicado foi removido daqui porque 
-                          // a função applyPwaManifest (acionada ali em cima) já faz todo o trabalho perfeitamente.
                       }
 
                       setTimeout(() => {
-                            if (window.initMeusCursosCarousel) {
-                                // Forçamos o 'true' para garantir que os vídeos sempre apareçam 
-                                // caso haja algum vídeo cadastrado no Admin
-                                window.initMeusCursosCarousel(true, data.landingVideos);
-                            }
-                        }, 500);
+                          if (window.initMeusCursosCarousel) {
+                              window.initMeusCursosCarousel(true, data.landingVideos);
+                          }
+                      }, 500);
 
                       const heroImgUrl = data.heroBgUrl || data.heroBackground;
                       if (heroImgUrl) {
