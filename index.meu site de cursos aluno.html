@@ -979,7 +979,7 @@ const MarketplaceCheckoutModal = ({ product, user, onClose, settings, showNotifi
             }
 
             try {
-                // 👇 LÓGICA DE AFILIADOS PARA PRODUTOS: Captura o ID
+                // LÓGICA DE AFILIADOS PARA PRODUTOS: Captura o ID
                 const params = new URLSearchParams(window.location.search);
                 const currentRef = params.get('ref') || localStorage.getItem('affiliate_ref');
                 
@@ -998,11 +998,11 @@ const MarketplaceCheckoutModal = ({ product, user, onClose, settings, showNotifi
                     userId: user.uid,
                     userName: user.displayName || 'Aluno',
                     userEmail: user.email,
-                    valor: finalPrice, // SALVA O PREÇO CORRETO
+                    valor: finalPrice,
                     status: 'pendente',
                     method: 'mercado_pago',
-                    ref: currentRef || null, // 👈 INJETA O CPF/ID DO AFILIADO AQUI
-                    affiliateCommission: affiliateCommission, // 👈 INJETA O VALOR DA COMISSÃO
+                    ref: currentRef || null,
+                    affiliateCommission: affiliateCommission,
                     createdAt: serverTimestamp(),
                     updatedAt: serverTimestamp()
                 });
@@ -1019,7 +1019,7 @@ const MarketplaceCheckoutModal = ({ product, user, onClose, settings, showNotifi
                         picture_url: product.images && product.images.length > 0 ? product.images[0] : '',
                         quantity: 1,
                         currency_id: 'BRL',
-                        unit_price: Number(finalPrice) // COBRA O PREÇO COM DESCONTO
+                        unit_price: Number(finalPrice)
                     }],
                     payer: { name: user.displayName || 'Aluno', email: user.email },
                     back_urls: { success: `${currentUrl}?mp_order_status=approved`, failure: `${currentUrl}?mp_order_status=failure`, pending: `${currentUrl}?mp_order_status=pending` },
@@ -1049,13 +1049,12 @@ const MarketplaceCheckoutModal = ({ product, user, onClose, settings, showNotifi
             }
         };
 
-        // 👇 TRAVA CONTRA O LOOP DE PISCAR DA LOJA
         if (!preferenceId) {
             createPreference();
         }
     }, [product.id, user.uid, finalPrice, MP_ACCESS_TOKEN, db]);
 
-   useEffect(() => {
+    useEffect(() => {
         let brickController; 
         let isMounted = true;
 
@@ -1080,9 +1079,7 @@ const MarketplaceCheckoutModal = ({ product, user, onClose, settings, showNotifi
                         brickController = controller;
                     }
                 } catch(err) {
-                    if (isMounted) {
-                        console.warn("Erro MP Loja:", err);
-                    }
+                    if (isMounted) console.warn("Erro MP Loja:", err);
                 }
             }
         };
@@ -1099,45 +1096,105 @@ const MarketplaceCheckoutModal = ({ product, user, onClose, settings, showNotifi
 
     if (!product) return null;
 
+    // NOVO LAYOUT: Mesmo padrão imersivo, escuro e em duas colunas do modal de cursos
     return (
-        <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-fade-in">
-            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md relative overflow-hidden flex flex-col animate-scale-in">
-                <div className="bg-slate-50 px-6 py-4 border-b border-slate-200 flex justify-between items-center">
-                    <h3 className="font-bold text-lg text-slate-800 flex items-center gap-2"><ShoppingBag size={20} className="text-indigo-600"/> Finalizar Compra</h3>
-                    <button onClick={onClose} className="text-slate-400 hover:text-slate-600 transition-colors"><X size={20}/></button>
-                </div>
-                <div className="p-6 space-y-6">
-                    <div className="flex gap-4 items-start">
-                        <div className="w-20 h-20 rounded-lg bg-slate-100 overflow-hidden shrink-0 border border-slate-200 relative flex items-center justify-center">
-                            {product.images && product.images.length > 0 ? <img src={product.images[0]} className="w-full h-full object-cover" /> : <ImageIcon size={24} className="text-slate-300"/>}
-                        </div>
-                        <div className="flex-1">
-                            <h4 className="font-bold text-slate-800 text-sm line-clamp-2">{product.title}</h4>
-                            
-                            {/* EXIBIÇÃO DO DESCONTO AQUI */}
-                            {discountInfo.hasDiscount ? (
-                                <div className="mt-2 flex flex-col">
-                                    <div className="flex items-center gap-2">
-                                        <span className="text-xs text-slate-400 line-through decoration-red-500/50">R$ {parseFloat(product.price || 0).toFixed(2).replace('.', ',')}</span>
-                                        <span className="text-[9px] font-bold text-pink-600 bg-pink-50 px-1.5 py-0.5 rounded uppercase">{discountInfo.tag} OFF</span>
-                                    </div>
-                                    <div className="text-emerald-600 font-black text-xl">R$ {parseFloat(finalPrice).toFixed(2).replace('.', ',')}</div>
-                                </div>
-                            ) : (
-                                <div className="mt-2 text-emerald-600 font-black text-xl">R$ {parseFloat(finalPrice).toFixed(2).replace('.', ',')}</div>
-                            )}
-                        </div>
-                    </div>
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 sm:p-6 bg-black/80 backdrop-blur-md animate-fade-in overflow-y-auto">
+            <div className="relative w-full max-w-5xl bg-[#0a0a0a] border border-[#333] rounded-3xl shadow-2xl overflow-hidden flex flex-col md:flex-row min-h-[500px] animate-scale-in my-auto">
+                
+                <button onClick={onClose} className="absolute top-4 right-4 z-50 p-2.5 bg-black/40 hover:bg-black text-gray-400 hover:text-white rounded-full backdrop-blur-md transition-all border border-white/10">
+                    <X className="w-5 h-5" />
+                </button>
 
-                    <div className="border-t border-slate-100 pt-4">
-                        {isLoading ? (
-                            <div className="flex flex-col items-center justify-center py-8 text-slate-500 gap-3"><div className="w-8 h-8 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin"></div></div>
+                {/* COLUNA ESQUERDA - DETALHES DO PRODUTO */}
+                <div className="w-full md:w-3/5 relative bg-[#111] flex flex-col min-h-[300px] md:min-h-full">
+                    <div className="absolute inset-0 h-full w-full">
+                        {product.images && product.images.length > 0 ? (
+                            <img src={product.images[0]} className="w-full h-full object-cover opacity-70" alt={product.title} />
                         ) : (
-                            <div className="animate-fade-in flex flex-col items-center w-full">
-                                <div id="mp_wallet_container" className="w-full"></div>
-                                {initPoint && <a href={initPoint} className="mt-2 w-full py-4 bg-blue-500 hover:bg-blue-600 text-white font-bold rounded-[16px] text-center text-sm shadow-md transition-colors">Pagar via Link Seguro</a>}
+                            <div className="w-full h-full bg-gradient-to-br from-indigo-900/60 to-black flex items-center justify-center">
+                                <ShoppingBag size={64} className="text-white/10" />
                             </div>
                         )}
+                        <div className="absolute inset-0 bg-gradient-to-t from-[#0a0a0a] via-[#0a0a0a]/90 to-transparent"></div>
+                        <div className="absolute inset-0 bg-gradient-to-r from-transparent via-transparent to-[#0a0a0a] hidden md:block"></div>
+                    </div>
+
+                    <div className="relative z-10 p-8 sm:p-12 flex flex-col h-full justify-end">
+                        {product.category && (
+                            <span className="w-fit px-3 py-1 bg-indigo-600 text-white text-[10px] font-bold uppercase tracking-widest rounded-full mb-4 shadow-lg shadow-indigo-500/30">
+                                {product.category}
+                            </span>
+                        )}
+                        
+                        <h2 className="text-3xl sm:text-4xl font-black text-white mb-2 leading-tight tracking-tight">
+                            {product.title}
+                        </h2>
+                        
+                        <div className="mt-4 border-t border-white/10 pt-6">
+                            <h4 className="text-[11px] font-bold text-gray-400 uppercase tracking-widest mb-4 flex items-center gap-2">
+                                <ShoppingBag className="w-4 h-4 text-indigo-500" /> Detalhes do Produto
+                            </h4>
+                            <div className="text-gray-300 text-sm leading-relaxed max-h-[200px] overflow-y-auto pr-4 whitespace-pre-wrap font-medium custom-scrollbar">
+                                {product.description || "Descrição do produto não disponível."}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                {/* COLUNA DIREITA - CHECKOUT MERCADO PAGO */}
+                <div className="w-full md:w-2/5 bg-[#0a0a0a] p-8 sm:p-10 flex flex-col justify-center relative z-10 border-t md:border-t-0 md:border-l border-[#222]">
+                    <div className="mb-10 text-center md:text-left">
+                        <p className="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-2">Investimento Total</p>
+                        
+                        {discountInfo.hasDiscount ? (
+                            <div className="flex flex-col items-center md:items-start">
+                                <span className="text-sm text-gray-500 line-through decoration-red-500/50 decoration-2">De R$ {parseFloat(product.price || 0).toFixed(2).replace('.', ',')}</span>
+                                <div className="flex items-baseline justify-center md:justify-start gap-1.5 mt-1">
+                                    <span className="text-xl text-emerald-500 font-bold">R$</span>
+                                    <span className="text-5xl font-black text-white tracking-tight">{parseFloat(finalPrice).toFixed(2).replace('.', ',')}</span>
+                                </div>
+                                <span className="text-[10px] font-black text-pink-500 mt-2 uppercase tracking-widest bg-pink-500/10 px-2 py-1 rounded border border-pink-500/30">
+                                    {discountInfo.tag} Aplicado!
+                                </span>
+                            </div>
+                        ) : (
+                            <div className="flex items-baseline justify-center md:justify-start gap-1.5">
+                                <span className="text-xl text-green-500 font-bold">R$</span>
+                                <span className="text-5xl font-black text-white tracking-tight">{parseFloat(finalPrice).toFixed(2).replace('.', ',')}</span>
+                            </div>
+                        )}
+
+                        <p className="text-xs text-gray-500 mt-4 font-medium bg-[#111] py-1.5 px-3 rounded-lg inline-block">
+                            Pagamento Seguro • Acesso Imediato
+                        </p>
+                    </div>
+
+                    <div className="space-y-6 w-full min-h-[100px]">
+                        {isLoading ? (
+                            <div className="flex flex-col items-center justify-center py-8 text-slate-500 gap-3">
+                                <div className="w-8 h-8 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin"></div>
+                                <p className="text-sm font-medium">Conectando ao Mercado Pago...</p>
+                            </div>
+                        ) : (
+                            <div className="animate-fade-in w-full">
+                                <p className="text-xs text-slate-500 mb-3 text-center font-medium uppercase tracking-wide">Escolha como pagar:</p>
+                                <div id="mp_wallet_container" className="w-full"></div>
+                                {initPoint && (
+                                    <a href={initPoint} className="mt-4 flex w-full py-4 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl text-center text-sm shadow-md transition-colors justify-center items-center gap-2">
+                                        Pagar via Link Seguro
+                                    </a>
+                                )}
+                                <div className="mt-4 flex justify-center items-center gap-2 text-[10px] text-slate-400">
+                                    <Lock size={10} /> <span>Ambiente Seguro Mercado Pago</span>
+                                </div>
+                            </div>
+                        )}
+
+                        <div className="pt-6 flex flex-col items-center justify-center gap-4 opacity-70 border-t border-[#222]">
+                            <div className="flex items-center gap-2 text-[10px] font-bold text-gray-400 uppercase tracking-widest">
+                                <ShieldCheck className="w-4 h-4 text-green-500" /> Compra Garantida
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -1252,7 +1309,7 @@ const MarketplaceAudioPlayer = ({ url, name, onDownload, isDownloading }) => {
 // =================================================================================
 // COMPONENTE ALUNO: LOJA / MARKETPLACE (VISUALIZADOR UNIVERSAL + CATEGORIAS)
 // =================================================================================
-const StudentMarketplace = ({ db, user, settings, showNotification, promotions = [] }) => {
+const StudentMarketplace = ({ db, user, settings, showNotification, promotions = [], requestConfirmation }) => {
     const [products, setProducts] = useState([]);
     const [purchasedCourses, setPurchasedCourses] = useState([]);
     const [purchasedProducts, setPurchasedProducts] = useState([]); 
@@ -1262,17 +1319,18 @@ const StudentMarketplace = ({ db, user, settings, showNotification, promotions =
     const [currentImageIndex, setCurrentImageIndex] = useState(0);
     const [checkoutProduct, setCheckoutProduct] = useState(null);
     
-    // 👇 NOVO ESTADO PARA AS CATEGORIAS DA LOJA 👇
     const [selectedCategory, setSelectedCategory] = useState('Todas');
 
-    // ESTADOS DO VISUALIZADOR UNIVERSAL DE MÍDIAS
     const [viewingProduct, setViewingProduct] = useState(null); 
     const [activeProductFile, setActiveProductFile] = useState(null);
     const [isDownloading, setIsDownloading] = useState(false);
 
-    // MOTOR DE VERIFICAÇÃO AUTOMÁTICA
     const [pendingOrders, setPendingOrders] = useState([]);
     const isCheckingRef = useRef(false);
+
+    // ESTADO DO MODAL DE CANCELAMENTO DA LOJA
+    const [cancelModal, setCancelModal] = useState({ isOpen: false, product: null, reason: '', customText: '', isProcessing: false });
+    
 
     const handleForceDownload = async (url, fileName) => {
             if (!url) return;
@@ -1281,7 +1339,6 @@ const StudentMarketplace = ({ db, user, settings, showNotification, promotions =
             
             const am = String.fromCharCode(38);
             try {
-                // TRUQUE MÁGICO: Adiciona 't=' com a hora atual para ignorar o cache corrompido do navegador
                 const fetchUrl = url + (url.includes('?') ? am : '?') + 'force_download=1' + am + 't=' + Date.now();
                 
                 const response = await fetch(fetchUrl, { method: 'GET', mode: 'cors', cache: 'no-cache' });
@@ -1373,8 +1430,7 @@ const StudentMarketplace = ({ db, user, settings, showNotification, promotions =
         let finalPrice = promo.discountType === 'percentage' 
             ? price - (price * (promo.discountValue / 100)) 
             : price - promo.discountValue;
-
-        return {
+             return {
             hasDiscount: true,
             originalPrice: price,
             finalPrice: Math.max(0, finalPrice),
@@ -1390,6 +1446,91 @@ const StudentMarketplace = ({ db, user, settings, showNotification, promotions =
         setCheckoutProduct({ ...product, appliedDiscount: getDiscountInfo(product.id, 'product', product.price) });
     };
 
+    // FUNÇÃO DE CANCELAMENTO DE PRODUTO DA LOJA
+    const handleCancelarCompraProduto = (product) => {
+        setCancelModal({ isOpen: true, product: product, reason: '', customText: '', isProcessing: false });
+    };
+
+    const executeCancelProduct = async () => {
+        const { product, reason, customText } = cancelModal;
+        if (!reason) return showNotification("Por favor, selecione um motivo.", "warning");
+        if (reason === 'Outro' && !customText.trim()) return showNotification("Por favor, digite o motivo.", "warning");
+
+        setCancelModal(prev => ({ ...prev, isProcessing: true }));
+        const isFree = parseFloat(String(product.price || 0)) <= 0;
+        const motivoFinal = reason === 'Outro' ? customText : reason;
+
+        try {
+            if (showNotification) showNotification("Registrando solicitação de cancelamento...", "info");
+    
+            // Busca a transação do usuário, independentemente do status
+            const qTrans = query(
+                collection(db, "marketplace_orders"), 
+                where("userId", "==", user.uid), 
+                where("productId", "==", product.id)
+            );
+            const transSnap = await getDocs(qTrans);
+    
+            if (!transSnap.empty) {
+                // Atualiza o banco de dados para o status "solicitado_cancelamento"
+                for (let docSnap of transSnap.docs) {
+                    await updateDoc(doc(db, "marketplace_orders", docSnap.id), {
+                        status: 'solicitado_cancelamento',
+                        cancelReason: motivoFinal,
+                        updatedAt: serverTimestamp()
+                    });
+                }
+        
+                // Remove o produto da lista de acesso do aluno instantaneamente
+                setPurchasedProducts(prev => prev.filter(id => id !== product.id));
+                setSelectedProduct(null); 
+        
+                if (showNotification) showNotification("Solicitação enviada! O administrador avaliará em breve.", "success");
+
+                // Envio de E-mail de Solicitação
+                const platformName = settings?.siteName || "Nossa Plataforma";
+                const logoUrl = settings?.siteLogoUrl || settings?.logoUrl || ""; 
+                const capaDoProduto = (product.images && product.images.length > 0) ? product.images[0] : "https://images.unsplash.com/photo-1616469829941-c7200edec809?q=80&w=600";
+                const nomeDoProduto = product.title || 'Produto';
+                const precoFinal = isFree ? "0,00" : parseFloat(product.price || 0).toFixed(2).replace('.', ',');
+
+                const cancelBodyHTML = `
+                    <div style="background-color:#f8fafc;padding:40px 20px;font-family:sans-serif;">
+                        <div style="max-width:600px;margin:0 auto;background-color:#ffffff;padding:40px;border-radius:24px;box-shadow:0 10px 25px rgba(0,0,0,0.05);color:#1e293b;">
+                            ${logoUrl ? `<div style="text-align: center; margin-bottom: 30px;"><img src="${logoUrl}" alt="${platformName}" style="max-height: 70px; max-width: 200px; object-fit: contain;"></div>` : ''}
+                            <div style="text-align: center; margin-bottom: 20px;">
+                                <h2 style="color: #f59e0b; margin: 0; font-size: 24px;">Solicitação de Cancelamento Recebida</h2>
+                            </div>
+                            <p style="font-size:16px;">Olá, <strong>${user.displayName || 'Aluno'}</strong>.</p>
+                            <p style="font-size:16px;line-height:1.6;">Recebemos a sua solicitação de cancelamento para o item da Loja na ${platformName}.</p>
+                            <div style="text-align:center;margin:30px 0;">
+                                <img src="${capaDoProduto}" style="max-width:100%;max-height:250px;border-radius:12px;box-shadow:0 4px 10px rgba(0,0,0,0.1);" alt="Capa">
+                            </div>
+                            <div style="background-color:#fffbeb;padding:20px;border-radius:12px;margin-top:20px;border:1px solid #fde68a;">
+                                <p style="margin:0 0 10px 0;font-size:14px;color:#b45309;">Item: <strong style="color:#92400e;">${nomeDoProduto}</strong></p>
+                                <p style="margin:0 0 10px 0;font-size:14px;color:#b45309;">Motivo Registrado: <strong style="color:#92400e;">${motivoFinal}</strong></p>
+                                <p style="margin:0;font-size:14px;color:#b45309;">Valor a ser estornado: <strong style="color:#f59e0b;">R$ ${precoFinal}</strong></p>
+                            </div>
+                            <p style="font-size:14px;line-height:1.6;margin-top:20px;color:#64748b;">Nossa equipe analisará sua solicitação e o estorno será processado em breve de acordo com as políticas do sistema de pagamento.</p>
+                        </div>
+                    </div>
+                `;
+
+                fetch("https://script.google.com/macros/s/AKfycbzyuxuOw0fx5YiAWuE_PaN8JE9VrupAStYQfKk6fFDMiLMn7BARtbLagoF3sPbhg9A/exec", {
+                    method: "POST", mode: "no-cors", headers: { "Content-Type": "text/plain;charset=utf-8" },
+                    body: JSON.stringify({ type: "transactional", to: user.email, subject: `Solicitação de Cancelamento: ${nomeDoProduto}`, body: cancelBodyHTML, senderName: `Suporte ${platformName}` })
+                }).catch(e => console.log(e));
+            } else {
+                if (showNotification) showNotification("Registro de compra não encontrado.", "error");
+            }
+        } catch (error) {
+            console.error("Erro no cancelamento da loja:", error);
+            if (showNotification) showNotification("Houve um erro de comunicação ao cancelar.", "error");
+        } finally {
+            setCancelModal({ isOpen: false, product: null, reason: '', customText: '', isProcessing: false });
+        }
+    };
+
     const verifyPendingPayments = async () => {
         if (isCheckingRef.current || pendingOrders.length === 0) return;
         const mpToken = settings?.mercadoPagoAccessToken || settings?.mercadopagoAccessToken || 'APP_USR-5078406563096978-100721-63ed85c89b2cb57e85109eb14514462c-336516116';
@@ -1398,6 +1539,7 @@ const StudentMarketplace = ({ db, user, settings, showNotification, promotions =
         isCheckingRef.current = true;
 
         try {
+            const am = "\u0026";
             for (let order of pendingOrders) {
                 let mpStatus = null;
                 let mpData = null;
@@ -1415,8 +1557,7 @@ const StudentMarketplace = ({ db, user, settings, showNotification, promotions =
                 }
 
                 if (!mpStatus) {
-                    const am = String.fromCharCode(38);
-                    const searchUrl = `https://api.mercadopago.com/v1/payments/search?sort=date_created${am}criteria=desc${am}external_reference=${order.id}`;
+                    const searchUrl = "https://api.mercadopago.com/v1/payments/search?sort=date_created" + am + "criteria=desc" + am + "external_reference=" + order.id;
                     const resSearch = await fetch(searchUrl, { 
                         headers: { 'Authorization': `Bearer ${mpToken}` } 
                     });
@@ -1442,28 +1583,72 @@ const StudentMarketplace = ({ db, user, settings, showNotification, promotions =
                         });
                         
                         if (novoStatus === 'pago') {
-                            if(showNotification) showNotification(`O pagamento do produto "${order.productTitle}" foi aprovado e liberado!`, "success");
-                            
-                            // 👇 BUSCANDO A FOTO DO PRODUTO 👇
+                            let nomeDoProduto = order.productTitle || "Produto VIP";
                             let capaDoProduto = "https://images.unsplash.com/photo-1616469829941-c7200edec809?q=80&w=600";
+                            let precoDoProduto = order.valor || "0,00";
+
                             try {
                                 const prodInfo = products.find(p => p.id === order.productId);
-                                if (prodInfo && prodInfo.images && prodInfo.images.length > 0) {
-                                    capaDoProduto = prodInfo.images[0];
+                                if (prodInfo) {
+                                    if (prodInfo.images && prodInfo.images.length > 0) capaDoProduto = prodInfo.images[0];
+                                    if (prodInfo.title) nomeDoProduto = prodInfo.title;
                                 }
                             } catch(e){}
 
-                            // 👇 DISPARO DE E-MAIL DE PRODUTO 👇
+                            if (showNotification) showNotification(`O pagamento do produto "${nomeDoProduto}" foi aprovado e liberado!`, "success");
+
+                            const platformName = settings?.siteName || "Nossa Plataforma";
+                            const linkPlataforma = window.location.origin; 
+                            const logoUrl = settings?.siteLogoUrl || settings?.logoUrl || ""; 
+
+                            const compraBodyHTML = `
+                                <div style="background-color: #030303; padding: 40px 20px; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;">
+                                    <div style="max-width: 600px; margin: 0 auto; background: linear-gradient(145deg, #111111, #0a0a0f); padding: 40px; border-radius: 24px; box-shadow: 0 20px 50px rgba(79,70,229,0.2); border: 1px solid #333333;">
+                                        
+                                        <!-- Logo do Site -->
+                                        ${logoUrl ? `<div style="text-align: center; margin-bottom: 30px;"><img src="${logoUrl}" alt="${platformName}" style="max-height: 80px; max-width: 250px; object-fit: contain;"></div>` : ''}
+
+                                        <!-- GIF Animado de Celebração -->
+                                        <div style="text-align: center; margin-bottom: 25px;">
+                                            <img src="https://media.giphy.com/media/v1.Y2lkPTc5MGI3NjExODg3c2MwYnd1ajMwOXh3ZmV1eHN2NmhjdWV1OG12eXB2dTRudHltaSZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/artj92V8o75VPL7AeQ/giphy.gif" alt="Festa" style="width: 100px; border-radius: 50%; box-shadow: 0 0 25px rgba(16, 185, 129, 0.3);">
+                                        </div>
+
+                                        <h1 style="color: #34d399; margin: 0 0 15px 0; font-size: 28px; font-weight: 900; text-align: center; text-transform: uppercase; letter-spacing: 1px;">Pagamento Aprovado! 🎉</h1>
+                           
+                                        
+                                        <p style="color: #cbd5e1; font-size: 16px; margin-bottom: 30px; text-align: center;">Olá, <strong style="color: #ffffff;">${order.userName || 'Aluno'}</strong>! Que incrível ter você com a gente.</p>
+                                        
+                                        <!-- Card do Produto com Borda Gradiente -->
+                                        <div style="background: linear-gradient(to right, #4f46e5, #9333ea); padding: 3px; border-radius: 16px; margin-bottom: 30px;">
+                                            <div style="background-color: #0f0f13; padding: 25px; border-radius: 14px; text-align: center;">
+                                                <img src="${capaDoProduto}" alt="Capa do Produto" style="width: 100%; max-height: 250px; object-fit: cover; border-radius: 10px; margin-bottom: 15px; border: 1px solid rgba(255,255,255,0.1);">
+                                                <h2 style="color: #ffffff; margin: 0 0 10px 0; font-size: 22px;">${nomeDoProduto}</h2>
+                                                <span style="display: inline-block; background-color: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16, 185, 129, 0.3); color: #34d399; padding: 5px 15px; border-radius: 50px; font-size: 14px; font-weight: bold;">R$ ${precoDoProduto}</span>
+                                            </div>
+                                        </div>
+                                        
+                                        <p style="color: #94a3b8; font-size: 15px; line-height: 1.6; margin-bottom: 35px; text-align: center;">Seu produto exclusivo já foi liberado no sistema. Clique no botão abaixo para ir direto para a sua área de membros e começar a aproveitar agora mesmo!</p>
+                                        
+                                        <!-- Botão de Acesso Estilizado -->
+                                        <div style="text-align: center;">
+                                            <a href="${linkPlataforma}" style="display: inline-block; background: linear-gradient(to right, #4f46e5, #7e22ce); color: #ffffff; text-decoration: none; font-size: 16px; font-weight: 900; padding: 18px 40px; border-radius: 50px; box-shadow: 0 10px 20px rgba(126, 34, 206, 0.4); text-transform: uppercase; letter-spacing: 1px;">Acessar Plataforma 🚀</a>
+                                        </div>
+                                        
+                                        <p style="color: #475569; font-size: 12px; margin-top: 40px; text-align: center;">Equipe ${platformName}</p>
+                                    </div>
+                                </div>
+                            `;
+
                             fetch("https://script.google.com/macros/s/AKfycbzyuxuOw0fx5YiAWuE_PaN8JE9VrupAStYQfKk6fFDMiLMn7BARtbLagoF3sPbhg9A/exec", {
                                 method: "POST", 
                                 mode: "no-cors", 
                                 headers: { "Content-Type": "text/plain;charset=utf-8" },
                                 body: JSON.stringify({
+                                    type: "transactional",
                                     to: order.userEmail,
-                                    userName: order.userName || 'Aluno',
-                                    itemName: order.productTitle || 'Produto VIP',
-                                    itemImage: capaDoProduto,
-                                    itemType: "product"
+                                    subject: `Pagamento Aprovado: ${nomeDoProduto} 🎉`,
+                                    body: compraBodyHTML,
+                                    senderName: `Equipe ${platformName}`
                                 })
                             }).catch(e => console.log("Erro no e-mail de Produto: ", e));
                         }
@@ -1522,7 +1707,6 @@ const StudentMarketplace = ({ db, user, settings, showNotification, promotions =
         return [];
     };
 
-    // 👇 NOVA LÓGICA DE FILTRAGEM E CATEGORIAS 👇
     const availableCategories = ['Todas', ...new Set(products.map(p => p.category || p.categoria || 'Outros'))];
 
     const filteredProducts = selectedCategory === 'Todas'
@@ -1536,7 +1720,6 @@ const StudentMarketplace = ({ db, user, settings, showNotification, promotions =
                 <div><h2 className="text-2xl md:text-3xl font-black text-white tracking-tight">Loja Exclusiva</h2></div>
             </div>
 
-            {/* 👇 BARRA DE CATEGORIAS DA LOJA 👇 */}
             {!isLoading && products.length > 0 && availableCategories.length > 1 && (
                 <div className="mb-8 flex gap-3 overflow-x-auto py-2 snap-x custom-scrollbar">
                     {availableCategories.map((cat, idx) => (
@@ -1561,7 +1744,7 @@ const StudentMarketplace = ({ db, user, settings, showNotification, promotions =
                 <div className="text-center py-20 border-2 border-dashed border-white/10 rounded-2xl bg-white/5"><p className="font-medium text-slate-400">Nenhum produto disponível nesta categoria.</p></div>
             ) : (
                 <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 sm:gap-6">
-                    {filteredProducts.map(prod => { // <-- AGORA USA filteredProducts
+                    {filteredProducts.map(prod => { 
                         const isOutOfStock = Number(prod.stock) <= 0;
                         const discountInfo = getDiscountInfo(prod.id, 'product', prod.price);
                         const isOwned = purchasedProducts.includes(prod.id); 
@@ -1613,7 +1796,6 @@ const StudentMarketplace = ({ db, user, settings, showNotification, promotions =
                 </div>
             )}
 
-            {/* O Restante do Modal de Produtos Fica Igual... */}
             {selectedProduct && (
                 <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 pb-24 md:p-8 md:pb-20 bg-black/80 backdrop-blur-sm animate-fade-in" onClick={() => { setSelectedProduct(null); setCurrentImageIndex(0); }}>
                     <div className="bg-slate-900 border border-[#333] w-full md:max-w-4xl rounded-2xl md:rounded-3xl overflow-hidden flex flex-col md:flex-row shadow-[0_0_50px_rgba(0,0,0,0.8)] relative max-h-[80vh] md:max-h-[75vh] animate-scale-in" onClick={e => e.stopPropagation()}>
@@ -1663,15 +1845,32 @@ const StudentMarketplace = ({ db, user, settings, showNotification, promotions =
 
                             <div className="mt-auto pt-4 border-t border-white/5 relative z-10 shrink-0">
                                 {purchasedProducts.includes(selectedProduct.id) ? (
-                                    <button onClick={() => {
-                                        const files = getProductFiles(selectedProduct);
-                                        setViewingProduct(selectedProduct);
-                                        setActiveProductFile(files.length > 0 ? files[0] : null);
-                                        setSelectedProduct(null);
-                                        setCurrentImageIndex(0);
-                                    }} className="w-full py-4 rounded-xl font-bold uppercase tracking-wider flex items-center justify-center gap-2 transition-all bg-emerald-600 hover:bg-emerald-500 text-white shadow-[0_0_20px_rgba(16,185,129,0.3)] hover:-translate-y-1">
-                                        <CheckCircle className="w-5 h-5"/> Acessar Arquivos
-                                    </button>
+                                    <div className="flex flex-col gap-3">
+                                        <button onClick={() => {
+                                            const files = getProductFiles(selectedProduct);
+                                            setViewingProduct(selectedProduct);
+                                            setActiveProductFile(files.length > 0 ? files[0] : null);
+                                            setSelectedProduct(null);
+                                            setCurrentImageIndex(0);
+                                        }} className="w-full py-4 rounded-xl font-bold uppercase tracking-wider flex items-center justify-center gap-2 transition-all bg-emerald-600 hover:bg-emerald-500 text-white shadow-[0_0_20px_rgba(16,185,129,0.3)] hover:-translate-y-1">
+                                            <CheckCircle className="w-5 h-5"/> Acessar Arquivos
+                                        </button>
+                                        
+                                        {/* 👇 O BOTÃO DINÂMICO AQUI 👇 */}
+                                        <div className="flex justify-center mt-2">
+                                            <button 
+                                                onClick={(e) => { 
+                                                    if(e && typeof e.stopPropagation === 'function') e.stopPropagation(); 
+                                                    handleCancelarCompraProduto(selectedProduct); 
+                                                }}
+                                                className="group/cancel relative p-3 rounded-xl transition-all bg-red-500/10 hover:bg-red-600 text-red-500 hover:text-white border border-red-500/20 hover:-translate-y-0.5 flex items-center gap-0 hover:gap-2 overflow-hidden"
+                                            >
+                                                <Trash2 className="w-5 h-5 shrink-0"/>
+                                                <span className="max-w-0 overflow-hidden group-hover/cancel:max-w-xs transition-all duration-500 text-[10px] font-black uppercase tracking-widest whitespace-nowrap">Cancelar e Estornar</span>
+                                            </button>
+                                        </div>
+                                        {/* 👆 FIM DO BOTÃO 👇 */}
+                                    </div>
                                 ) : (
                                     <button onClick={() => handleBuyClick(selectedProduct)} disabled={Number(selectedProduct.stock) <= 0} className={`w-full py-4 rounded-xl font-bold uppercase tracking-wider flex items-center justify-center gap-2 transition-all ${Number(selectedProduct.stock) <= 0 ? 'bg-slate-800 text-slate-500 cursor-not-allowed' : 'bg-indigo-600 hover:bg-indigo-500 hover:-translate-y-1 text-white shadow-[0_0_20px_rgba(79,70,229,0.3)]'}`}>
                                         <ShoppingBag className="w-5 h-5"/> {Number(selectedProduct.stock) <= 0 ? 'Sem Estoque' : 'Comprar Agora'}
@@ -1683,137 +1882,62 @@ const StudentMarketplace = ({ db, user, settings, showNotification, promotions =
                 </div>
             )}
 
-            {/* Modal de Múltiplos Arquivos */}
-            {viewingProduct && (
-                <div className="fixed inset-0 z-[9999] flex items-center justify-center p-2 sm:p-8 bg-black/95 backdrop-blur-md animate-fade-in" onClick={() => { setViewingProduct(null); setActiveProductFile(null); }}>
-                    
-                    <button onClick={() => { setViewingProduct(null); setActiveProductFile(null); }} className="absolute top-3 right-3 md:top-6 md:right-6 z-[10000] bg-white/10 hover:bg-red-500 text-white p-2 md:p-3 rounded-full border border-white/20 transition-all shadow-2xl backdrop-blur-md">
-                        <X className="w-5 h-5 md:w-6 md:h-6" />
-                    </button>
-
-                    <div className="relative z-[9999] flex flex-col md:flex-row w-full max-w-6xl h-full max-h-[90vh] md:max-h-[85vh] bg-[#0a0a0f] rounded-2xl md:rounded-3xl border border-white/10 shadow-[0_0_50px_rgba(0,0,0,0.8)] overflow-hidden mt-8 md:mt-0" onClick={e => e.stopPropagation()}>
+            {/* 👇 INÍCIO DO MODAL DE CANCELAMENTO QUE FALTAVA 👇 */}
+            {cancelModal.isOpen && (
+                <div className="fixed inset-0 z-[10000] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-fade-in" onClick={() => !cancelModal.isProcessing && setCancelModal({ isOpen: false, product: null, reason: '', customText: '', isProcessing: false })}>
+                    <div className="bg-[#0a0a0f] border border-[#333] w-full max-w-md rounded-3xl p-6 md:p-8 shadow-2xl relative animate-scale-in flex flex-col" onClick={e => e.stopPropagation()}>
+                        <h3 className="text-xl md:text-2xl font-black text-white mb-2">Solicitar Cancelamento</h3>
+                        <p className="text-sm text-slate-400 mb-6">Nos conte o motivo do cancelamento. O estorno será avaliado pelo suporte.</p>
                         
-                        <div className="w-full md:w-80 bg-[#111] border-b md:border-b-0 md:border-r border-white/10 flex flex-col shrink-0 h-[30vh] md:h-full">
-                            <div className="p-4 md:p-5 border-b border-white/10 bg-[#0a0a0a] shrink-0">
-                                <h3 className="text-base md:text-lg font-black text-white line-clamp-2">{viewingProduct.title}</h3>
-                                <p className="text-[10px] md:text-xs text-emerald-400 font-bold uppercase tracking-widest mt-1.5 flex items-center gap-1.5">
-                                    <CheckCircle size={14}/> Arquivos Liberados
-                                </p>
-                            </div>
-                            
-                            <div className="flex-1 overflow-y-auto custom-scrollbar p-2 md:p-3 space-y-2">
-                                {(() => {
-                                    const files = getProductFiles(viewingProduct);
-                                    if (files.length === 0) return <p className="text-center text-white/40 text-xs mt-10">Nenhum arquivo encontrado.</p>;
-                                    
-                                    return files.map((f, idx) => (
-                                        <button 
-                                            key={idx}
-                                            onClick={() => setActiveProductFile(f)}
-                                            className={`w-full flex items-center gap-3 p-2.5 md:p-3 rounded-xl transition-all text-left border ${activeProductFile?.url === f.url ? 'bg-indigo-600/20 border-indigo-500/50 text-white shadow-inner' : 'bg-black/20 border-white/5 text-white/70 hover:bg-white/5 hover:text-white hover:border-white/20'}`}
-                                        >
-                                            <div className={`p-2 md:p-2.5 rounded-lg shrink-0 ${activeProductFile?.url === f.url ? 'bg-indigo-600 text-white shadow-lg' : 'bg-white/10 text-white/50'}`}>
-                                                {f.type === 'video' ? <Video size={16}/> : f.type === 'pdf' ? <FileText size={16}/> : f.type === 'image' ? <ImageIcon size={16}/> : <Download size={16}/>}
-                                            </div>
-                                            <div className="flex-1 min-w-0">
-                                                <p className="font-bold text-xs md:text-sm truncate leading-tight">{f.name || `Arquivo ${idx + 1}`}</p>
-                                                <p className={`text-[9px] md:text-[10px] uppercase tracking-widest font-bold mt-0.5 md:mt-1 ${activeProductFile?.url === f.url ? 'text-indigo-300' : 'text-white/40'}`}>
-                                                    {f.type === 'video' ? 'Vídeo Aula' : f.type === 'pdf' ? 'Documento PDF' : f.type === 'image' ? 'Imagem' : 'Arquivo Externo'}
-                                                </p>
-                                            </div>
-                                        </button>
-                                    ))
-                                })()}
-                            </div>
+                        <div className="space-y-3 mb-6">
+                            {['Arrependimento da compra', 'Produto diferente do esperado', 'Problemas financeiros', 'Outro'].map((motivo) => (
+                                <label key={motivo} className={`flex items-center gap-3 p-3.5 rounded-xl border cursor-pointer transition-all ${cancelModal.reason === motivo ? 'bg-red-500/10 border-red-500 text-white' : 'bg-white/5 border-white/10 text-slate-300 hover:border-white/30'}`}>
+                                    <input 
+                                        type="radio" 
+                                        name="cancelReason" 
+                                        checked={cancelModal.reason === motivo}
+                                        onChange={() => setCancelModal(prev => ({ ...prev, reason: motivo }))}
+                                        className="w-4 h-4 accent-red-500"
+                                    />
+                                    <span className="text-sm font-bold">{motivo}</span>
+                                </label>
+                            ))}
                         </div>
 
-                        <div className="flex-1 flex flex-col relative bg-black overflow-hidden h-[60vh] md:h-full">
-                            {activeProductFile ? (
-                                <>
-                                    <div className="p-3 md:p-4 bg-[#111] border-b border-white/10 flex justify-between items-center shrink-0 z-20 shadow-lg">
-                                        <h4 className="text-white font-bold text-xs md:text-base line-clamp-1 pr-2 md:pr-4">{activeProductFile.name}</h4>
-                                        <button 
-                                            onClick={(e) => { e.preventDefault(); handleForceDownload(activeProductFile.url, activeProductFile.name); }}
-                                            disabled={isDownloading}
-                                            className="bg-indigo-600 hover:bg-indigo-500 text-white px-3 py-2 md:px-4 md:py-2.5 rounded-lg font-bold text-[10px] md:text-sm flex items-center gap-1.5 md:gap-2 transition-all shadow-[0_0_15px_rgba(79,70,229,0.4)] shrink-0 active:scale-95 disabled:opacity-50"
-                                        >
-                                            {isDownloading ? <div className="w-3 h-3 md:w-4 md:h-4 border-2 border-white/50 border-t-white rounded-full animate-spin"></div> : <Download size={14} className="md:w-4 md:h-4" />}
-                                            <span className="hidden sm:inline">{isDownloading ? 'Baixando...' : 'Baixar Arquivo'}</span>
-                                            <span className="sm:hidden">{isDownloading ? '...' : 'Baixar'}</span>
-                                        </button>
-                                    </div>
-                                    
-                                    <div className="flex-1 w-full flex items-center justify-center p-0 md:p-6 relative overflow-hidden bg-[#050505]">
-                                        {(() => {
-                                            const url = (activeProductFile.url || '').toLowerCase();
-                                            const type = activeProductFile.type || 'arquivo';
+                        {cancelModal.reason === 'Outro' && (
+                            <div className="mb-6 animate-fade-in">
+                                <textarea 
+                                    placeholder="Descreva brevemente o motivo..."
+                                    className="w-full bg-black/50 border border-white/10 rounded-xl p-4 text-sm text-white placeholder-slate-500 focus:border-red-500 outline-none resize-none h-24 custom-scrollbar"
+                                    value={cancelModal.customText}
+                                    onChange={(e) => setCancelModal(prev => ({ ...prev, customText: e.target.value }))}
+                                ></textarea>
+                            </div>
+                        )}
 
-                                            if (type === 'video' || url.match(/\.(mp4|webm|ogg)$/)) {
-                                                if(url.includes('youtube.com') || url.includes('youtu.be') || url.includes('vimeo')) {
-                                                    return <iframe src={activeProductFile.url} className="w-full h-full border-none md:rounded-2xl bg-black" allowFullScreen></iframe>
-                                                }
-                                                return (
-                                                    <div className="w-full h-full md:rounded-2xl overflow-hidden shadow-2xl md:border border-white/10 relative">
-                                                        <CustomVideoPlayer 
-                                                            src={activeProductFile.url} 
-                                                            isCompleted={true} 
-                                                            onEnded={() => {}} 
-                                                            showNotification={showNotification}
-                                                        />
-                                                    </div>
-                                                );
-                                            } else if (type === 'image' || url.match(/\.(jpeg|jpg|gif|png|webp)$/)) {
-                                                return <img src={activeProductFile.url} className="max-w-full max-h-full object-contain md:rounded-2xl shadow-2xl border-none md:border border-white/5" alt="Preview Imagem" />;
-                                            } else if (type === 'pdf' || url.match(/\.(pdf)$/)) {
-                                                return <iframe src={`${activeProductFile.url}#view=FitH`} className="w-full h-full bg-white md:rounded-2xl shadow-2xl border-none"></iframe>;
-                                            } else if (type === 'audio' || url.match(/\.(mp3|wav|ogg|m4a)$/i)) {
-                                                return (
-                                                    <div className="w-full px-4 flex items-center justify-center h-full">
-                                                        <MarketplaceAudioPlayer 
-                                                            url={activeProductFile.url} 
-                                                            name={activeProductFile.name} 
-                                                            onDownload={() => handleForceDownload(activeProductFile.url, activeProductFile.name)}
-                                                            isDownloading={isDownloading}
-                                                        />
-                                                    </div>
-                                                );
-                                            } else {
-                                                return (
-                                                    <div className="text-center p-6 md:p-8 max-w-sm bg-[#111] rounded-2xl border border-white/5 shadow-2xl m-4">
-                                                        <div className="w-16 h-16 md:w-20 md:h-20 bg-indigo-500/20 text-indigo-400 rounded-full flex items-center justify-center mx-auto mb-4 md:mb-5 shadow-inner">
-                                                            <LinkIcon size={24} className="md:w-8 md:h-8" />
-                                                        </div>
-                                                        <h4 className="text-lg md:text-xl font-bold text-white mb-2 md:mb-3">Download Disponível</h4>
-                                                        <p className="text-white/50 mb-6 md:mb-8 text-xs md:text-sm leading-relaxed">Este tipo de arquivo precisa ser baixado para ser aberto no seu dispositivo.</p>
-                                                        <button 
-                                                            onClick={(e) => { e.preventDefault(); handleForceDownload(activeProductFile.url, activeProductFile.name); }}
-                                                            disabled={isDownloading}
-                                                            className="w-full bg-white text-black px-4 md:px-6 py-3 md:py-4 rounded-xl font-extrabold shadow-xl hover:bg-gray-200 transition-colors flex items-center justify-center gap-2 disabled:opacity-50 text-sm md:text-base"
-                                                        >
-                                                            {isDownloading ? <div className="w-4 h-4 md:w-5 md:h-5 border-2 border-black/50 border-t-black rounded-full animate-spin"></div> : <Download size={18} />} 
-                                                            {isDownloading ? 'Baixando Arquivo...' : 'Fazer Download Agora'}
-                                                        </button>
-                                                    </div>
-                                                );
-                                            }
-                                        })()}
-                                    </div>
-                                </>
-                            ) : (
-                                <div className="flex-1 flex flex-col items-center justify-center text-center p-8">
-                                    <div className="w-16 h-16 md:w-20 md:h-20 bg-white/5 rounded-full flex items-center justify-center mx-auto mb-4 border border-white/10">
-                                        <FileText size={28} className="md:w-8 md:h-8 text-white/20" />
-                                    </div>
-                                    <h4 className="text-base md:text-lg font-bold text-white mb-2">Selecione um Arquivo</h4>
-                                    <p className="text-white/40 text-xs md:text-sm leading-relaxed">Escolha um item na lista ao lado para visualizar ou baixar.</p>
-                                </div>
-                            )}
+                        <div className="flex gap-3 mt-auto">
+                            <button 
+                                onClick={() => setCancelModal({ isOpen: false, product: null, reason: '', customText: '', isProcessing: false })}
+                                className="flex-1 py-3.5 bg-white/10 hover:bg-white/20 text-white rounded-xl text-sm font-bold transition-colors"
+                                disabled={cancelModal.isProcessing}
+                            >
+                                Manter Compra
+                            </button>
+                            <button 
+                                onClick={executeCancelProduct}
+                                disabled={cancelModal.isProcessing || !cancelModal.reason}
+                                className="flex-1 py-3.5 bg-red-600 hover:bg-red-500 text-white rounded-xl text-sm font-bold flex items-center justify-center gap-2 transition-all disabled:opacity-50"
+                            >
+                                {cancelModal.isProcessing ? <div className="w-5 h-5 border-2 border-white/50 border-t-white rounded-full animate-spin"></div> : <Trash2 className="w-5 h-5" />}
+                                Confirmar
+                            </button>
                         </div>
                     </div>
                 </div>
             )}
+            {/* 👆 FIM DO MODAL DE CANCELAMENTO 👆 */}
 
-            {/* 👇 CÓDIGO NOVO: MODAL DE CHECKOUT DA LOJA SENDO EXIBIDO 👇 */}
+
             {checkoutProduct && (
                 <MarketplaceCheckoutModal 
                     product={checkoutProduct} 
@@ -1824,8 +1948,7 @@ const StudentMarketplace = ({ db, user, settings, showNotification, promotions =
                     db={db} 
                 />
             )}
-            {/* 👆 FIM DO CÓDIGO NOVO 👆 */}
-
+       
         </div>
     );
 };
@@ -6838,7 +6961,12 @@ Retorne APENAS um array JSON puro (SEM crases, SEM formatação markdown), com e
                                     <div key={c.id} onClick={() => onSelectCourse(c)} className="bg-white/5 hover:bg-white/10 border border-white/5 hover:border-white/20 rounded-2xl p-4 flex gap-4 cursor-pointer transition-all group">
                                         <img src={c.cover} className="w-16 h-16 rounded-xl object-cover border border-white/10 shrink-0" alt="capa" />
                                         <div className="flex-1 min-w-0 flex flex-col justify-center">
-                                            <h4 className="font-bold text-sm text-white truncate mb-2">{c.title}</h4>
+                                            <h4 className="font-bold text-sm text-white truncate mb-1">{c.title}</h4>
+                                            <div className="mb-2">
+                                                <span className="text-emerald-400 font-bold text-[9px] uppercase tracking-widest">
+                                                    {(parseFloat(String(c.price || 0)) <= 0) ? 'Gratuito' : 'Adquirido'}
+                                                </span>
+                                            </div>
                                             <div className="flex items-center gap-3">
                                                 <div className="flex-1 h-1.5 bg-black/50 rounded-full overflow-hidden">
                                                     <div className="h-full bg-emerald-500 rounded-full" style={{width: `${c.progress}%`}}></div>
@@ -6937,7 +7065,9 @@ Retorne APENAS um array JSON puro (SEM crases, SEM formatação markdown), com e
                                         <div className="w-2 h-2 rounded-full bg-blue-500 animate-pulse"></div>
                                         <div className="flex-1 min-w-0">
                                             <p className="text-xs font-bold text-white truncate">{c.title}</p>
-                                            <p className="text-[10px] text-slate-400">Pendente hoje</p>
+                                            <p className="text-[10px] text-slate-400">
+                                                {(parseFloat(String(c.price || 0)) <= 0) ? 'Gratuito' : 'Adquirido'} • Pendente hoje
+                                            </p>
                                         </div>
                                         <Play size={14} className="text-slate-500" />
                                     </div>
@@ -7127,22 +7257,34 @@ const CategoryCarousel = ({ categoryTitle, coursesList, rowIndex, onSelectCourse
                             <div className="absolute top-3 right-3 z-20 pointer-events-none">
                                 {isOwned ? <div className="w-2.5 h-2.5 bg-purple-500 rounded-full shadow-[0_0_10px_rgba(168,85,247,1)] md:hidden"></div> : <Lock size={12} className="text-white/50 md:hidden drop-shadow-md" />}
                                 <div className="hidden md:block">
-                                    <span className="bg-black/60 backdrop-blur-md text-[10px] px-3 py-1.5 rounded-full text-white font-bold border border-white/10 uppercase tracking-widest shadow-sm">{isOwned ? 'Liberado' : 'Premium'}</span>
-                                </div>
+                                <span className="bg-black/60 backdrop-blur-md text-[10px] px-3 py-1.5 rounded-full text-white font-bold border border-white/10 uppercase tracking-widest shadow-sm">
+                                    {isOwned ? (isFree ? 'Gratuito' : 'Adquirido') : 'Premium'}
+                                </span>
+                            </div>
                             </div>
 
                             <div className="relative z-20 p-4 md:p-6 flex flex-col transform transition-transform duration-500 md:translate-y-12 md:group-hover:translate-y-0 pointer-events-none">
                                 <h3 className="text-white font-black text-sm md:text-xl mb-1 md:mb-2 line-clamp-2 leading-tight drop-shadow-lg">{course.title || course.titulo}</h3>
-                                {!isFree ? (
+                                {isOwned ? (
                                     <div className="mt-1">
-                                        {discountInfo.hasDiscount ? (
-                                            <div className="flex flex-col">
-                                                <span className="text-[10px] md:text-xs text-slate-400 line-through decoration-red-500/50">R$ {discountInfo.originalPrice.toFixed(2).replace('.', ',')}</span>
-                                                <span className="text-emerald-400 font-black text-lg md:text-2xl drop-shadow-md">R$ {discountInfo.finalPrice.toFixed(2).replace('.', ',')}</span>
-                                            </div>
-                                        ) : <span className="text-emerald-400 font-black text-lg md:text-2xl drop-shadow-md">R$ {discountInfo.originalPrice.toFixed(2).replace('.', ',')}</span>}
+                                        <span className="text-emerald-400 font-black text-lg md:text-2xl drop-shadow-md uppercase tracking-widest">
+                                            {isFree ? 'Gratuito' : 'Adquirido'}
+                                        </span>
                                     </div>
-                                ) : !isOwned && <div className="mt-1"><span className="text-emerald-400 font-black text-lg md:text-2xl drop-shadow-md uppercase tracking-widest">Gratuito</span></div>}
+                                ) : (
+                                    <>
+                                        {!isFree ? (
+                                            <div className="mt-1">
+                                                {discountInfo.hasDiscount ? (
+                                                    <div className="flex flex-col">
+                                                        <span className="text-[10px] md:text-xs text-slate-400 line-through decoration-red-500/50">R$ {discountInfo.originalPrice.toFixed(2).replace('.', ',')}</span>
+                                                        <span className="text-emerald-400 font-black text-lg md:text-2xl drop-shadow-md">R$ {discountInfo.finalPrice.toFixed(2).replace('.', ',')}</span>
+                                                    </div>
+                                                ) : <span className="text-emerald-400 font-black text-lg md:text-2xl drop-shadow-md">R$ {discountInfo.originalPrice.toFixed(2).replace('.', ',')}</span>}
+                                            </div>
+                                        ) : <div className="mt-1"><span className="text-emerald-400 font-black text-lg md:text-2xl drop-shadow-md uppercase tracking-widest">Gratuito</span></div>}
+                                    </>
+                                )}
 
                                 <div className="w-full mt-4 py-2.5 md:py-3 bg-indigo-600/90 text-white rounded-xl font-bold text-[10px] md:text-xs flex items-center justify-center gap-2 transition-all md:opacity-0 md:group-hover:opacity-100 duration-300 shadow-[0_0_15px_rgba(79,70,229,0.5)] backdrop-blur-sm pointer-events-auto">
                                     <Play size={14} fill="currentColor" /> {isOwned ? 'Acessar Agora' : 'Garantir Vaga'}
@@ -7182,14 +7324,16 @@ const CatalogSection = ({ onSelectCourse, onBuyCourse, purchasedIds = [], allCou
         if (!promo) return { hasDiscount: false, originalPrice: price, finalPrice: price };
 
         if (promo.conditionType === 'buy_other') {
-            if (promo.conditionTargetType === 'course' && !purchasedIds.includes(promo.conditionTargetId)) return { hasDiscount: false, originalPrice: price, finalPrice: price };
+            if (promo.conditionTargetType === 'course' && !purchasedCourses.includes(promo.conditionTargetId)) return { hasDiscount: false, originalPrice: price, finalPrice: price };
             if (promo.conditionTargetType === 'product' && !purchasedProducts.includes(promo.conditionTargetId)) return { hasDiscount: false, originalPrice: price, finalPrice: price };
         }
 
         let finalPrice = promo.discountType === 'percentage' ? price - (price * (promo.discountValue / 100)) : price - promo.discountValue;
 
         return {
-            hasDiscount: true, originalPrice: price, finalPrice: Math.max(0, finalPrice),
+            hasDiscount: true,
+            originalPrice: price,
+            finalPrice: Math.max(0, finalPrice),
             tag: promo.discountType === 'percentage' ? `-${promo.discountValue}%` : `-R$${promo.discountValue}`
         };
     };
@@ -8776,9 +8920,14 @@ const CommunityTab = ({ user, showNotification }) => {
                                 
                                 {/* Textos Formatados (Mesma estrutura dos certificados) */}
                                 <div>
-                                    <span className="text-[10px] font-black text-pink-400 uppercase tracking-widest mb-1 block line-clamp-1">
-                                        {fav.courseName}
-                                    </span>
+                                    <div className="flex justify-between items-center mb-1">
+                                        <span className="text-[10px] font-black text-pink-400 uppercase tracking-widest line-clamp-1">
+                                            {fav.courseName}
+                                        </span>
+                                        <span className="text-[9px] font-black text-emerald-400 uppercase tracking-widest">
+                                            {(parseFloat(String(fav.courseData?.price || 0)) <= 0) ? 'Gratuito' : 'Adquirido'}
+                                        </span>
+                                    </div>
                                     <h4 className="font-bold text-white text-lg mb-1 line-clamp-1">{fav.titulo}</h4>
                                     <p className="text-xs text-white/50 flex items-center gap-1.5 truncate">
                                         <Video className="w-3.5 h-3.5 shrink-0"/> <span className="truncate">{fav.moduleName}</span>
@@ -8879,7 +9028,10 @@ const PointsWalletSection = ({ user, courses, purchasedIds, userPoints, db, setP
                             userName: user.displayName || 'Aluno',
                             itemName: course.title || course.titulo,
                             itemImage: capaDoCurso,
-                            itemType: "points_exchange" // Avisa o Google que foi resgate por pontos
+                            itemType: "course", // MUDADO PARA COURSE PARA LIBERAR ACESSO
+                            subject: "Seu Acesso via Recompensa foi Liberado!",
+                            titleHeader: "RECOMPENSA LIBERADA",
+                            message: `Parabéns! Você resgatou "${course.title || course.titulo}" utilizando seus pontos. O seu acesso ao curso já foi liberado na área do aluno.`
                         })
                     }).catch(e => console.log("Erro no e-mail de resgate: ", e));
                     // 👆 FIM DO DISPARO 👇
@@ -8985,11 +9137,105 @@ const PointsWalletSection = ({ user, courses, purchasedIds, userPoints, db, setP
 
 
 // =================================================================================
-// COMPONENTE: MEUS CURSOS (CORRIGIDO PARA MOBILE - CLIQUES FLUIDOS)
+// COMPONENTE: MEUS CURSOS (BLINDADO CONTRA ERRO DE CLICK / STOP_PROPAGATION)
 // =================================================================================
-const MyCoursesSection = ({ courses, purchasedIds, onSelectCourse }) => {
+const MyCoursesSection = ({ courses, purchasedIds, onSelectCourse, user, db, setPurchasedIds, showNotification, settings, requestConfirmation }) => {
     // Filtra para mostrar apenas os cursos cujo ID está na lista de comprados
     const myCourses = courses.filter(course => purchasedIds.includes(course.id));
+
+    // 👇 NOVO: ESTADO DO MODAL DE CANCELAMENTO DE CURSOS 👇
+    const [cancelModal, setCancelModal] = useState({ isOpen: false, course: null, reason: '', customText: '', isProcessing: false });
+
+// 👇 NOVA FUNÇÃO DE CANCELAMENTO DE CURSOS 👇
+    const handleCancelarCompra = (course) => {
+        setCancelModal({ isOpen: true, course: course, reason: '', customText: '', isProcessing: false });
+    };
+
+   const executeCancelCourse = async () => {
+        const { course, reason, customText } = cancelModal;
+        if (!reason) return showNotification("Por favor, selecione um motivo.", "warning");
+        if (reason === 'Outro' && !customText.trim()) return showNotification("Por favor, digite o motivo.", "warning");
+
+        setCancelModal(prev => ({ ...prev, isProcessing: true }));
+        const isFree = parseFloat(String(course.price || 0)) <= 0;
+        const motivoFinal = reason === 'Outro' ? customText : reason;
+
+        try {
+            if (showNotification) showNotification("Enviando solicitação de cancelamento...", "info");
+    
+            const validStatus = ["pago", "approved", "aprovado", "liberado", "concluido", "concluído"];
+            let qTrans = query(collection(db, "transactions"), where("userEmail", "==", user.email), where("courseId", "==", course.id), where("status", "in", validStatus));
+            let transSnap = await getDocs(qTrans);
+    
+            if (transSnap.empty) {
+                const courseTitle = course.title || course.titulo;
+                qTrans = query(collection(db, "transactions"), where("userEmail", "==", user.email), where("courseTitle", "==", courseTitle), where("status", "in", validStatus));
+                transSnap = await getDocs(qTrans);
+            }
+
+            if (transSnap.empty) {
+                qTrans = query(collection(db, "transactions"), where("userEmail", "==", user.email), where("courseId", "==", course.id));
+                transSnap = await getDocs(qTrans);
+            }
+    
+            if (!transSnap.empty) {
+                // ATUALIZADO: Agora apenas envia o pedido para o painel Admin e bloqueia o acesso
+                for (let docSnap of transSnap.docs) {
+                    await updateDoc(doc(db, "transactions", docSnap.id), {
+                        status: 'solicitado_cancelamento',
+                        cancelReason: motivoFinal, // Envia o motivo para o seu painel
+                        updatedAt: serverTimestamp()
+                    });
+                }
+        
+                if (setPurchasedIds) setPurchasedIds(prev => prev.filter(id => id !== course.id));
+                if (showNotification) showNotification("Solicitação enviada! O administrador avaliará em breve.", "success");
+
+                // Envio de Email
+                const platformName = settings?.siteName || "Nossa Plataforma";
+                const logoUrl = settings?.siteLogoUrl || settings?.logoUrl || ""; 
+                const capaDoCurso = course.cover || course.thumbnailUrl || "https://images.unsplash.com/photo-1616469829941-c7200edec809?q=80&w=600";
+                const nomeDoCurso = course.title || course.titulo || 'Curso';
+                const precoFinal = isFree ? "0,00" : parseFloat(course.price || 0).toFixed(2).replace('.', ',');
+
+                const cancelCourseBodyHTML = `
+                    <div style="background-color:#f8fafc;padding:40px 20px;font-family:sans-serif;">
+                        <div style="max-width:600px;margin:0 auto;background-color:#ffffff;padding:40px;border-radius:24px;box-shadow:0 10px 25px rgba(0,0,0,0.05);color:#1e293b;">
+                            ${logoUrl ? `<div style="text-align: center; margin-bottom: 30px;"><img src="${logoUrl}" alt="${platformName}" style="max-height: 70px; max-width: 200px; object-fit: contain;"></div>` : ''}
+                            <div style="text-align: center; margin-bottom: 20px;">
+                                <h2 style="color: #f59e0b; margin: 0; font-size: 24px;">Solicitação de Cancelamento Recebida</h2>
+                            </div>
+                            <p style="font-size:16px;">Olá, <strong>${user.displayName || 'Aluno'}</strong>.</p>
+                            <p style="font-size:16px;line-height:1.6;">Recebemos o seu pedido de cancelamento para o curso na ${platformName}.</p>
+                            <div style="text-align:center;margin:30px 0;">
+                                <img src="${capaDoCurso}" style="max-width:100%;max-height:250px;border-radius:12px;box-shadow:0 4px 10px rgba(0,0,0,0.1);" alt="Capa">
+                            </div>
+                            <div style="background-color:#fffbeb;padding:20px;border-radius:12px;margin-top:20px;border:1px solid #fde68a;">
+                                <p style="margin:0 0 10px 0;font-size:14px;color:#b45309;">Curso: <strong style="color:#92400e;">${nomeDoCurso}</strong></p>
+                                <p style="margin:0 0 10px 0;font-size:14px;color:#b45309;">Motivo: <strong style="color:#92400e;">${motivoFinal}</strong></p>
+                                <p style="margin:0;font-size:14px;color:#b45309;">Valor a ser estornado: <strong style="color:#f59e0b;">R$ ${precoFinal}</strong></p>
+                            </div>
+                            <p style="font-size:14px;line-height:1.6;margin-top:20px;color:#64748b;">Nossa equipe analisará sua solicitação e o estorno será processado em breve de acordo com as políticas do sistema de pagamento.</p>
+                        </div>
+                    </div>
+                `;
+
+                fetch("https://script.google.com/macros/s/AKfycbzyuxuOw0fx5YiAWuE_PaN8JE9VrupAStYQfKk6fFDMiLMn7BARtbLagoF3sPbhg9A/exec", {
+                    method: "POST", mode: "no-cors", headers: { "Content-Type": "text/plain;charset=utf-8" },
+                    body: JSON.stringify({ type: "transactional", to: user.email, subject: `Solicitação de Cancelamento: ${nomeDoCurso}`, body: cancelCourseBodyHTML, senderName: `Suporte ${platformName}` })
+                }).catch(e => console.log(e));
+
+            } else {
+                if (showNotification) showNotification("Registro de compra original não encontrado no sistema.", "error");
+            }
+        } catch (error) {
+            console.error("Erro geral no cancelamento:", error);
+            if (showNotification) showNotification("Houve um erro técnico ao processar a solicitação.", "error");
+        } finally {
+            setCancelModal({ isOpen: false, course: null, reason: '', customText: '', isProcessing: false });
+        }
+    };
+    // 👆 FIM DA NOVA FUNÇÃO 👆
 
     return (
         <div className="space-y-4 md:space-y-10 animate-fade-in max-w-[100rem] mx-auto mt-16 md:mt-28 mb-10 px-3 md:px-8 lg:px-12 font-sans">
@@ -9029,8 +9275,8 @@ const MyCoursesSection = ({ courses, purchasedIds, onSelectCourse }) => {
                             <img src={course.thumbnailUrl || course.cover || "https://images.unsplash.com/photo-1616469829941-c7200edec809?q=80&w=600&auto=format&fit=crop"} alt={course.title} draggable="false" className="absolute inset-0 w-full h-full object-cover opacity-80 md:group-hover:scale-110 md:group-hover:opacity-100 transition-transform duration-700 pointer-events-none" />
                             <div className="absolute inset-0 bg-gradient-to-t from-[#050505] via-[#050505]/40 to-transparent opacity-90 pointer-events-none"></div>
                             
-                            <div className="absolute top-2 right-2 bg-indigo-600 text-white text-[8px] md:text-[10px] font-bold px-2 py-1 rounded-full border border-white/20 shadow-lg pointer-events-none">
-                                Liberado
+                            <div className={`absolute top-2 right-2 ${(parseFloat(String(course.price || 0)) <= 0) ? 'bg-emerald-600' : 'bg-indigo-600'} text-white text-[8px] md:text-[10px] font-bold px-2 py-1 rounded-full border border-white/20 shadow-lg pointer-events-none`}>
+                                {(parseFloat(String(course.price || 0)) <= 0) ? 'Gratuito' : 'Adquirido'}
                             </div>
 
                             {/* Play Button Central (Oculto no mobile para evitar bug de hover preso) */}
@@ -9040,20 +9286,100 @@ const MyCoursesSection = ({ courses, purchasedIds, onSelectCourse }) => {
                                 </div>
                             </div>
 
-                            <div className="absolute inset-x-0 bottom-0 p-2 md:p-4 flex flex-col z-20 pointer-events-none">
-                                <h3 className="text-white font-bold text-xs md:text-sm mb-1 line-clamp-2 leading-tight drop-shadow-md">{course.title || course.titulo}</h3>
-                                {/* Usamos uma div visual em vez de button para não conflitar com o clique principal do card */}
-                                <div className="w-full mt-2 py-1.5 md:py-2 bg-indigo-600/90 md:bg-indigo-600 md:group-hover:bg-indigo-500 text-white rounded-lg font-bold text-[9px] md:text-xs flex items-center justify-center gap-1.5 transition-colors shadow-md">
-                                    <Play size={12} fill="currentColor" /> Acessar
+                            {/* RODAPÉ INTERATIVO COM MENU DE CANCELAMENTO */}
+                            <div className="absolute inset-x-0 bottom-0 p-2 md:p-4 flex flex-col z-20 pointer-events-auto">
+                                <h3 className="text-white font-bold text-xs md:text-sm mb-0.5 line-clamp-2 leading-tight drop-shadow-lg pointer-events-none">{course.title || course.titulo}</h3>
+                                <div className="mb-1">
+                                    <span className="text-emerald-400 font-black text-[9px] md:text-[11px] drop-shadow-md uppercase tracking-widest">
+                                        {(parseFloat(String(course.price || 0)) <= 0) ? 'Gratuito' : 'Adquirido'}
+                                    </span>
+                                </div>
+                                <div className="flex items-center gap-2 mt-1 w-full">
+                                    {/* Botão de Acessar */}
+                                    <div onClick={(e) => { if(e && typeof e.stopPropagation === 'function') e.stopPropagation(); onSelectCourse(course); }} className="flex-1 py-1.5 md:py-2 bg-indigo-600/90 md:bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg font-bold text-[9px] md:text-xs flex items-center justify-center gap-1.5 transition-colors shadow-md cursor-pointer">
+                                        <Play size={12} fill="currentColor" /> Acessar
+                                    </div>
+
+                                    {/* Menu de 3 pontinhos */}
+                                    <div className="relative group/menu">
+                                        <div className="w-7 h-7 md:w-8 md:h-8 bg-black/60 hover:bg-black border border-white/10 rounded-lg flex items-center justify-center text-white cursor-pointer transition-colors shadow-md" onClick={(e) => { if(e && typeof e.stopPropagation === 'function') e.stopPropagation(); }}>
+                                            <MoreVertical size={16} />
+                                        </div>
+                                        
+                                        {/* Painel do Menu (Dropdown) */}
+                                        <div className="absolute bottom-full right-0 mb-2 w-fit bg-[#111] border border-white/10 rounded-xl shadow-2xl opacity-0 invisible group-hover/menu:opacity-100 group-hover/menu:visible transition-all z-50 overflow-hidden">
+                                            <button 
+                                                onClick={(e) => { if(e && typeof e.stopPropagation === 'function') e.stopPropagation(); handleCancelarCompra(course); }}
+                                                className="group/cancel px-4 py-3 flex items-center justify-center gap-0 hover:gap-2 transition-all bg-red-500/10 hover:bg-red-600 text-red-500 hover:text-white overflow-hidden"
+                                            >
+                                                <Trash2 className="w-5 h-5 shrink-0"/>
+                                                <span className="max-w-0 overflow-hidden group-hover/cancel:max-w-xs transition-all duration-500 text-[10px] font-black uppercase tracking-widest whitespace-nowrap">Cancelar e Estornar</span>
+                                            </button>
+                                        </div>
+                                    </div>
                                 </div>
                             </div>
                         </div>
                     ))}
                 </div>
             )}
-        </div>
+        {/* 👇 COLE O MODAL DE CANCELAMENTO DOS CURSOS AQUI, NO FINAL DE TUDO 👇 */}
+            {cancelModal.isOpen && (
+                <div className="fixed inset-0 z-[999999] flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-fade-in" onClick={() => !cancelModal.isProcessing && setCancelModal({ ...cancelModal, isOpen: false })}>
+                    <div className="bg-[#0a0a0f] border border-[#333] rounded-3xl p-6 md:p-8 max-w-md w-full shadow-2xl animate-scale-in relative" onClick={e => e.stopPropagation()}>
+                        
+                        <div className="w-16 h-16 bg-red-500/10 text-red-500 rounded-full flex items-center justify-center mx-auto mb-4 border border-red-500/20">
+                            <Trash2 size={32} />
+                        </div>
+                        
+                        <h3 className="text-xl font-black text-white text-center mb-2">Deseja mesmo cancelar?</h3>
+                        <p className="text-sm text-slate-400 text-center mb-6">Ajude-nos a melhorar informando o motivo do cancelamento do curso <strong>{cancelModal.course?.title || cancelModal.course?.titulo}</strong>.</p>
+
+                        <div className="space-y-3 mb-6">
+                            {['Comprei por engano', 'Não era o que eu esperava', 'Problemas financeiros', 'Outro'].map((motivo) => (
+                                <label key={motivo} className={`flex items-center gap-3 p-3 rounded-xl cursor-pointer transition-all border ${cancelModal.reason === motivo ? 'bg-indigo-600/10 border-indigo-500 text-white' : 'bg-[#111] border-white/5 text-slate-400 hover:bg-white/5'}`}>
+                                    <input 
+                                        type="radio" 
+                                        name="cancelReasonCourse" 
+                                        value={motivo} 
+                                        checked={cancelModal.reason === motivo}
+                                        onChange={(e) => setCancelModal({ ...cancelModal, reason: e.target.value })}
+                                        className="w-4 h-4 text-indigo-600 focus:ring-indigo-500 bg-black border-slate-600"
+                                    />
+                                    <span className="font-medium text-sm">{motivo}</span>
+                                </label>
+                            ))}
+                        </div>
+
+                        {cancelModal.reason === 'Outro' && (
+                            <div className="mb-6 animate-fade-in">
+                                <textarea 
+                                    placeholder="Conte-nos um pouco mais sobre o motivo..."
+                                    value={cancelModal.customText}
+                                    onChange={(e) => setCancelModal({ ...cancelModal, customText: e.target.value })}
+                                    className="w-full bg-[#111] border border-white/10 rounded-xl p-3 text-white text-sm outline-none focus:border-indigo-500 transition-colors resize-none h-24 custom-scrollbar"
+                                />
+                            </div>
+                        )}
+
+                        <div className="flex gap-3">
+                            <button onClick={() => setCancelModal({ ...cancelModal, isOpen: false })} disabled={cancelModal.isProcessing} className="flex-1 py-3.5 rounded-xl border border-white/10 text-white font-bold hover:bg-white/5 transition-colors text-sm disabled:opacity-50">
+                                Voltar
+                            </button>
+                            <button onClick={executeCancelCourse} disabled={cancelModal.isProcessing || !cancelModal.reason} className="flex-1 py-3.5 rounded-xl bg-red-600 hover:bg-red-700 text-white font-bold shadow-[0_8px_20px_rgba(220,38,38,0.3)] transition-all text-sm disabled:opacity-50 flex items-center justify-center">
+                                {cancelModal.isProcessing ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div> : 'Confirmar'}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+        </div> /* Este é o fechamento original do componente MyCoursesSection */
     );
 };
+
+
+
+
 // =================================================================================
 // FIM DO COMPONENTE: MEUS CURSOS
 // =================================================================================
@@ -9422,10 +9748,14 @@ const MindMapSection = ({ user, courses, purchasedIds, setView }) => {
                            
                            if (novoStatus !== order.status) {
                                let capaDoCurso = "https://images.unsplash.com/photo-1616469829941-c7200edec809?q=80&w=600";
+                               let precoDoCurso = order.valor || "0,00";
+                               let tituloDoCurso = order.courseTitle || "Seu Curso";
+
                                try {
                                    const cursoInfo = allCourses.find(c => c.id === order.courseId);
-                                   if (cursoInfo && (cursoInfo.cover || cursoInfo.thumbnailUrl)) {
-                                       capaDoCurso = cursoInfo.cover || cursoInfo.thumbnailUrl;
+                                   if (cursoInfo) {
+                                       if (cursoInfo.cover || cursoInfo.thumbnailUrl) capaDoCurso = cursoInfo.cover || cursoInfo.thumbnailUrl;
+                                       if (cursoInfo.title || cursoInfo.titulo) tituloDoCurso = cursoInfo.title || cursoInfo.titulo;
                                    }
                                } catch(e){}
 
@@ -9436,16 +9766,20 @@ const MindMapSection = ({ user, courses, purchasedIds, setView }) => {
                                });
                                
                                if (novoStatus === 'pago') {
-                                   if(showNotification) showNotification(`🎉 Pagamento aprovado! O curso "${order.courseTitle || 'Adquirido'}" já está liberado.`, "success");
+                                   if(showNotification) showNotification(`🎉 Pagamento aprovado! O curso "${tituloDoCurso}" já está liberado.`, "success");
                                    
                                    fetch("https://script.google.com/macros/s/AKfycbzyuxuOw0fx5YiAWuE_PaN8JE9VrupAStYQfKk6fFDMiLMn7BARtbLagoF3sPbhg9A/exec", {
                                        method: "POST", mode: "no-cors", headers: { "Content-Type": "text/plain;charset=utf-8" },
                                        body: JSON.stringify({
                                            to: order.userEmail,
                                            userName: order.userName || 'Aluno',
-                                           itemName: order.courseTitle || 'Seu Curso',
+                                           itemName: tituloDoCurso,
                                            itemImage: capaDoCurso,
-                                           itemType: "course"
+                                           itemType: "course",
+                                           subject: "Seu Acesso foi Liberado!",
+                                           titleHeader: "ACESSO LIBERADO",
+                                           itemPrice: precoDoCurso,
+                                           message: `Parabéns, ${order.userName || 'Aluno'}! Seu acesso ao curso "${tituloDoCurso}" foi liberado com sucesso. O valor de R$ ${precoDoCurso} foi confirmado e você já pode iniciar sua jornada agora mesmo na plataforma.`
                                        })
                                    }).catch(e => console.log("Erro no e-mail: ", e));
                                    
@@ -9825,19 +10159,21 @@ const MindMapSection = ({ user, courses, purchasedIds, setView }) => {
                                     const transSnapList = await getDocs(qTrans);
                                     setPurchasedIds(transSnapList.docs.map(d => d.data().courseId));
 
-                                   // 👇 DISPARA O E-MAIL BLINDADO CONTRA CORS 👇
+                                   // 👇 DISPARA O E-MAIL DE ACESSO LIBERADO (CURSO) 👇
                                     fetch("https://script.google.com/macros/s/AKfycbzyuxuOw0fx5YiAWuE_PaN8JE9VrupAStYQfKk6fFDMiLMn7BARtbLagoF3sPbhg9A/exec", {
                                         method: "POST",
                                         mode: "no-cors", 
-                                        headers: { 
-                                            "Content-Type": "text/plain;charset=utf-8" // <-- O SEGREDO AQUI!
-                                        },
+                                        headers: { "Content-Type": "text/plain;charset=utf-8" },
                                         body: JSON.stringify({
                                             to: user.email,
                                             userName: user.displayName || 'Aluno',
                                             itemName: nomeDoCurso,
                                             itemImage: capaDoCurso,
-                                            itemPrice: transData.valor || "0,00" // <-- ADICIONADO PARA O SCRIPT FUNCIONAR
+                                            itemType: "course",
+                                            subject: "Seu Acesso foi Liberado!",
+                                            titleHeader: "ACESSO LIBERADO",
+                                            itemPrice: transData.valor || "0,00",
+                                            message: `Parabéns, seu acesso ao curso "${nomeDoCurso}" foi liberado com sucesso! Você já pode iniciar sua jornada agora mesmo na plataforma.`
                                         })
                                     }).catch(e => console.log("E-mail Curso disparado: ", e));
                                 }
@@ -9871,6 +10207,16 @@ const MindMapSection = ({ user, courses, purchasedIds, setView }) => {
                                     let nomeDoProduto = orderData.productTitle || "Seu Produto";
                                     let capaDoProduto = "https://images.unsplash.com/photo-1616469829941-c7200edec809?q=80&w=600";
 
+                                    // BUSCA INFO ADICIONAL DO PRODUTO PARA O E-MAIL
+                                    try {
+                                        const prodSnap = await getDoc(doc(db, "marketplace_products", orderData.productId));
+                                        if (prodSnap.exists()) {
+                                            const pData = prodSnap.data();
+                                            if (pData.images && pData.images.length > 0) capaDoProduto = pData.images[0];
+                                            if (pData.title) nomeDoProduto = pData.title;
+                                        }
+                                    } catch(e){}
+
                                     // ATUALIZA NO BANCO COMO LIBERADO
                                     await updateDoc(orderRef, { 
                                         status: 'pago',
@@ -9880,19 +10226,21 @@ const MindMapSection = ({ user, courses, purchasedIds, setView }) => {
                                     
                                     if(showNotification) showNotification("Sua compra na Loja foi confirmada!", "success");
 
-                                    // 👇 DISPARA O E-MAIL BLINDADO CONTRA CORS 👇
+                                    // 👇 DISPARA O E-MAIL DE ACESSO LIBERADO (PRODUTO LOJA) 👇
                                     fetch("https://script.google.com/macros/s/AKfycbzyuxuOw0fx5YiAWuE_PaN8JE9VrupAStYQfKk6fFDMiLMn7BARtbLagoF3sPbhg9A/exec", {
                                         method: "POST",
                                         mode: "no-cors",
-                                        headers: { 
-                                            "Content-Type": "text/plain;charset=utf-8" // <-- O SEGREDO AQUI!
-                                        },
+                                        headers: { "Content-Type": "text/plain;charset=utf-8" },
                                         body: JSON.stringify({
                                             to: user.email,
                                             userName: user.displayName || 'Aluno',
                                             itemName: nomeDoProduto,
                                             itemImage: capaDoProduto,
-                                            itemPrice: orderData.valor || "0,00" // <-- ADICIONADO PARA O SCRIPT FUNCIONAR
+                                            itemType: "product",
+                                            subject: "Sua Compra foi Liberada!",
+                                            titleHeader: "PRODUTO LIBERADO",
+                                            itemPrice: orderData.valor || "0,00",
+                                            message: `Olá, ${user.displayName || 'Aluno'}! Seu produto "${nomeDoProduto}" adquirido em nossa loja oficial já está disponível para acesso na sua área do aluno. O valor de R$ ${orderData.valor || '---'} foi confirmado.`
                                         })
                                     }).catch(e => console.log("E-mail Loja disparado: ", e));
                                 }
@@ -10003,7 +10351,10 @@ const MindMapSection = ({ user, courses, purchasedIds, setView }) => {
                     userName: user.displayName || 'Aluno',
                     itemName: courseToStart.title || courseToStart.titulo || 'Curso Gratuito',
                     itemImage: capaDoCurso,
-                    itemType: "free_course" // Avisa o Google que foi resgate grátis
+                    itemType: "course", // MUDADO PARA COURSE PARA LIBERAR ACESSO
+                    subject: "Seu Novo Curso Gratuito foi Liberado!",
+                    titleHeader: "ACESSO GRATUITO LIBERADO",
+                    message: `Olá! Seu acesso ao curso gratuito "${courseToStart.title || courseToStart.titulo}" foi liberado com sucesso. Aproveite os estudos!`
                 })
             }).catch(e => console.log("Erro no e-mail grátis: ", e));
             // 👆 FIM DO DISPARO 👇
@@ -10246,8 +10597,8 @@ const MindMapSection = ({ user, courses, purchasedIds, setView }) => {
                             {view === 'home' && <HomeSection user={updatedUser} courses={allCourses} purchasedIds={purchasedIds} userProgress={userProgress} db={db} showNotification={showNotification} setView={setView} onSelectCourse={handleSelectCourse} />}
                             {view === 'mindmap' && <MindMapSection user={updatedUser} courses={allCourses} purchasedIds={purchasedIds} setView={setView} />}
                             {view === 'catalog' && <CatalogSection onSelectCourse={handleSelectCourse} onBuyCourse={setCheckoutCourse} purchasedIds={purchasedIds} allCourses={allCourses} settings={currentSettings} userPoints={realProfile.pointsBalance} currentUser={updatedUser} showNotification={showNotification} db={db} setPurchasedIds={setPurchasedIds} requestConfirmation={requestConfirmation} promotions={promotions} />}
-                            {view === 'my_courses' && <MyCoursesSection courses={allCourses} purchasedIds={purchasedIds} onSelectCourse={(course) => { if(course) handleSelectCourse(course); else setView('catalog'); }} />}
-                            {view === 'loja' && <StudentMarketplace db={db} user={updatedUser} settings={currentSettings} showNotification={showNotification} promotions={promotions} />}
+                            {view === 'my_courses' && <MyCoursesSection courses={allCourses} purchasedIds={purchasedIds} user={updatedUser} db={db} setPurchasedIds={setPurchasedIds} showNotification={showNotification} settings={currentSettings} requestConfirmation={requestConfirmation} onSelectCourse={(course) => { if(course) handleSelectCourse(course); else setView('catalog'); }} />}
+                            {view === 'loja' && <StudentMarketplace db={db} user={updatedUser} settings={currentSettings} showNotification={showNotification} promotions={promotions} requestConfirmation={requestConfirmation} />}
                             {view === 'favorites' && <FavoritesSection user={updatedUser} courses={allCourses} onSelectCourse={handleSelectCourse} />}
                             {view === 'certificates' && <CertificatesSection user={updatedUser} courses={allCourses} userProgress={userProgress} certificates={certificates} customCerts={customCerts} onGenerate={generateCertificate} />}
                             {view === 'community' && <CommunityTab user={updatedUser} showNotification={showNotification} />} 
@@ -10435,41 +10786,84 @@ const MindMapSection = ({ user, courses, purchasedIds, setView }) => {
                     else if (['rejected', 'cancelled', 'refunded', 'charged_back'].includes(mpStatus)) novoStatus = 'cancelado'; 
                     
                     // Se o status mudou para PAGO, atualiza no Banco de Dados
-                    if (novoStatus !== order.status) {
-                        
-                        // 👇 CÓDIGO NOVO: PEGANDO A FOTO DO CURSO 👇
-                        let capaDoCurso = "https://images.unsplash.com/photo-1616469829941-c7200edec809?q=80&w=600";
-                        try {
-                            const cursoInfo = allCourses.find(c => c.id === order.courseId);
-                            if (cursoInfo && (cursoInfo.cover || cursoInfo.thumbnailUrl)) {
-                                capaDoCurso = cursoInfo.cover || cursoInfo.thumbnailUrl;
-                            }
-                        } catch(e){}
-                        // 👆 FIM DA CAPA 👇
-
-                        await updateDoc(doc(db, "transactions", order.id), { 
-                            status: novoStatus, 
-                            mpPaymentId: mpData ? String(mpData.id) : order.mpPaymentId, 
-                            updatedAt: serverTimestamp() 
-                        });
-                        
-                        // Notifica o aluno e já libera!
-                        if (novoStatus === 'pago') {
-                            if(showNotification) showNotification(`🎉 Pagamento aprovado! O curso "${order.courseTitle || 'Adquirido'}" já está liberado.`, "success");
+                        if (novoStatus !== order.status) {
                             
-                            // 👇 DISPARO DE E-MAIL (NOVO) 👇
-                            fetch("https://script.google.com/macros/s/AKfycbzyuxuOw0fx5YiAWuE_PaN8JE9VrupAStYQfKk6fFDMiLMn7BARtbLagoF3sPbhg9A/exec", {
-                                method: "POST", mode: "no-cors", headers: { "Content-Type": "application/json" },
-                                body: JSON.stringify({
-                                    to: order.userEmail,
-                                    userName: order.userName || 'Aluno',
-                                    itemName: order.courseTitle || 'Seu Curso',
-                                    itemImage: capaDoCurso
-                                })
-                            }).catch(e => console.log("Erro no e-mail: ", e));
-                            // 👆 FIM DO DISPARO 👇
+                            // 👇 CÓDIGO NOVO: PEGANDO A FOTO DO CURSO 👇
+                            let capaDoCurso = "https://images.unsplash.com/photo-1616469829941-c7200edec809?q=80&w=600";
+                            try {
+                                const cursoInfo = allCourses.find(c => c.id === order.courseId);
+                                if (cursoInfo && (cursoInfo.cover || cursoInfo.thumbnailUrl)) {
+                                    capaDoCurso = cursoInfo.cover || cursoInfo.thumbnailUrl;
+                                }
+                            } catch(e){}
+                            // 👆 FIM DA CAPA 👇
+
+                            await updateDoc(doc(db, "transactions", order.id), { 
+                                status: novoStatus, 
+                                mpPaymentId: mpData ? String(mpData.id) : order.mpPaymentId, 
+                                updatedAt: serverTimestamp() 
+                            });
+                            
+                            // Notifica o aluno e já libera!
+                            if (novoStatus === 'pago') {
+                                if(showNotification) showNotification(`🎉 Pagamento aprovado! O curso "${order.courseTitle || 'Adquirido'}" já está liberado.`, "success");
+                                
+                               // 👇 DISPARO DE E-MAIL ANIMADO (CURSO) 👇
+                                const platformName = currentSettings?.siteName || "Nossa Plataforma";
+                                const logoUrl = currentSettings?.siteLogoUrl || currentSettings?.logoUrl || "";
+                                const linkPlataforma = window.location.origin;
+
+                                const compraCursoHTML = `
+                                    <div style="background-color: #030303; padding: 40px 20px; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;">
+                                        <div style="max-width: 600px; margin: 0 auto; background: linear-gradient(145deg, #111111, #0a0a0f); padding: 40px; border-radius: 24px; box-shadow: 0 20px 50px rgba(79,70,229,0.2); border: 1px solid #333333;">
+                                            
+                                            <!-- Logo do Site -->
+                                            ${logoUrl ? `<div style="text-align: center; margin-bottom: 30px;"><img src="${logoUrl}" alt="${platformName}" style="max-height: 80px; max-width: 250px; object-fit: contain;"></div>` : ''}
+
+                                            <!-- GIF Animado de Celebração -->
+                                            <div style="text-align: center; margin-bottom: 25px;">
+                                                <img src="https://media.giphy.com/media/v1.Y2lkPTc5MGI3NjExODg3c2MwYnd1ajMwOXh3ZmV1eHN2NmhjdWV1OG12eXB2dTRudHltaSZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/artj92V8o75VPL7AeQ/giphy.gif" alt="Festa" style="width: 100px; border-radius: 50%; box-shadow: 0 0 25px rgba(16, 185, 129, 0.3);">
+                                            </div>
+
+                                            <h1 style="color: #34d399; margin: 0 0 15px 0; font-size: 28px; font-weight: 900; text-align: center; text-transform: uppercase; letter-spacing: 1px;">Acesso Liberado! 🎉</h1>
+                                            
+                                            <p style="color: #cbd5e1; font-size: 16px; margin-bottom: 30px; text-align: center;">Olá, <strong style="color: #ffffff;">${order.userName || 'Aluno'}</strong>! Que incrível ter você com a gente.</p>
+                                            
+                                            <!-- Card do Curso com Borda Gradiente -->
+                                            <div style="background: linear-gradient(to right, #4f46e5, #9333ea); padding: 3px; border-radius: 16px; margin-bottom: 30px;">
+                                                <div style="background-color: #0f0f13; padding: 25px; border-radius: 14px; text-align: center;">
+                                                    <img src="${capaDoCurso}" alt="Capa do Curso" style="width: 100%; max-height: 250px; object-fit: cover; border-radius: 10px; margin-bottom: 15px; border: 1px solid rgba(255,255,255,0.1);">
+                                                    <h2 style="color: #ffffff; margin: 0 0 10px 0; font-size: 22px;">${tituloDoCurso}</h2>
+                                                    <span style="display: inline-block; background-color: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16, 185, 129, 0.3); color: #34d399; padding: 5px 15px; border-radius: 50px; font-size: 14px; font-weight: bold;">R$ ${precoDoCurso}</span>
+                                                </div>
+                                            </div>
+                                            
+                                            <p style="color: #94a3b8; font-size: 15px; line-height: 1.6; margin-bottom: 35px; text-align: center;">O seu portal de conhecimento já está desbloqueado. Clique no botão abaixo para ir direto para a sua área de membros e começar a aprender agora mesmo!</p>
+                                            
+                                            <!-- Botão de Acesso Estilizado -->
+                                            <div style="text-align: center;">
+                                                <a href="${linkPlataforma}" style="display: inline-block; background: linear-gradient(to right, #4f46e5, #7e22ce); color: #ffffff; text-decoration: none; font-size: 16px; font-weight: 900; padding: 18px 40px; border-radius: 50px; box-shadow: 0 10px 20px rgba(126, 34, 206, 0.4); text-transform: uppercase; letter-spacing: 1px;">Acessar Plataforma 🚀</a>
+                                            </div>
+                                            
+                                            <p style="color: #475569; font-size: 12px; margin-top: 40px; text-align: center;">Equipe ${platformName}</p>
+                                        </div>
+                                    </div>
+                                `;
+
+                                fetch("https://script.google.com/macros/s/AKfycbzyuxuOw0fx5YiAWuE_PaN8JE9VrupAStYQfKk6fFDMiLMn7BARtbLagoF3sPbhg9A/exec", {
+                                    method: "POST", mode: "no-cors", headers: { "Content-Type": "text/plain;charset=utf-8" },
+                                    body: JSON.stringify({
+                                        type: "transactional",
+                                        to: order.userEmail,
+                                        subject: `Acesso Liberado: ${tituloDoCurso} 🎉`,
+                                        body: compraCursoHTML,
+                                        senderName: `Equipe ${platformName}`
+                                    })
+                                }).catch(e => console.log("Erro no e-mail: ", e));
+                                // 👆 FIM DO DISPARO 👇
+
+                            }
                         }
-                    }
                 }
             }
         } catch (error) {
@@ -10495,7 +10889,7 @@ const MindMapSection = ({ user, courses, purchasedIds, setView }) => {
        useEffect(() => {
            if (genSettings) {
                // Caçador de variáveis
-               const nomeDaIA = genSettings.aiName || genSettings.iaName || genSettings.nomeIA || genSettings.botName || 'A&M.IA';
+               const nomeDaIA = genSettings.aiName || genSettings.iaName || genSettings.nomeIA || genSettings.botName || 'Assistente VIP';
                const msgBoasVindas = genSettings.aiWelcome || genSettings.iaWelcome || genSettings.mensagemIA || genSettings.botWelcome || 'Olá! O que vamos explorar hoje na plataforma?';
                const fotoIA = genSettings.aiAvatarUrl || genSettings.iaAvatarUrl || genSettings.iaFoto || genSettings.botAvatar;
 
@@ -10838,7 +11232,7 @@ const MindMapSection = ({ user, courses, purchasedIds, setView }) => {
        }
 
        // 👇 INÍCIO DO BLOCO DE CARREGAMENTO E ROTEAMENTO 👇
-       // 2. TELA DE CARREGAMENTO NEUTRA DA A&M Produções / A&M
+       // 2. TELA DE CARREGAMENTO NEUTRA
        if (loading) {
            return (
                <div className="flex flex-col items-center justify-center min-h-screen bg-[#050505] transition-colors duration-300">
