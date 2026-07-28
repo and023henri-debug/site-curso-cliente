@@ -193,6 +193,9 @@
     }
     /* 👆 FIM DO CSS - STREAMING ESPIRITUAL PREMIUM 👆 */
 
+
+
+
     
 
 /* 👇 COMEÇO - ESTILOS DO LIVRO DIÁRIO DE BORDO 3D AVANÇADO 👇 */
@@ -459,6 +462,56 @@ if(isIos() && !isStandalone()){
     setTimeout(()=>document.body.appendChild(ib),2000);
 }
 </script>
+
+
+
+<script>
+        // Executa apenas após a página carregar, evitando a "tela branca"
+        window.addEventListener('DOMContentLoaded', (event) => {
+            
+            // 1. Bloqueia o botão direito (Menu de Contexto)
+            document.addEventListener('contextmenu', function(e) {
+                e.preventDefault();
+            });
+
+            // 2. Bloqueia atalhos F12, Inspecionar, Ver Código Fonte e Salvar
+            document.addEventListener('keydown', function(e) {
+                // F12
+                if (e.key === 'F12' || e.keyCode === 123) {
+                    e.preventDefault();
+                }
+                // Ctrl + Shift + I / J / C (Windows/Linux)
+                if (e.ctrlKey && e.shiftKey && ['I', 'J', 'C', 'i', 'j', 'c'].includes(e.key)) {
+                    e.preventDefault();
+                }
+                // Ctrl + U (Ver código fonte) / Ctrl + S (Salvar)
+                if (e.ctrlKey && ['U', 'S', 'u', 's'].includes(e.key)) {
+                    e.preventDefault();
+                }
+                // Cmd + Option + I / J / U (Mac)
+                if (e.metaKey && e.altKey && ['I', 'J', 'U', 'i', 'j', 'u'].includes(e.key)) {
+                    e.preventDefault();
+                }
+            });
+
+            // 3. Oculta o corpo da página se a impressão (Ctrl+P) for acionada para salvar em PDF
+            window.addEventListener('beforeprint', () => {
+                document.body.style.display = 'none';
+            });
+            window.addEventListener('afterprint', () => {
+                document.body.style.display = '';
+            });
+            
+            // 4. Limpa o console constantemente para evitar injeção de scripts
+            setInterval(() => {
+                console.clear();
+                console.log("%c⛔ ACESSO RESTRITO", "color: red; font-size: 24px; font-weight: bold; text-shadow: 1px 1px 0px black;");
+            }, 1000);
+        });
+    </script>
+    </head>
+
+
 </head>
 <body class="bg-slate-900 text-slate-100 transition-colors duration-300 selection:bg-blue-200 selection:text-blue-900">
   <div id="root"></div>
@@ -1437,27 +1490,6 @@ const StudentMarketplace = ({ db, user, settings, showNotification, promotions =
             tag: promo.discountType === 'percentage' ? `-${promo.discountValue}%` : `-R$${promo.discountValue}`
         };
     };
-
-
-// 👇 AUTO-ABRIR O MODAL DA LOJA SE ENTRAR PELO LINK DE AFILIADO 👇
-    useEffect(() => {
-        if (!isLoading && products.length > 0) {
-            const params = new URLSearchParams(window.location.search);
-            const productId = params.get('productId') || params.get('produto');
-            if (productId) {
-                const productToOpen = products.find(p => p.id === productId);
-                if (productToOpen) {
-                    // Calcula descontos do produto se tiver
-                    const discountInfo = getDiscountInfo(productToOpen.id, 'product', productToOpen.price);
-                    
-                    // Abre a tela de Checkout do Produto Imediatamente!
-                    setCheckoutProduct({ ...productToOpen, appliedDiscount: discountInfo });
-                }
-            }
-        }
-    }, [isLoading, products, promotions]);
-    // 👆 FIM DA AUTO-ABERTURA 👆
-
 
     const handleBuyClick = (product) => {
         if (Number(product.stock) <= 0) {
@@ -4747,10 +4779,13 @@ const CertificatesSection = ({ user, courses, userProgress, certificates, custom
 const NotificationBell = ({ db, user }) => {
     const [notifications, setNotifications] = React.useState([]);
     const [isOpen, setIsOpen] = React.useState(false);
-    const [selectedNotification, setSelectedNotification] = React.useState(null);
+    
+    // ESTADO: Controla qual mídia foi clicada para abrir em tela cheia
+    const [selectedMedia, setSelectedMedia] = React.useState(null); 
     
     const dropdownRef = React.useRef(null);
 
+    // FUNÇÃO VITAL: Corrige links antigos do Cloudflare para a imagem carregar
     const fixUrl = (url) => {
         if (!url) return null;
         const wrongDomain = "https://pub-2ece542306d80259e71a793d20f91a60.r2.dev";
@@ -4760,18 +4795,20 @@ const NotificationBell = ({ db, user }) => {
     };
 
     React.useEffect(() => {
-        if (!db || !user?.uid) return;
-        const q = query(collection(db, "system_notifications"));
+        if (!db || !user) return;
+        const q = query(
+            collection(db, "system_notifications")
+        );
 
         const unsubscribe = onSnapshot(q, (snap) => {
             const docs = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
             const validDocs = docs.filter(n => n.targetMode === 'all' || n.targetUserId === user.uid);
             validDocs.sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
             setNotifications(validDocs);
-        }, () => {});
+        });
 
         return () => unsubscribe();
-    }, [db, user?.uid]);
+    }, [db, user]);
 
     React.useEffect(() => {
         const handleClickOutside = (event) => {
@@ -4785,7 +4822,6 @@ const NotificationBell = ({ db, user }) => {
 
     // Nova função: Marca todas as notificações visíveis como lidas de uma vez
     const markAllAsRead = async () => {
-        if (!user?.uid || !db) return;
         const unreadNotifs = notifications.filter(n => !(n.readBy || []).includes(user.uid));
         if (unreadNotifs.length === 0) return;
 
@@ -4795,21 +4831,14 @@ const NotificationBell = ({ db, user }) => {
                 return updateDoc(docRef, { readBy: arrayUnion(user.uid) });
             });
             await Promise.all(promises);
-        } catch (e) {}
+        } catch (e) {
+            console.error("Erro ao marcar todas como lidas", e);
+        }
     };
 
     const unreadCount = notifications.filter(n => {
-        if (!user?.uid) return false;
         return !(n.readBy || []).includes(user.uid);
     }).length;
-
-    const markAsRead = async (notif) => {
-        if (!user?.uid || !db || (notif.readBy || []).includes(user.uid)) return;
-        try {
-            const docRef = doc(db, "system_notifications", notif.id);
-            await updateDoc(docRef, { readBy: arrayUnion(user.uid) });
-        } catch (e) {}
-    };
 
     const formatTimeAgo = (timestamp) => {
         if(!timestamp) return '';
@@ -4880,7 +4909,7 @@ const NotificationBell = ({ db, user }) => {
                                 return (
                                     <div 
                                         key={notif.id} 
-                                        onClick={() => { markAsRead(notif); setSelectedNotification(notif); }}
+                                        onClick={() => { if(isUnread) markAsRead(notif); }}
                                         className={`p-4 border-b border-slate-800 transition-all cursor-pointer flex flex-col gap-3 ${isUnread ? 'bg-indigo-500/10 hover:bg-indigo-500/20' : 'hover:bg-white/5 opacity-70 hover:opacity-100'}`}
                                     >
                                         <div className="flex gap-4">
@@ -4901,11 +4930,31 @@ const NotificationBell = ({ db, user }) => {
                                         {/* ÁREA DA FOTO / VÍDEO */}
                                         {hasMedia && (
                                             <div className="mt-2 ml-12">
+                                                <button 
+                                                    onClick={(e) => {
+                                                        e.preventDefault();
+                                                        e.stopPropagation();
+                                                        if (isUnread) markAsRead(notif);
+                                                        setSelectedMedia(mediaList[0]);
+                                                        setIsOpen(false);
+                                                    }}
+                                                    className="text-[10px] font-bold text-indigo-400 hover:text-indigo-300 mb-1.5 uppercase tracking-widest flex items-center gap-1 cursor-pointer transition-colors outline-none"
+                                                >
+                                                    <Camera size={12} /> Veja a Postagem
+                                                </button>
+                                                
                                                 <div className="flex gap-2 overflow-x-auto pb-1 custom-scrollbar">
                                                     {mediaList.map((att, idx) => (
                                                         <div 
                                                             key={idx} 
-                                                            className="relative group shrink-0 w-24 h-16 rounded-lg overflow-hidden border border-slate-700 block"
+                                                            onClick={(e) => {
+                                                                e.preventDefault();
+                                                                e.stopPropagation();
+                                                                if (isUnread) markAsRead(notif);
+                                                                setSelectedMedia(att);
+                                                                setIsOpen(false);
+                                                            }} 
+                                                            className="relative group shrink-0 w-24 h-16 rounded-lg overflow-hidden border border-slate-700 block cursor-pointer"
                                                         >
                                                             {att.type === 'video' ? (
                                                                 <>
@@ -4933,56 +4982,44 @@ const NotificationBell = ({ db, user }) => {
             )}
             {/* --- FIM DO POPUP DE NOTIFICAÇÕES --- */}
 
-            {/* --- MODAL DE POSTAGEM COMPLETA CENTRALIZADO COM X --- */}
-            {selectedNotification && (
+            {/* --- INÍCIO DO MODAL DE VISUALIZAÇÃO DE MÍDIA (TAMANHO REDUZIDO E CENTRALIZADO) --- */}
+            {selectedMedia && (
                 <div
-                    className="fixed inset-0 z-[9999999] flex items-center justify-center bg-black/90 backdrop-blur-md p-4 animate-fade-in"
-                    onClick={() => setSelectedNotification(null)}
+                    className="fixed top-0 left-0 w-[100vw] h-[100vh] z-[9999999] flex items-center justify-center bg-black/95 backdrop-blur-md p-4 sm:p-8 animate-fade-in"
+                    onClick={(e) => {
+                        e.stopPropagation();
+                        setSelectedMedia(null);
+                    }}
                 >
+                    {/* Botão Fechar */}
+                    <button
+                        onClick={(e) => { e.stopPropagation(); setSelectedMedia(null); }}
+                        className="absolute top-6 right-6 md:top-8 md:right-8 z-[100000] bg-white/10 hover:bg-red-500 text-white p-3 rounded-full border border-white/20 transition-all shadow-2xl cursor-pointer backdrop-blur-md"
+                    >
+                        <X size={24} />
+                    </button>
+
+                    {/* Container Flex (Tamanho máximo reduzido de 4xl para 3xl) */}
                     <div 
-                        className="bg-slate-900 border border-slate-700 w-full max-w-2xl rounded-3xl shadow-[0_30px_100px_rgba(0,0,0,0.8)] relative overflow-hidden flex flex-col animate-scale-in my-auto"
+                        className="relative z-10 flex items-center justify-center w-full max-w-3xl"
                         onClick={e => e.stopPropagation()}
                     >
-                        <button
-                            onClick={() => setSelectedNotification(null)}
-                            className="absolute top-4 right-4 md:top-6 md:right-6 z-50 bg-black/40 hover:bg-red-500 text-white p-2.5 rounded-full border border-white/10 transition-all shadow-xl backdrop-blur-sm"
-                        >
-                            <X size={24} />
-                        </button>
-
-                        <div className="p-8 border-b border-slate-800 bg-[#0a0a0f] text-center shrink-0">
-                            <h3 className="text-xl md:text-3xl font-black text-white px-6 leading-tight">
-                                {selectedNotification.title || "Informativo"}
-                            </h3>
-                            <span className="text-[10px] md:text-xs font-bold text-indigo-400 uppercase tracking-[0.3em] mt-4 block opacity-80">
-                                {selectedNotification.createdAt ? `Publicado ${formatTimeAgo(selectedNotification.createdAt)}` : 'Aviso do Sistema'}
-                            </span>
-                        </div>
-
-                        <div className="p-6 md:p-12 max-h-[70vh] overflow-y-auto custom-scrollbar flex flex-col gap-8 bg-slate-900/50 text-center items-center">
-                            <p className="text-slate-300 text-base md:text-xl leading-relaxed whitespace-pre-wrap max-w-2xl mx-auto font-medium">
-                                {selectedNotification.message || "Sem descrição disponível."}
-                            </p>
-                            
-                            {(() => {
-                                const media = selectedNotification.attachments || (selectedNotification.attachmentUrl ? [{url: selectedNotification.attachmentUrl, type: selectedNotification.attachmentType || 'image'}] : []);
-                                if (!media || media.length === 0) return null;
-
-                                return (
-                                    <div className="flex flex-col gap-6 w-full max-w-xl">
-                                        {media.map((att, idx) => (
-                                            <div key={idx} className="rounded-2xl overflow-hidden border border-white/10 bg-black shadow-2xl mx-auto w-full">
-                                                {att.type === 'video' ? (
-                                                    <video src={fixUrl(att.url)} controls className="w-full h-auto max-h-[50vh] object-contain" />
-                                                ) : (
-                                                    <img src={fixUrl(att.url)} className="w-full h-auto max-h-[50vh] object-contain" alt="Mídia" />
-                                                )}
-                                            </div>
-                                        ))}
-                                    </div>
-                                );
-                            })()}
-                        </div>
+                        {selectedMedia.type === 'video' ? (
+                            <video 
+                                src={fixUrl(selectedMedia.url)} 
+                                controls 
+                                autoPlay 
+                                /* Aqui está a mágica: max-w-[85vw] e max-h-[60vh] no celular, e max-w-2xl max-h-[70vh] no PC */
+                                className="w-auto h-auto max-w-[85vw] md:max-w-2xl max-h-[60vh] md:max-h-[70vh] object-contain rounded-xl shadow-[0_0_50px_rgba(0,0,0,0.5)] border border-white/10 bg-black" 
+                            />
+                        ) : (
+                            <img 
+                                src={fixUrl(selectedMedia.url)} 
+                                alt="Visualização Completa" 
+                                /* Aqui está a mágica: max-w-[85vw] e max-h-[60vh] no celular, e max-w-2xl max-h-[70vh] no PC */
+                                className="w-auto h-auto max-w-[85vw] md:max-w-2xl max-h-[60vh] md:max-h-[70vh] object-contain rounded-xl shadow-[0_0_50px_rgba(0,0,0,0.5)] border border-white/10 bg-transparent" 
+                            />
+                        )}
                     </div>
                 </div>
             )}
@@ -10336,20 +10373,10 @@ const MindMapSection = ({ user, courses, purchasedIds, setView }) => {
 
        const handleSelectCourse = (course) => { setSelectedCourse(course); setView('course_details'); }; 
        const handleResumeCourse = (course, modIdx, lessonIdx) => { setSelectedCourse(course); setView('course_player'); };
-       // 👇 INÍCIO DA FUNÇÃO PROTEGIDA (PAGAMENTO VS GRATUITO) 👇
-const handleStartCourse = async (courseToStart) => { 
-    // O SEGURANÇA: Verifica matematicamente se o curso é de graça ou pago
-    const priceVal = typeof courseToStart.price === 'number' ? courseToStart.price : parseFloat(String(courseToStart.price || "0").replace(/\./g, '').replace(',', '.'));
-    const isTrulyFree = isNaN(priceVal) || priceVal <= 0;
-
+       const handleStartCourse = async (courseToStart) => { 
+    // Se o aluno não tem o curso, ele só pode ter chegado aqui se for GRATUITO.
+    // Então, vamos matricular ele silenciosamente no banco de dados!
     if (!purchasedIds.includes(courseToStart.id)) {
-        // SE CUSTAR DINHEIRO: Bloqueia e abre a tela de Pagamento do Mercado Pago!
-        if (!isTrulyFree) {
-            setCheckoutCourse(courseToStart);
-            return; // Para tudo aqui e não deixa entrar de graça!
-        }
-
-        // SE FOR 100% GRATUITO: Matricula de graça e manda e-mail
         try {
             await addDoc(collection(db, "transactions"), {
                 courseId: courseToStart.id,
@@ -10358,7 +10385,7 @@ const handleStartCourse = async (courseToStart) => {
                 userName: user.displayName || 'Aluno',
                 userEmail: user.email,
                 valor: 0,
-                status: 'pago', // Marca como pago para liberar o acesso permanentemente
+                status: 'pago', // Marca como pago para o sistema liberar o acesso permanentemente
                 method: 'free_enrollment',
                 createdAt: serverTimestamp(),
                 updatedAt: serverTimestamp()
@@ -10368,7 +10395,7 @@ const handleStartCourse = async (courseToStart) => {
             setPurchasedIds(prev => [...prev, courseToStart.id]);
             if (showNotification) showNotification("Curso gratuito adicionado aos seus portais!", "success");
 
-            // Disparo de E-mail
+            // 👇 DISPARO DE E-MAIL (CURSO GRÁTIS) 👇
             let capaDoCurso = courseToStart.cover || courseToStart.thumbnailUrl || "https://images.unsplash.com/photo-1616469829941-c7200edec809?q=80&w=600";
             fetch("https://script.google.com/macros/s/AKfycbzyuxuOw0fx5YiAWuE_PaN8JE9VrupAStYQfKk6fFDMiLMn7BARtbLagoF3sPbhg9A/exec", {
                 method: "POST", mode: "no-cors", headers: { "Content-Type": "text/plain;charset=utf-8" },
@@ -10377,12 +10404,13 @@ const handleStartCourse = async (courseToStart) => {
                     userName: user.displayName || 'Aluno',
                     itemName: courseToStart.title || courseToStart.titulo || 'Curso Gratuito',
                     itemImage: capaDoCurso,
-                    itemType: "course", 
+                    itemType: "course", // MUDADO PARA COURSE PARA LIBERAR ACESSO
                     subject: "Seu Novo Curso Gratuito foi Liberado!",
                     titleHeader: "ACESSO GRATUITO LIBERADO",
                     message: `Olá! Seu acesso ao curso gratuito "${courseToStart.title || courseToStart.titulo}" foi liberado com sucesso. Aproveite os estudos!`
                 })
             }).catch(e => console.log("Erro no e-mail grátis: ", e));
+            // 👆 FIM DO DISPARO 👇
 
         } catch (err) {
             console.error("Erro ao matricular no curso gratuito:", err);
@@ -10390,52 +10418,35 @@ const handleStartCourse = async (courseToStart) => {
     }
     setView('course_player'); 
 };
-// 👆 FIM DA FUNÇÃO PROTEGIDA 👆
        const handlePurchaseSuccess = (courseId) => { setPurchasedIds(prev => [...prev, courseId]); setCheckoutCourse(null); showNotification("Acesso Liberado!", "success"); };
        
        const myCoursesList = allCourses.filter(c => purchasedIds.includes(c.id));
 
         // =======================================================================
-// ⚡ LÓGICA DE DEEP LINKING SEGURO: LER ID DA URL E FILTRAR CONTEÚDO
-// =======================================================================
-useEffect(() => {
-    if (!loadingData && allCourses.length > 0) {
-        const params = new URLSearchParams(window.location.search);
-        const courseId = params.get('id') || params.get('curso');
-        const productId = params.get('productId') || params.get('produto');
-        const affiliateRef = params.get('ref');
-
-        // Salva o afiliado na memória do navegador se existir
-        if (affiliateRef) {
-            localStorage.setItem('affiliate_ref', affiliateRef);
-        }
-        
-        // 1. LÓGICA SE MANDARAM LINK DE UM CURSO
-        if (courseId) {
-            const found = allCourses.find(c => c.id === courseId);
-            if (found) {
-                setSelectedCourse(found);
-                // Se já comprou, vai direto pro player.
-                if (purchasedIds.includes(courseId)) {
-                    setView('course_player');
-                } else {
-                    // Se não comprou, vai pra capa de detalhes. (O Passo 1 acima vai cobrar se ele clicar em Iniciar)
-                    setView('course_details');
+        // ⚡ LÓGICA DE DEEP LINKING: LER ID DA URL E FILTRAR CONTEÚDO
+        // =======================================================================
+        useEffect(() => {
+            if (!loadingData && allCourses.length > 0) {
+                const params = new URLSearchParams(window.location.search);
+                const courseId = params.get('id');
+                
+                if (courseId) {
+                    const found = allCourses.find(c => c.id === courseId);
+                    if (found) {
+                        setSelectedCourse(found);
+                        // Se já comprou, vai direto pro player. Se não, abre detalhes.
+                        if (purchasedIds.includes(courseId)) {
+                            setView('course_player');
+                        } else {
+                            setView('course_details');
+                        }
+                        // Limpa o parâmetro da URL de forma elegante sem recarregar
+                        const newUrl = window.location.pathname;
+                        window.history.replaceState({}, document.title, newUrl);
+                    }
                 }
             }
-        }
-        
-        // 2. LÓGICA SE MANDARAM LINK DE UM PRODUTO DA LOJA
-        if (productId) {
-            setView('loja'); // Manda pra aba da loja (o Passo 3 vai cuidar de abrir o Checkout do produto)
-        }
-
-        // Limpa o link feio lá de cima do navegador
-        if (courseId || productId) {
-            window.history.replaceState({}, document.title, window.location.pathname);
-        }
-    }
-}, [loadingData, allCourses, purchasedIds]);
+        }, [loadingData, allCourses, purchasedIds]);
 
         useEffect(() => {
             // 👇 ISSO AVISA A IA GLOBAL ONDE ESTAMOS 👇
