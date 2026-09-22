@@ -3,6 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="referrer" content="strict-origin-when-cross-origin">
   <title>Sua Plataforma | Área do Aluno</title>
 
   <link rel="preconnect" href="https://meu-backend-ia.vercel.app">
@@ -465,51 +466,7 @@ if(isIos() && !isStandalone()){
 
 
 
-<script>
-        // Executa apenas após a página carregar, evitando a "tela branca"
-        window.addEventListener('DOMContentLoaded', (event) => {
-            
-            // 1. Bloqueia o botão direito (Menu de Contexto)
-            document.addEventListener('contextmenu', function(e) {
-                e.preventDefault();
-            });
 
-            // 2. Bloqueia atalhos F12, Inspecionar, Ver Código Fonte e Salvar
-            document.addEventListener('keydown', function(e) {
-                // F12
-                if (e.key === 'F12' || e.keyCode === 123) {
-                    e.preventDefault();
-                }
-                // Ctrl + Shift + I / J / C (Windows/Linux)
-                if (e.ctrlKey && e.shiftKey && ['I', 'J', 'C', 'i', 'j', 'c'].includes(e.key)) {
-                    e.preventDefault();
-                }
-                // Ctrl + U (Ver código fonte) / Ctrl + S (Salvar)
-                if (e.ctrlKey && ['U', 'S', 'u', 's'].includes(e.key)) {
-                    e.preventDefault();
-                }
-                // Cmd + Option + I / J / U (Mac)
-                if (e.metaKey && e.altKey && ['I', 'J', 'U', 'i', 'j', 'u'].includes(e.key)) {
-                    e.preventDefault();
-                }
-            });
-
-            // 3. Oculta o corpo da página se a impressão (Ctrl+P) for acionada para salvar em PDF
-            window.addEventListener('beforeprint', () => {
-                document.body.style.display = 'none';
-            });
-            window.addEventListener('afterprint', () => {
-                document.body.style.display = '';
-            });
-            
-            // 4. Limpa o console constantemente para evitar injeção de scripts
-            setInterval(() => {
-                console.clear();
-                console.log("%c⛔ ACESSO RESTRITO", "color: red; font-size: 24px; font-weight: bold; text-shadow: 1px 1px 0px black;");
-            }, 1000);
-        });
-    </script>
-    </head>
 
 
 </head>
@@ -2010,266 +1967,597 @@ const StudentMarketplace = ({ db, user, settings, showNotification, promotions =
 // =================================================================================
     
 // =================================================================================
-// SUB-COMPONENTE: PLAYER PREMIUM COM QUALIDADE, PULO DE 10S E PROGRESSO INTELIGENTE
+// SUB-COMPONENTE: PLAYER PREMIUM UNIFICADO (R2/NATIVO + YOUTUBE IFRAME API)
 // =================================================================================
 const CustomVideoPlayer = ({ src, onEnded, poster, isCompleted, showNotification }) => {
-    
-    // 1. LÓGICA DAS FONTES DE VÍDEO E QUALIDADE (SUPORTE 4K)
-    // Se o Admin cadastrou um objeto com links diferentes, ele usa. 
-    // Se cadastrou apenas um link, o player simula as opções para o usuário.
-    const fontes = (typeof src === 'object' && src !== null) ? src : {
-        '4K': src,
-        '1080p': src,
-        '720p': src,
-        '480p': src
-    };
+    const normalizarFontes = React.useCallback((valor) => {
+        if (typeof valor === 'string') return { 'Auto': valor };
+        if (!valor || typeof valor !== 'object') return { 'Auto': '' };
 
-    // Ordem de exibição: do maior para o menor
-    const qualidadesDisponiveis = ['4K', '1080p', '720p', '480p'].filter(q => fontes[q]);
-    const [qualidadeAtual, setQualidadeAtual] = React.useState(qualidadesDisponiveis[0]);
-    const [mostrarMenuQualidade, setMostrarMenuQualidade] = React.useState(false);
-    
-    // 2. REFS E ESTADOS DE CONTROLE
-    const videoRef = React.useRef(null);
-    const [seekAnim, setSeekAnim] = React.useState({ show: false, side: '' });
-    const isCompletedRef = React.useRef(isCompleted);
-    
-    // 👇 O SEGREDO AQUI: Memória de até onde o aluno já assistiu
-    const maxTimeWatched = React.useRef(0); 
+        // Compatibilidade com objetos do tipo { url }, { src } ou { videoUrl }.
+        const urlDireta = valor.url || valor.src || valor.videoUrl || valor.link;
+        if (typeof urlDireta === 'string') return { 'Auto': urlDireta };
 
-    // Mantém a trava atualizada (se a aula já for concluída, o limite é "infinito")
-    React.useEffect(() => {
-        isCompletedRef.current = isCompleted;
-        if (isCompleted) {
-            maxTimeWatched.current = Infinity;
-        }
-    }, [isCompleted]);
-
-    // 3. COMUNICAÇÃO COM A IA (AemVideoControl)
-    React.useEffect(() => {
-        window.AemVideoControl = {
-            play: () => { if (videoRef.current) videoRef.current.play(); },
-            pause: () => { if (videoRef.current) videoRef.current.pause(); },
-            skip: (amount) => { 
-                if (videoRef.current) {
-                    let newTime = videoRef.current.currentTime + amount;
-                    // Trava de IA: Se tentar avançar mais do que assistiu
-                    if (!isCompletedRef.current && newTime > maxTimeWatched.current) {
-                        newTime = maxTimeWatched.current;
-                    }
-                    videoRef.current.currentTime = newTime;
-                }
+        const mapa = {};
+        Object.entries(valor).forEach(([chave, item]) => {
+            if (typeof item === 'string' && item.trim()) mapa[chave] = item;
+            else if (item && typeof item === 'object') {
+                const u = item.url || item.src || item.videoUrl || item.link;
+                if (typeof u === 'string' && u.trim()) mapa[chave] = u;
             }
-        };
-        return () => { delete window.AemVideoControl; };
+        });
+        return Object.keys(mapa).length ? mapa : { 'Auto': '' };
     }, []);
 
-    // 4. FUNÇÃO: MUDAR QUALIDADE SEM PERDER O TEMPO
-    const mudarQualidade = (novaQualidade) => {
-        if (novaQualidade === qualidadeAtual) return;
-        
-        const video = videoRef.current;
-        if (!video) return;
+    const fontes = React.useMemo(() => normalizarFontes(src), [src, normalizarFontes]);
+    const qualidadesDisponiveis = Object.keys(fontes);
+    const [qualidadeAtual, setQualidadeAtual] = React.useState(qualidadesDisponiveis[0] || 'Auto');
 
-        const tempoAtual = video.currentTime;
-        const estavaTocando = !video.paused;
+    React.useEffect(() => {
+        if (!fontes[qualidadeAtual]) setQualidadeAtual(qualidadesDisponiveis[0] || 'Auto');
+    }, [fontes, qualidadeAtual, qualidadesDisponiveis.join('|')]);
 
-        setQualidadeAtual(novaQualidade);
-        setMostrarMenuQualidade(false);
-        if (showNotification) showNotification(`Ajustando qualidade para ${novaQualidade}...`, "info");
+    const videoUrl = fontes[qualidadeAtual] || fontes[qualidadesDisponiveis[0]] || '';
 
-        setTimeout(() => {
-            video.load(); 
-            video.currentTime = tempoAtual; 
-            if (estavaTocando) {
-                video.play().catch(e => console.log("Aguardando interação:", e));
+    const extrairYouTubeId = React.useCallback((valor) => {
+        if (typeof valor !== 'string') return null;
+        const raw = valor.trim();
+        if (/^[\w-]{11}$/.test(raw)) return raw;
+
+        try {
+            const url = new URL(raw);
+            const host = url.hostname.replace(/^www\./, '').replace(/^m\./, '').replace(/^music\./, '');
+
+            if (host === 'youtu.be') {
+                const id = url.pathname.split('/').filter(Boolean)[0];
+                return id && /^[\w-]{11}$/.test(id) ? id : null;
             }
-        }, 50);
+
+            if (host === 'youtube.com' || host === 'youtube-nocookie.com') {
+                const fromQuery = url.searchParams.get('v');
+                if (fromQuery && /^[\w-]{11}$/.test(fromQuery)) return fromQuery;
+
+                const parts = url.pathname.split('/').filter(Boolean);
+                const markerIndex = parts.findIndex(p => ['embed', 'shorts', 'live', 'v'].includes(p));
+                const candidate = markerIndex >= 0 ? parts[markerIndex + 1] : null;
+                if (candidate && /^[\w-]{11}$/.test(candidate)) return candidate;
+            }
+        } catch (e) {}
+
+        const fallback = raw.match(/(?:youtu\.be\/|youtube(?:-nocookie)?\.com\/(?:embed\/|v\/|watch\?v=|watch\?.+&v=|shorts\/|live\/))([\w-]{11})/i);
+        return fallback ? fallback[1] : null;
+    }, []);
+
+    const ytId = React.useMemo(() => extrairYouTubeId(videoUrl), [videoUrl, extrairYouTubeId]);
+    const isYT = Boolean(ytId);
+
+    const videoRef = React.useRef(null);
+    const playerShellRef = React.useRef(null);
+    const ytIframeRef = React.useRef(null);
+    const ytPlayerRef = React.useRef(null);
+    const onEndedRef = React.useRef(onEnded);
+    const showNotificationRef = React.useRef(showNotification);
+    const isCompletedRef = React.useRef(isCompleted);
+    const maxTimeWatched = React.useRef(0);
+
+    const [isPlaying, setIsPlaying] = React.useState(false);
+    const [currentTime, setCurrentTime] = React.useState(0);
+    const [duration, setDuration] = React.useState(0);
+    const [volume, setVolume] = React.useState(100);
+    const [isMuted, setIsMuted] = React.useState(false);
+    const [ytReady, setYtReady] = React.useState(false);
+    const [playerError, setPlayerError] = React.useState('');
+    const [mostrarMenuQualidade, setMostrarMenuQualidade] = React.useState(false);
+    const [mostrarMenuVelocidade, setMostrarMenuVelocidade] = React.useState(false);
+    const [playbackRate, setPlaybackRate] = React.useState(1);
+    const [seekAnim, setSeekAnim] = React.useState({ show: false, side: '' });
+
+    React.useEffect(() => { onEndedRef.current = onEnded; }, [onEnded]);
+    React.useEffect(() => { showNotificationRef.current = showNotification; }, [showNotification]);
+    React.useEffect(() => {
+        isCompletedRef.current = isCompleted;
+        if (isCompleted) maxTimeWatched.current = Infinity;
+    }, [isCompleted]);
+
+    React.useEffect(() => {
+        setCurrentTime(0);
+        setDuration(0);
+        setIsPlaying(false);
+        setPlayerError('');
+        setYtReady(false);
+        if (!isCompletedRef.current) maxTimeWatched.current = 0;
+    }, [videoUrl]);
+
+    const ensureYouTubeApi = React.useCallback(() => {
+        if (window.YT && window.YT.Player) return Promise.resolve(window.YT);
+
+        if (!window.__aemYouTubeApiPromise) {
+            window.__aemYouTubeApiPromise = new Promise((resolve, reject) => {
+                const previousReady = window.onYouTubeIframeAPIReady;
+                const timeout = setTimeout(() => reject(new Error('Timeout ao carregar YouTube IFrame API')), 15000);
+
+                window.onYouTubeIframeAPIReady = () => {
+                    clearTimeout(timeout);
+                    if (typeof previousReady === 'function') {
+                        try { previousReady(); } catch (e) {}
+                    }
+                    resolve(window.YT);
+                };
+
+                const existing = document.querySelector('script[src="https://www.youtube.com/iframe_api"]');
+                if (!existing) {
+                    const tag = document.createElement('script');
+                    tag.src = 'https://www.youtube.com/iframe_api';
+                    tag.async = true;
+                    tag.onerror = () => {
+                        clearTimeout(timeout);
+                        reject(new Error('Falha de rede ao carregar YouTube IFrame API'));
+                    };
+                    document.head.appendChild(tag);
+                }
+            }).catch((err) => {
+                // Permite nova tentativa se houve falha de rede.
+                window.__aemYouTubeApiPromise = null;
+                throw err;
+            });
+        }
+
+        return window.__aemYouTubeApiPromise;
+    }, []);
+
+    const ytEmbedSrc = React.useMemo(() => {
+        if (!ytId) return '';
+        const params = new URLSearchParams({
+            enablejsapi: '1',
+            controls: '0',
+            autoplay: '0',
+            playsinline: '1',
+            rel: '0',
+            fs: '0',
+            iv_load_policy: '3',
+            hl: 'pt-BR'
+        });
+
+        if (typeof window !== 'undefined' && window.location && /^https?:\/\//i.test(window.location.origin || '')) {
+            params.set('origin', window.location.origin);
+        }
+
+        return `https://www.youtube.com/embed/${ytId}?${params.toString()}`;
+    }, [ytId]);
+
+    // Mantemos o iframe criado pelo React e apenas conectamos a API a ele.
+    // Isso evita que o YT.Player substitua um nó que o React ainda acredita controlar.
+    React.useEffect(() => {
+        if (!isYT || !ytId || !ytIframeRef.current) return;
+
+        let cancelled = false;
+        let localPlayer = null;
+        setPlayerError('');
+        setYtReady(false);
+
+        const iniciar = async () => {
+            try {
+                await ensureYouTubeApi();
+                if (cancelled || !ytIframeRef.current) return;
+
+                localPlayer = new window.YT.Player(ytIframeRef.current, {
+                    events: {
+                        onReady: (e) => {
+                            if (cancelled) return;
+                            ytPlayerRef.current = e.target;
+                            setYtReady(true);
+                            setDuration(Number(e.target.getDuration()) || 0);
+                            try {
+                                setVolume(Number(e.target.getVolume()) || 100);
+                                setIsMuted(Boolean(e.target.isMuted && e.target.isMuted()));
+                            } catch (err) {}
+                        },
+                        onStateChange: (e) => {
+                            if (cancelled) return;
+                            const playing = e.data === window.YT.PlayerState.PLAYING;
+                            setIsPlaying(playing);
+
+                            if (e.data === window.YT.PlayerState.ENDED && !isCompletedRef.current) {
+                                isCompletedRef.current = true;
+                                if (onEndedRef.current) onEndedRef.current();
+                            }
+                        },
+                        onPlaybackRateChange: (e) => {
+                            if (!cancelled) setPlaybackRate(Number(e.data) || 1);
+                        },
+                        onAutoplayBlocked: () => {
+                            // Não é erro: o aluno pode iniciar pelo botão Play do player da plataforma.
+                            setIsPlaying(false);
+                        },
+                        onError: (e) => {
+                            if (cancelled) return;
+                            const mensagens = {
+                                2: 'O link do YouTube é inválido.',
+                                5: 'O navegador não conseguiu reproduzir este vídeo em HTML5.',
+                                100: 'Este vídeo foi removido ou está privado.',
+                                101: 'O proprietário deste vídeo não permite reprodução incorporada.',
+                                150: 'O proprietário deste vídeo não permite reprodução incorporada.',
+                                153: 'O YouTube não recebeu a identificação do domínio (HTTP Referer). Abra a plataforma pelo domínio HTTPS publicado.'
+                            };
+                            const msg = mensagens[e.data] || `Não foi possível reproduzir este vídeo do YouTube (erro ${e.data}).`;
+                            console.error('Erro no player do YouTube:', e.data);
+                            setPlayerError(msg);
+                            if (showNotificationRef.current) showNotificationRef.current(msg, 'error');
+                        }
+                    }
+                });
+                ytPlayerRef.current = localPlayer;
+            } catch (err) {
+                if (cancelled) return;
+                console.error('Falha ao carregar API do YouTube:', err);
+                const msg = 'Não foi possível inicializar o player do YouTube. Verifique a conexão e recarregue a aula.';
+                setPlayerError(msg);
+                if (showNotificationRef.current) showNotificationRef.current(msg, 'error');
+            }
+        };
+
+        iniciar();
+
+        return () => {
+            cancelled = true;
+            // Como o iframe pertence ao React, não chamamos destroy() aqui: destroy remove o nó
+            // que o React ainda precisa reconciliar. Apenas soltamos a referência da API.
+            ytPlayerRef.current = null;
+            localPlayer = null;
+        };
+    }, [isYT, ytId, ytEmbedSrc, ensureYouTubeApi]);
+
+    // Progresso do YouTube e conclusão automática em 95%.
+    React.useEffect(() => {
+        if (!isYT) return;
+
+        const interval = setInterval(() => {
+            const player = ytPlayerRef.current;
+            if (!player || typeof player.getCurrentTime !== 'function') return;
+
+            try {
+                const time = Number(player.getCurrentTime()) || 0;
+                const total = Number(player.getDuration()) || duration || 0;
+                setCurrentTime(time);
+                if (total > 0) setDuration(total);
+
+                if (!isCompletedRef.current && time > maxTimeWatched.current) {
+                    maxTimeWatched.current = time;
+                }
+
+                if (time > 0 && total > 0 && (time / total) >= 0.95 && !isCompletedRef.current) {
+                    isCompletedRef.current = true;
+                    if (onEndedRef.current) onEndedRef.current();
+                }
+            } catch (e) {}
+        }, 500);
+
+        return () => clearInterval(interval);
+    }, [isYT, duration]);
+
+    const togglePlay = () => {
+        if (isYT) {
+            const player = ytPlayerRef.current;
+            if (!player || !ytReady) return;
+            try {
+                const state = player.getPlayerState();
+                if (state === window.YT.PlayerState.PLAYING) player.pauseVideo();
+                else player.playVideo();
+            } catch (e) {
+                console.warn('Não foi possível alternar Play/Pause:', e);
+            }
+            return;
+        }
+
+        if (videoRef.current) {
+            if (videoRef.current.paused) videoRef.current.play();
+            else videoRef.current.pause();
+        }
     };
 
-    // 5. FUNÇÃO: DOUBLE CLICK PARA AVANÇAR/VOLTAR 10s (RESPEITANDO O PROGRESSO)
+    const handleSeek = (e) => {
+        let newTime = parseFloat(e.target.value);
+        if (!Number.isFinite(newTime)) return;
+
+        if (!isCompletedRef.current && newTime > maxTimeWatched.current) {
+            newTime = maxTimeWatched.current;
+        }
+
+        setCurrentTime(newTime);
+
+        if (isYT) {
+            const player = ytPlayerRef.current;
+            if (player && typeof player.seekTo === 'function') {
+                try { player.seekTo(newTime, true); } catch (err) {}
+            }
+        } else if (videoRef.current) {
+            videoRef.current.currentTime = newTime;
+        }
+    };
+
     const handleDblClick = (e) => {
-        e.preventDefault(); 
+        e.preventDefault();
         e.stopPropagation();
 
-        const video = videoRef.current;
-        if (!video) return;
-
         const rect = e.currentTarget.getBoundingClientRect();
-        const x = e.clientX - rect.left;
-        const side = x < rect.width / 2 ? 'left' : 'right';
+        const side = (e.clientX - rect.left) < rect.width / 2 ? 'left' : 'right';
         const jump = side === 'left' ? -10 : 10;
-        const currentTime = video.currentTime;
         let newTime = currentTime + jump;
 
-        // 👇 TRAVA INTELIGENTE: Pula apenas até o máximo que ele já assistiu
         if (jump > 0 && !isCompletedRef.current && newTime > maxTimeWatched.current) {
-            newTime = maxTimeWatched.current; // Puxa de volta para o limite
-            if (showNotification && newTime <= currentTime + 1) {
-                showNotification("Você só pode avançar até onde já assistiu.", "warning");
-            }
+            newTime = maxTimeWatched.current;
         }
 
         setSeekAnim({ show: true, side });
-        video.currentTime = Math.max(0, Math.min(video.duration || 0, newTime));
+        handleSeek({ target: { value: Math.max(0, Math.min(duration || 0, newTime)) } });
         setTimeout(() => setSeekAnim({ show: false, side: '' }), 600);
     };
 
-    // 6. FUNÇÃO: REGISTRAR O TEMPO MÁXIMO E AUTO CONCLUIR AOS 95%
-    const handleTimeUpdate = () => {
+    const formatTime = (time) => {
+        if (!time || isNaN(time)) return '00:00';
+        const h = Math.floor(time / 3600);
+        const m = Math.floor((time % 3600) / 60);
+        const s = Math.floor(time % 60);
+        if (h > 0) return `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+        return `${m}:${String(s).padStart(2, '0')}`;
+    };
+
+    const mudarQualidade = (novaQualidade) => {
+        if (isYT) return;
+        setQualidadeAtual(novaQualidade);
+        setMostrarMenuQualidade(false);
+
         const video = videoRef.current;
-        if (!video) return;
-
-        // Se o vídeo estiver tocando normalmente (não está sendo arrastado)
-        if (!video.seeking && !isCompletedRef.current) {
-            if (video.currentTime > maxTimeWatched.current) {
-                maxTimeWatched.current = video.currentTime;
-            }
-        }
-
-        const perc = (video.currentTime / video.duration) * 100;
-        if (perc > 95 && !isCompletedRef.current && !video.hasAutoCompleted) {
-            video.hasAutoCompleted = true;
-            isCompletedRef.current = true; // Libera na hora
-            maxTimeWatched.current = Infinity; // Destrava a barra de tempo de vez
-            if (onEnded) onEnded();
+        if (video) {
+            const tempoAtual = video.currentTime;
+            const estavaTocando = !video.paused;
+            setTimeout(() => {
+                video.load();
+                video.currentTime = tempoAtual;
+                if (estavaTocando) video.play();
+            }, 50);
         }
     };
 
-    // 7. FUNÇÃO: TRAVAR O "ARRASTAR" NA BARRA DE TEMPO NATIVA
-    const handleSeeking = () => {
-        const video = videoRef.current;
-        if (!video) return;
+    const toggleMute = () => {
+        if (isYT) {
+            const player = ytPlayerRef.current;
+            if (!player) return;
+            try {
+                if (player.isMuted()) {
+                    player.unMute();
+                    setIsMuted(false);
+                } else {
+                    player.mute();
+                    setIsMuted(true);
+                }
+            } catch (e) {}
+        } else if (videoRef.current) {
+            videoRef.current.muted = !videoRef.current.muted;
+            setIsMuted(videoRef.current.muted);
+        }
+    };
 
-        // Se ele arrastar a bolinha nativa além do que já assistiu
-        if (!isCompletedRef.current && video.currentTime > maxTimeWatched.current) {
-            video.currentTime = maxTimeWatched.current; // Puxa a bolinha de volta
+    const handleVolume = (e) => {
+        const value = Number(e.target.value);
+        setVolume(value);
+        setIsMuted(value === 0);
+
+        if (isYT) {
+            const player = ytPlayerRef.current;
+            if (!player) return;
+            try {
+                player.setVolume(value);
+                if (value === 0) player.mute(); else player.unMute();
+            } catch (err) {}
+        } else if (videoRef.current) {
+            videoRef.current.volume = value / 100;
+            videoRef.current.muted = value === 0;
+        }
+    };
+
+    const mudarVelocidade = (rate) => {
+        setPlaybackRate(rate);
+        setMostrarMenuVelocidade(false);
+
+        if (isYT) {
+            const player = ytPlayerRef.current;
+            if (player && typeof player.setPlaybackRate === 'function') {
+                try { player.setPlaybackRate(rate); } catch (e) {}
+            }
+        } else if (videoRef.current) {
+            videoRef.current.playbackRate = rate;
+        }
+    };
+
+    const toggleFullscreen = async () => {
+        const el = playerShellRef.current;
+        if (!el) return;
+        try {
+            if (!document.fullscreenElement) await el.requestFullscreen();
+            else await document.exitFullscreen();
+        } catch (e) {
+            console.warn('Fullscreen indisponível:', e);
         }
     };
 
     return (
-        <div className="w-full h-full rounded-2xl md:rounded-[2rem] overflow-hidden shadow-[0_20px_50px_rgba(0,0,0,0.5)] bg-black relative group select-none">
-            
-            {/* VÍDEO NATIVO INTEGRADO (Agora escutando o onSeeking) */}
-            <video 
-                ref={videoRef}
-                controls 
-                controlsList="nodownload"
-                poster={poster}
-                onEnded={onEnded}
-                onTimeUpdate={handleTimeUpdate}
-                onSeeking={handleSeeking} 
-                className="w-full h-full object-contain"
-                src={fontes[qualidadeAtual]}
-            >
-                Seu navegador não suporta a tag de vídeo.
-            </video>
-
-            {/* CAMADA INVISÍVEL (OVERLAY) PARA INTERCEPTAR OS CLIQUES */}
-            <div 
-                className="absolute top-0 left-0 w-full h-[calc(100%-70px)] z-10 cursor-pointer"
-                onClick={(e) => {
-                    // Se for 1 clique, dá Play ou Pause
-                    if (e.detail === 1) {
-                        const video = videoRef.current;
-                        if (video) {
-                            if (video.paused) video.play();
-                            else video.pause();
-                        }
-                    }
-                }}
+        <div ref={playerShellRef} className="w-full h-full overflow-hidden bg-black relative select-none flex flex-col">
+            <div
+                className="relative flex-1 min-h-0 w-full bg-black"
                 onDoubleClick={handleDblClick}
-            ></div>
+            >
+                {isYT && ytId ? (
+                    <>
+                        <iframe
+                            key={ytId}
+                            ref={ytIframeRef}
+                            src={ytEmbedSrc}
+                            title="Vídeo da aula"
+                            className="absolute inset-0 w-full h-full border-0 bg-black"
+                            allow="accelerometer; autoplay; encrypted-media; gyroscope; picture-in-picture; web-share"
+                            allowFullScreen
+                            referrerPolicy="strict-origin-when-cross-origin"
+                        ></iframe>
 
-            {/* ANIMAÇÃO DE 10 SEGUNDOS (VISUAL) */}
-            {seekAnim.show && (
-                <div className={`absolute inset-y-0 ${seekAnim.side === 'left' ? 'left-0 rounded-r-full' : 'right-0 rounded-l-full'} w-1/3 bg-white/20 backdrop-blur-md z-50 flex flex-col items-center justify-center pointer-events-none transition-all duration-300 animate-fade-in`}>
-                    <div className="flex items-center justify-center gap-0 mb-2">
-                        {seekAnim.side === 'left' ? (
-                            <div className="flex animate-[bounce_0.6s_infinite] text-white">
-                                <Play className="rotate-180 fill-white w-8 h-8 -mr-4 opacity-40" />
-                                <Play className="rotate-180 fill-white w-8 h-8 -mr-4 opacity-70" />
-                                <Play className="rotate-180 fill-white w-8 h-8" />
-                            </div>
-                        ) : (
-                            <div className="flex animate-[bounce_0.6s_infinite] text-white">
-                                <Play className="fill-white w-8 h-8 -mr-4" />
-                                <Play className="fill-white w-8 h-8 -mr-4 opacity-70" />
-                                <Play className="fill-white w-8 h-8 opacity-40" />
+                        {!ytReady && !playerError && (
+                            <div className="absolute inset-0 z-20 flex items-center justify-center bg-black pointer-events-none">
+                                <div className="flex flex-col items-center gap-3 text-white/70">
+                                    <div className="w-9 h-9 border-2 border-white/25 border-t-white rounded-full animate-spin"></div>
+                                    <span className="text-xs font-bold tracking-wide">Carregando vídeo...</span>
+                                </div>
                             </div>
                         )}
-                    </div>
-                    <span className="text-white font-black text-2xl tracking-tighter drop-shadow-lg">10 segundos</span>
-                </div>
-            )}
 
-            {/* OVERLAY PREMIUM: ENGRENAGEM (QUALIDADE) */}
-            <div className="absolute top-4 right-4 md:top-6 md:right-6 opacity-0 group-hover:opacity-100 transition-opacity duration-500 z-[60]">
-                <div className="relative flex flex-col items-end">
-                    <button 
-                        onClick={(e) => {
-                            e.stopPropagation();
-                            setMostrarMenuQualidade(!mostrarMenuQualidade);
+                        {playerError && (
+                            <div className="absolute inset-0 z-30 flex items-center justify-center bg-black px-6 text-center">
+                                <div className="max-w-lg">
+                                    <AlertCircle size={34} className="mx-auto mb-3 text-red-400" />
+                                    <p className="text-sm font-bold text-white mb-2">Não foi possível abrir este vídeo</p>
+                                    <p className="text-xs leading-relaxed text-slate-400">{playerError}</p>
+                                </div>
+                            </div>
+                        )}
+                    </>
+                ) : (
+                    <video
+                        ref={videoRef}
+                        poster={poster}
+                        src={videoUrl}
+                        className="absolute inset-0 w-full h-full object-contain bg-black"
+                        playsInline
+                        onClick={togglePlay}
+                        onPlay={() => setIsPlaying(true)}
+                        onPause={() => setIsPlaying(false)}
+                        onVolumeChange={(e) => {
+                            setVolume(Math.round((e.currentTarget.volume || 0) * 100));
+                            setIsMuted(e.currentTarget.muted);
                         }}
-                        className={`bg-black/40 hover:bg-black/80 backdrop-blur-xl text-white w-10 h-10 md:w-12 md:h-12 rounded-full transition-all duration-500 shadow-[0_8px_30px_rgba(0,0,0,0.6)] border border-white/10 flex items-center justify-center ${mostrarMenuQualidade ? 'rotate-90 bg-indigo-600/50 border-indigo-500/50 scale-110' : 'hover:scale-110 hover:border-white/30'}`}
-                        title="Configurações de Qualidade"
-                    >
-                        <Settings size={20} className={`md:w-6 md:h-6 transition-colors ${mostrarMenuQualidade ? 'text-indigo-300' : 'text-white/90'}`} />
-                    </button>
+                        onTimeUpdate={() => {
+                            const video = videoRef.current;
+                            if (!video) return;
+                            const time = video.currentTime || 0;
+                            const total = video.duration || 0;
+                            setCurrentTime(time);
+                            setDuration(total);
 
-                    {/* MENU DROPDOWN PREMIUM */}
-                    {mostrarMenuQualidade && (
-                        <div className="absolute right-0 top-14 md:top-16 mt-2 w-48 bg-[#0a0a0f]/95 backdrop-blur-3xl border border-white/10 rounded-2xl shadow-[0_30px_60px_rgba(0,0,0,0.9)] z-[70] overflow-hidden animate-scale-in transform origin-top-right flex flex-col">
-                            <div className="px-5 py-3.5 flex items-center gap-2.5 border-b border-white/5 bg-gradient-to-r from-white/5 to-transparent shrink-0">
-                                <Settings size={14} className="text-indigo-400" />
-                                <span className="text-[10px] font-black text-indigo-400 uppercase tracking-widest drop-shadow-md">
-                                    Resolução
-                                </span>
-                            </div>
+                            if (!isCompletedRef.current && time > maxTimeWatched.current) {
+                                maxTimeWatched.current = time;
+                            }
 
-                            <div className="p-2 flex flex-col gap-1">
-                                {qualidadesDisponiveis.map((qualidade) => (
-                                    <button
-                                        key={qualidade}
-                                        onClick={(e) => {
-                                            e.stopPropagation();
-                                            mudarQualidade(qualidade);
-                                        }}
-                                        className={`w-full text-left px-4 py-3 rounded-xl text-xs md:text-sm font-bold flex items-center justify-between transition-all duration-300 group/btn ${
-                                            qualidadeAtual === qualidade 
-                                            ? 'bg-indigo-600/20 text-indigo-400 border border-indigo-500/30 shadow-inner' 
-                                            : 'text-slate-300 hover:bg-white/10 hover:text-white border border-transparent'
-                                        }`}
-                                    >
-                                        {qualidade}
-                                        {qualidadeAtual === qualidade ? (
-                                            <CheckCircle size={16} className="text-indigo-400 drop-shadow-md" />
-                                        ) : (
-                                            <div className="w-4 h-4 rounded-full border border-slate-600 group-hover/btn:border-slate-400 transition-colors"></div>
-                                        )}
-                                    </button>
-                                ))}
-                            </div>
+                            if (time > 0 && total > 0 && (time / total) >= 0.95 && !isCompletedRef.current) {
+                                isCompletedRef.current = true;
+                                if (onEndedRef.current) onEndedRef.current();
+                            }
+                        }}
+                        onEnded={() => {
+                            setIsPlaying(false);
+                            if (!isCompletedRef.current) {
+                                isCompletedRef.current = true;
+                                if (onEndedRef.current) onEndedRef.current();
+                            }
+                        }}
+                    />
+                )}
+
+                {seekAnim.show && (
+                    <div className={`absolute inset-y-0 ${seekAnim.side === 'left' ? 'left-0 rounded-r-full' : 'right-0 rounded-l-full'} w-1/3 bg-black/20 z-40 flex flex-col items-center justify-center pointer-events-none animate-fade-in`}>
+                        <div className="flex text-white drop-shadow-lg mb-1">
+                            <Play className={`fill-white w-8 h-8 opacity-80 ${seekAnim.side === 'left' ? 'rotate-180' : ''}`} />
                         </div>
-                    )}
+                        <span className="text-white font-black text-xl tracking-tighter drop-shadow-md">10s</span>
+                    </div>
+                )}
+            </div>
+
+            {/* Controles da sua plataforma. Ficam fora da área do iframe para não bloquear cliques do player. */}
+            <div className="shrink-0 bg-[#080808] border-t border-white/10 px-3 sm:px-4 py-2.5 flex flex-col gap-2">
+                <div className="w-full relative flex items-center h-3 group/scrubber cursor-pointer">
+                    <input
+                        type="range"
+                        min="0"
+                        max={duration || 100}
+                        step="0.1"
+                        value={Math.min(currentTime, duration || 100)}
+                        onChange={handleSeek}
+                        className="w-full absolute inset-0 opacity-0 cursor-pointer z-20"
+                        aria-label="Progresso do vídeo"
+                    />
+                    <div className="w-full h-1.5 bg-white/20 rounded-full overflow-hidden pointer-events-none group-hover/scrubber:h-2 transition-all">
+                        <div className="h-full bg-indigo-500 rounded-full" style={{ width: `${Math.min(100, (currentTime / (duration || 1)) * 100)}%` }}></div>
+                    </div>
+                </div>
+
+                <div className="flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+                        <button onClick={togglePlay} disabled={isYT && !ytReady} className="text-white hover:text-indigo-400 disabled:opacity-40 transition-colors p-1" title={isPlaying ? 'Pausar' : 'Reproduzir'}>
+                            {isPlaying ? <Pause fill="currentColor" size={23}/> : <Play fill="currentColor" size={23}/>} 
+                        </button>
+
+                        <button onClick={toggleMute} className="text-white hover:text-indigo-400 transition-colors p-1" title={isMuted ? 'Ativar som' : 'Silenciar'}>
+                            {isMuted || volume === 0 ? <VolumeX size={20}/> : <Volume2 size={20}/>} 
+                        </button>
+
+                        <input
+                            type="range"
+                            min="0"
+                            max="100"
+                            value={volume}
+                            onChange={handleVolume}
+                            className="hidden sm:block w-20 accent-indigo-500"
+                            aria-label="Volume"
+                        />
+
+                        <span className="text-[11px] sm:text-xs font-mono font-bold text-white/80 whitespace-nowrap">
+                            {formatTime(currentTime)} / {formatTime(duration)}
+                        </span>
+                    </div>
+
+                    <div className="flex items-center gap-1 sm:gap-2">
+                        <div className="relative">
+                            <button onClick={() => setMostrarMenuVelocidade(!mostrarMenuVelocidade)} className="text-[11px] sm:text-xs font-black text-white/90 hover:text-indigo-400 px-2 py-1.5 rounded-lg hover:bg-white/5 transition-colors">
+                                {playbackRate}x
+                            </button>
+                            {mostrarMenuVelocidade && (
+                                <div className="absolute right-0 bottom-10 w-28 bg-[#111] border border-white/10 rounded-xl shadow-2xl z-[70] p-1.5">
+                                    {[0.5, 0.75, 1, 1.25, 1.5, 1.75, 2].map(rate => (
+                                        <button key={rate} onClick={() => mudarVelocidade(rate)} className={`w-full text-left px-3 py-2 rounded-lg text-xs font-bold ${playbackRate === rate ? 'bg-indigo-600/30 text-indigo-300' : 'text-slate-300 hover:bg-white/10'}`}>
+                                            {rate}x
+                                        </button>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+
+                        {!isYT && qualidadesDisponiveis.length > 1 && (
+                            <div className="relative">
+                                <button onClick={() => setMostrarMenuQualidade(!mostrarMenuQualidade)} className="text-white hover:text-indigo-400 p-1.5 transition-colors" title="Qualidade">
+                                    <Settings size={19}/>
+                                </button>
+                                {mostrarMenuQualidade && (
+                                    <div className="absolute right-0 bottom-10 w-40 bg-[#111] border border-white/10 rounded-xl shadow-2xl z-[70] flex flex-col p-1.5">
+                                        {qualidadesDisponiveis.map((qualidade) => (
+                                            <button key={qualidade} onClick={() => mudarQualidade(qualidade)} className={`w-full text-left px-3 py-2.5 rounded-lg text-xs font-bold flex items-center justify-between ${qualidadeAtual === qualidade ? 'bg-indigo-600/30 text-indigo-300' : 'text-slate-300 hover:bg-white/10'}`}>
+                                                {qualidade} {qualidadeAtual === qualidade && <CheckCircle size={14}/>} 
+                                            </button>
+                                        ))}
+                                    </div>
+                                )}
+                            </div>
+                        )}
+
+                        <button onClick={toggleFullscreen} className="text-white hover:text-indigo-400 p-1.5 transition-colors" title="Tela cheia">
+                            <Maximize size={20}/>
+                        </button>
+                    </div>
                 </div>
             </div>
-            
-            {/* AREA DE CLIQUE INVISÍVEL PARA FECHAR O MENU SE CLICAR FORA */}
-            {mostrarMenuQualidade && (
-                <div 
-                    className="absolute inset-0 z-50 cursor-pointer" 
-                    onClick={(e) => {
-                        e.stopPropagation();
-                        setMostrarMenuQualidade(false);
-                    }}
-                ></div>
-            )}
-            
         </div>
     );
 };
 // =================================================================================
+// =================================================================================
+
 
 // =================================================================================
     // MOTOR DE EXTRAÇÃO DE ÁUDIO PARA A IA (Baseado no seu modelo)
@@ -2836,24 +3124,31 @@ const CustomVideoPlayer = ({ src, onEnded, poster, isCompleted, showNotification
             }, 600);
         };
 
-        const getEmbedUrl = (url) => {
-            if (!url) return null;
-            if (url.includes('youtube.com') || url.includes('youtu.be')) {
-                const videoId = url.split('v=')[1]?.split('&')[0] || url.split('youtu.be/')[1];
-                return `https://www.youtube.com/embed/${videoId}?autoplay=1&rel=0&modestbranding=1&showinfo=0`;
+        // MOTOR DE VÍDEO
+        // YouTube agora passa pelo CustomVideoPlayer para preservar progresso e eventos.
+        // Vimeo continua usando iframe próprio.
+        const getEmbedUrl = (lessonObj) => {
+            if (!lessonObj) return null;
+
+            const conteudoPrincipal = (
+                typeof lessonObj.conteudo === 'string'
+                    ? lessonObj.conteudo
+                    : JSON.stringify(lessonObj.conteudo || '')
+            );
+
+            const vimeoRegex = /(?:vimeo\.com\/|player\.vimeo\.com\/video\/)(\d+)/i;
+            const vimeoMatch = conteudoPrincipal.match(vimeoRegex);
+
+            if (vimeoMatch && vimeoMatch[1]) {
+                return `https://player.vimeo.com/video/${vimeoMatch[1]}?autoplay=0&title=0&byline=0&portrait=0`;
             }
-            if (url.includes('vimeo.com')) {
-                const videoId = url.split('vimeo.com/')[1];
-                return `https://player.vimeo.com/video/${videoId}?autoplay=1&title=0&byline=0&portrait=0`;
-            }
+
             return null;
         };
-
-       if(!currentLesson) return <div className="p-10 text-center text-white animate-pulse">Carregando aula...</div>;
+        if(!currentLesson) return <div className="p-10 text-center text-white animate-pulse">Carregando aula...</div>;
 
         const isCurrentCompleted = completedMap[`${activeModuleIndex}-${activeLessonIndex}`];
-        const embedUrl = getEmbedUrl(currentLesson.conteudo);
-
+        const embedUrl = getEmbedUrl(currentLesson);
         return (
             <div className="fixed inset-0 z-[100] bg-[#050505] flex flex-col font-sans text-white overflow-hidden animate-fade-in">
                 
@@ -2930,9 +3225,16 @@ const CustomVideoPlayer = ({ src, onEnded, poster, isCompleted, showNotification
                             {/* 👇 AQUI ESTÁ A LÓGICA DO VÍDEO vs PDF NA TELA PRINCIPAL 👇 */}
                             {currentLesson.tipo === 'video' ? (
                                 embedUrl ? (
-                                    <iframe src={embedUrl} className="w-full h-full" frameBorder="0" allow="autoplay; fullscreen" allowFullScreen></iframe>
+                                    <iframe 
+                                        src={embedUrl} 
+                                        className="w-full h-full" 
+                                        frameBorder="0" 
+                                        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" 
+                                        allowFullScreen
+                                    ></iframe>
                                 ) : (
                                     <CustomVideoPlayer 
+                                        key={`${activeModuleIndex}-${activeLessonIndex}-${String(currentLesson.conteudo || '').slice(0, 80)}`}
                                         src={currentLesson.conteudo} 
                                         title={currentLesson.titulo}
                                         poster={course.cover}
