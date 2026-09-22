@@ -447,6 +447,7 @@ window.applyPwaManifest = function(settings) {
 
   <link href="https://vjs.zencdn.net/8.10.0/video-js.css" rel="stylesheet" />
   <script src="https://vjs.zencdn.net/8.10.0/video.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.18/dist/hls.min.js"></script>
   
 
 <meta name="theme-color" content="#3b82f6">
@@ -1967,143 +1968,62 @@ const StudentMarketplace = ({ db, user, settings, showNotification, promotions =
 // =================================================================================
     
 // =================================================================================
-// SUB-COMPONENTE: PLAYER PREMIUM UNIFICADO (R2/NATIVO + YOUTUBE IFRAME API)
+// SUB-COMPONENTE: PLAYER PREMIUM WHITE-LABEL V7 (SOMENTE R2/CDN + HLS + MP4)
 // =================================================================================
 const CustomVideoPlayer = ({ src, onEnded, poster, isCompleted, showNotification }) => {
+    const normalizeUrl = React.useCallback((value) => {
+        if (typeof value !== 'string') return '';
+        let url = value.trim();
+        if (!url) return '';
+
+        // Compatibilidade com domínio R2 antigo já usado na plataforma.
+        const wrongDomain = "https://pub-2ece542306d80259e71a793d20f91a60.r2.dev";
+        const rightDomain = "https://pub-263c6a7252164111a104a68e6835cfc4.r2.dev";
+        if (url.includes(wrongDomain)) url = url.replace(wrongDomain, rightDomain);
+        return url;
+    }, []);
+
     const normalizarFontes = React.useCallback((valor) => {
-        if (typeof valor === 'string') return { 'Auto': valor };
+        if (typeof valor === 'string') return { 'Auto': normalizeUrl(valor) };
         if (!valor || typeof valor !== 'object') return { 'Auto': '' };
 
-        // Compatibilidade com objetos do tipo { url }, { src } ou { videoUrl }.
-        const urlDireta = valor.url || valor.src || valor.videoUrl || valor.link;
-        if (typeof urlDireta === 'string') return { 'Auto': urlDireta };
+        const urlDireta = valor.r2Url || valor.r2VideoUrl || valor.videoR2Url || valor.hlsUrl || valor.mp4Url || valor.url || valor.src || valor.videoUrl || valor.link;
+        if (typeof urlDireta === 'string' && urlDireta.trim()) return { 'Auto': normalizeUrl(urlDireta) };
 
         const mapa = {};
         Object.entries(valor).forEach(([chave, item]) => {
-            if (typeof item === 'string' && item.trim()) mapa[chave] = item;
-            else if (item && typeof item === 'object') {
-                const u = item.url || item.src || item.videoUrl || item.link;
-                if (typeof u === 'string' && u.trim()) mapa[chave] = u;
+            if (typeof item === 'string' && item.trim()) {
+                mapa[chave] = normalizeUrl(item);
+            } else if (item && typeof item === 'object') {
+                const u = item.r2Url || item.r2VideoUrl || item.videoR2Url || item.hlsUrl || item.mp4Url || item.url || item.src || item.videoUrl || item.link;
+                if (typeof u === 'string' && u.trim()) mapa[chave] = normalizeUrl(u);
             }
         });
+
         return Object.keys(mapa).length ? mapa : { 'Auto': '' };
-    }, []);
+    }, [normalizeUrl]);
 
     const fontes = React.useMemo(() => normalizarFontes(src), [src, normalizarFontes]);
-    const qualidadesDisponiveis = Object.keys(fontes);
+    const qualidadesDisponiveis = React.useMemo(() => Object.keys(fontes), [fontes]);
     const [qualidadeAtual, setQualidadeAtual] = React.useState(qualidadesDisponiveis[0] || 'Auto');
 
     React.useEffect(() => {
         if (!fontes[qualidadeAtual]) setQualidadeAtual(qualidadesDisponiveis[0] || 'Auto');
     }, [fontes, qualidadeAtual, qualidadesDisponiveis.join('|')]);
 
-    const videoUrl = fontes[qualidadeAtual] || fontes[qualidadesDisponiveis[0]] || '';
-
-    const extrairYouTubeId = React.useCallback((valor) => {
-        if (valor === null || valor === undefined) return null;
-
-        // Se algum formato antigo chegar como objeto/array, procura recursivamente por uma URL do YouTube.
-        if (typeof valor === 'object') {
-            const candidatos = Array.isArray(valor) ? valor : Object.values(valor);
-            for (const item of candidatos) {
-                const achado = extrairYouTubeId(item);
-                if (achado) return achado;
-            }
-            return null;
-        }
-
-        if (typeof valor !== 'string') return null;
-        let raw = valor.trim();
-        if (!raw) return null;
-
-        // Corrige links copiados de HTML/iframes e URLs codificadas.
-        raw = raw.replace(/&amp;/gi, '&').replace(/&#38;/gi, '&');
-        const iframeSrc = raw.match(/src=["']([^"']+)["']/i);
-        if (iframeSrc && iframeSrc[1]) raw = iframeSrc[1];
-
-        // ID puro do YouTube.
-        if (/^[A-Za-z0-9_-]{11}$/.test(raw)) return raw;
-
-        const procurarEmTexto = (texto) => {
-            if (!texto) return null;
-            const padroes = [
-                /youtu\.be\/([A-Za-z0-9_-]{11})(?:[?&#/]|$)/i,
-                /youtube(?:-nocookie)?\.com\/(?:embed|shorts|live|v)\/([A-Za-z0-9_-]{11})(?:[?&#/]|$)/i,
-                /youtube(?:-nocookie)?\.com\/watch(?:\?|[^#]*[?&])[^#]*[?&]?v=([A-Za-z0-9_-]{11})(?:[&#]|$)/i,
-                /[?&]v=([A-Za-z0-9_-]{11})(?:[&#]|$)/i
-            ];
-            for (const regex of padroes) {
-                const match = texto.match(regex);
-                if (match && match[1]) return match[1];
-            }
-            return null;
-        };
-
-        let id = procurarEmTexto(raw);
-        if (id) return id;
-
-        // Alguns links de compartilhamento/attribution vêm URL-encoded.
-        let decoded = raw;
-        for (let i = 0; i < 3; i++) {
-            try {
-                const next = decodeURIComponent(decoded);
-                if (next === decoded) break;
-                decoded = next;
-                id = procurarEmTexto(decoded);
-                if (id) return id;
-            } catch (e) {
-                break;
-            }
-        }
-
-        try {
-            const url = new URL(raw);
-            const host = url.hostname.toLowerCase().replace(/^www\./, '').replace(/^m\./, '').replace(/^music\./, '');
-
-            if (host === 'youtu.be') {
-                const candidate = url.pathname.split('/').filter(Boolean)[0];
-                return candidate && /^[A-Za-z0-9_-]{11}$/.test(candidate) ? candidate : null;
-            }
-
-            if (host === 'youtube.com' || host.endsWith('.youtube.com') || host === 'youtube-nocookie.com' || host.endsWith('.youtube-nocookie.com')) {
-                const fromQuery = url.searchParams.get('v');
-                if (fromQuery && /^[A-Za-z0-9_-]{11}$/.test(fromQuery)) return fromQuery;
-
-                const parts = url.pathname.split('/').filter(Boolean);
-                const markerIndex = parts.findIndex(p => ['embed', 'shorts', 'live', 'v'].includes(p.toLowerCase()));
-                const candidate = markerIndex >= 0 ? parts[markerIndex + 1] : null;
-                if (candidate && /^[A-Za-z0-9_-]{11}$/.test(candidate)) return candidate;
-
-                // attribution_link, redirect e links similares.
-                for (const key of ['u', 'url', 'q']) {
-                    const nested = url.searchParams.get(key);
-                    if (nested) {
-                        const nestedId = procurarEmTexto(nested) || procurarEmTexto(decodeURIComponent(nested));
-                        if (nestedId) return nestedId;
-                    }
-                }
-            }
-        } catch (e) {}
-
-        return null;
-    }, []);
-
-    const ytId = React.useMemo(() => extrairYouTubeId(src) || extrairYouTubeId(videoUrl), [videoUrl, src, extrairYouTubeId]);
-    const fonteTexto = React.useMemo(() => {
-        try {
-            return typeof src === 'string' ? src : JSON.stringify(src || '');
-        } catch (e) {
-            return String(videoUrl || '');
-        }
+    const videoUrl = normalizeUrl(fontes[qualidadeAtual] || fontes[qualidadesDisponiveis[0]] || '');
+    const sourceText = React.useMemo(() => {
+        try { return typeof src === 'string' ? src : JSON.stringify(src || ''); }
+        catch (e) { return String(videoUrl || ''); }
     }, [src, videoUrl]);
-    const isYouTubeLike = /(?:youtu\.be|youtube(?:-nocookie)?\.com)/i.test(fonteTexto) || Boolean(ytId);
-    const isYT = Boolean(ytId);
-    const ytSourceInvalid = isYouTubeLike && !ytId;
+
+    const isYouTubeSource = /(?:youtu\.be|youtube(?:-nocookie)?\.com)/i.test(sourceText);
+    const isVimeoSource = /(?:vimeo\.com|player\.vimeo\.com)/i.test(sourceText);
+    const isHlsSource = /\.m3u8(?:[?#].*)?$/i.test(videoUrl) || /(?:^|[?&])format=hls(?:&|$)/i.test(videoUrl);
 
     const videoRef = React.useRef(null);
     const playerShellRef = React.useRef(null);
-    const ytIframeRef = React.useRef(null);
-    const ytPlayerRef = React.useRef(null);
+    const hlsRef = React.useRef(null);
     const onEndedRef = React.useRef(onEnded);
     const showNotificationRef = React.useRef(showNotification);
     const isCompletedRef = React.useRef(isCompleted);
@@ -2114,8 +2034,8 @@ const CustomVideoPlayer = ({ src, onEnded, poster, isCompleted, showNotification
     const [duration, setDuration] = React.useState(0);
     const [volume, setVolume] = React.useState(100);
     const [isMuted, setIsMuted] = React.useState(false);
-    const [ytReady, setYtReady] = React.useState(false);
     const [playerError, setPlayerError] = React.useState('');
+    const [isLoading, setIsLoading] = React.useState(Boolean(videoUrl));
     const [mostrarMenuQualidade, setMostrarMenuQualidade] = React.useState(false);
     const [mostrarMenuVelocidade, setMostrarMenuVelocidade] = React.useState(false);
     const [playbackRate, setPlaybackRate] = React.useState(1);
@@ -2128,250 +2048,129 @@ const CustomVideoPlayer = ({ src, onEnded, poster, isCompleted, showNotification
         if (isCompleted) maxTimeWatched.current = Infinity;
     }, [isCompleted]);
 
+    const destroyHls = React.useCallback(() => {
+        if (hlsRef.current) {
+            try { hlsRef.current.destroy(); } catch (e) {}
+            hlsRef.current = null;
+        }
+    }, []);
+
     React.useEffect(() => {
+        const video = videoRef.current;
+        destroyHls();
+
         setCurrentTime(0);
         setDuration(0);
         setIsPlaying(false);
         setPlayerError('');
-        setYtReady(false);
+        setIsLoading(Boolean(videoUrl));
         if (!isCompletedRef.current) maxTimeWatched.current = 0;
-    }, [videoUrl]);
 
-    const ensureYouTubeApi = React.useCallback(() => {
-        if (window.YT && window.YT.Player) return Promise.resolve(window.YT);
+        if (!video || !videoUrl || isYouTubeSource || isVimeoSource) return;
 
-        if (!window.__aemYouTubeApiPromise) {
-            window.__aemYouTubeApiPromise = new Promise((resolve, reject) => {
-                const previousReady = window.onYouTubeIframeAPIReady;
-                const timeout = setTimeout(() => reject(new Error('Timeout ao carregar YouTube IFrame API')), 15000);
+        try {
+            video.pause();
+            video.removeAttribute('src');
+            video.load();
+        } catch (e) {}
 
-                window.onYouTubeIframeAPIReady = () => {
-                    clearTimeout(timeout);
-                    if (typeof previousReady === 'function') {
-                        try { previousReady(); } catch (e) {}
-                    }
-                    resolve(window.YT);
-                };
+        if (isHlsSource) {
+            // Safari/iOS reproduzem HLS nativamente.
+            if (video.canPlayType('application/vnd.apple.mpegurl')) {
+                video.src = videoUrl;
+                video.load();
+                return;
+            }
 
-                const existing = document.querySelector('script[src="https://www.youtube.com/iframe_api"]');
-                if (!existing) {
-                    const tag = document.createElement('script');
-                    tag.src = 'https://www.youtube.com/iframe_api';
-                    tag.async = true;
-                    tag.onerror = () => {
-                        clearTimeout(timeout);
-                        reject(new Error('Falha de rede ao carregar YouTube IFrame API'));
-                    };
-                    document.head.appendChild(tag);
-                }
-            }).catch((err) => {
-                // Permite nova tentativa se houve falha de rede.
-                window.__aemYouTubeApiPromise = null;
-                throw err;
-            });
-        }
+            // Chrome/Edge/Firefox usam hls.js, carregado globalmente no <head>.
+            if (window.Hls && window.Hls.isSupported()) {
+                const hls = new window.Hls({
+                    enableWorker: true,
+                    lowLatencyMode: false,
+                    backBufferLength: 60
+                });
+                hlsRef.current = hls;
+                hls.loadSource(videoUrl);
+                hls.attachMedia(video);
 
-        return window.__aemYouTubeApiPromise;
-    }, []);
-
-    // Player oficial conectado a um <iframe> real renderizado pelo React.
-    // Este é um fluxo suportado oficialmente pelo YouTube quando enablejsapi=1 está no src.
-    React.useEffect(() => {
-        if (!isYT || !ytId || !ytIframeRef.current) return;
-
-        let cancelled = false;
-        let localPlayer = null;
-        let readyTimeout = null;
-        let readyFired = false;
-
-        setPlayerError('');
-        setYtReady(false);
-
-        const iniciar = async () => {
-            try {
-                await ensureYouTubeApi();
-                if (cancelled || !ytIframeRef.current) return;
-
-                const iframe = ytIframeRef.current;
-                if (!iframe.id) iframe.id = `aem-yt-frame-${String(ytId).replace(/[^\w-]/g, '')}`;
-
-                readyTimeout = setTimeout(() => {
-                    if (!cancelled && !readyFired) {
-                        const msg = 'O YouTube não confirmou o carregamento do player. Verifique se o vídeo permite incorporação e se a plataforma está no domínio HTTPS publicado.';
-                        setPlayerError(msg);
-                        if (showNotificationRef.current) showNotificationRef.current(msg, 'error');
-                    }
-                }, 15000);
-
-                localPlayer = new window.YT.Player(iframe.id, {
-                    events: {
-                        onReady: (e) => {
-                            if (cancelled) return;
-                            readyFired = true;
-                            if (readyTimeout) clearTimeout(readyTimeout);
-
-                            ytPlayerRef.current = e.target;
-                            setYtReady(true);
-                            setPlayerError('');
-                            setDuration(Number(e.target.getDuration()) || 0);
-
-                            try {
-                                setVolume(Number(e.target.getVolume()) || 100);
-                                setIsMuted(Boolean(e.target.isMuted && e.target.isMuted()));
-                            } catch (err) {}
-                        },
-                        onStateChange: (e) => {
-                            if (cancelled) return;
-                            const playing = e.data === window.YT.PlayerState.PLAYING;
-                            setIsPlaying(playing);
-
-                            if (e.data === window.YT.PlayerState.ENDED && !isCompletedRef.current) {
-                                isCompletedRef.current = true;
-                                if (onEndedRef.current) onEndedRef.current();
-                            }
-                        },
-                        onPlaybackRateChange: (e) => {
-                            if (!cancelled) setPlaybackRate(Number(e.data) || 1);
-                        },
-                        onAutoplayBlocked: () => setIsPlaying(false),
-                        onError: (e) => {
-                            if (cancelled) return;
-                            if (readyTimeout) clearTimeout(readyTimeout);
-
-                            const mensagens = {
-                                2: 'O ID do vídeo do YouTube é inválido.',
-                                5: 'O navegador não conseguiu reproduzir este vídeo no player HTML5 do YouTube.',
-                                100: 'Este vídeo foi removido ou está privado.',
-                                101: 'O proprietário deste vídeo não permite reprodução incorporada.',
-                                150: 'O proprietário deste vídeo não permite reprodução incorporada.',
-                                153: 'O YouTube não recebeu a identificação do domínio (HTTP Referer). Abra a plataforma pelo domínio HTTPS publicado.'
-                            };
-                            const msg = mensagens[e.data] || `Não foi possível reproduzir este vídeo do YouTube (erro ${e.data}).`;
-                            console.error('Erro no player do YouTube:', e.data, { ytId, videoUrl });
-                            setPlayerError(msg);
-                            if (showNotificationRef.current) showNotificationRef.current(msg, 'error');
-                        }
-                    }
+                hls.on(window.Hls.Events.MANIFEST_PARSED, () => {
+                    setIsLoading(false);
                 });
 
-                ytPlayerRef.current = localPlayer;
-            } catch (err) {
-                if (cancelled) return;
-                if (readyTimeout) clearTimeout(readyTimeout);
-                console.error('Falha ao carregar API do YouTube:', err, { ytId, videoUrl });
-                const msg = 'Não foi possível inicializar a API do YouTube. Recarregue a aula e confirme que a página está publicada em HTTPS.';
+                hls.on(window.Hls.Events.ERROR, (_event, data) => {
+                    if (!data || !data.fatal) return;
+                    console.error('Erro fatal HLS:', data);
+                    let msg = 'Não foi possível carregar este streaming HLS.';
+                    if (data.type === window.Hls.ErrorTypes.NETWORK_ERROR) msg = 'Falha de rede ao carregar o vídeo. Verifique CORS e a URL do R2/CDN.';
+                    if (data.type === window.Hls.ErrorTypes.MEDIA_ERROR) msg = 'O navegador encontrou um erro de mídia neste streaming.';
+                    setPlayerError(msg);
+                    setIsLoading(false);
+                    if (showNotificationRef.current) showNotificationRef.current(msg, 'error');
+                });
+            } else {
+                const msg = 'Este navegador não oferece suporte a HLS neste dispositivo.';
                 setPlayerError(msg);
-                if (showNotificationRef.current) showNotificationRef.current(msg, 'error');
+                setIsLoading(false);
             }
-        };
+        } else {
+            video.src = videoUrl;
+            video.load();
+        }
 
-        iniciar();
+        return () => destroyHls();
+    }, [videoUrl, isHlsSource, isYouTubeSource, isVimeoSource, destroyHls]);
 
-        return () => {
-            cancelled = true;
-            if (readyTimeout) clearTimeout(readyTimeout);
-            try {
-                if (localPlayer && typeof localPlayer.destroy === 'function') localPlayer.destroy();
-            } catch (e) {}
-            ytPlayerRef.current = null;
-        };
-    }, [isYT, ytId, ensureYouTubeApi, videoUrl]);
-
-    // Progresso do YouTube e conclusão automática em 95%.
-    React.useEffect(() => {
-        if (!isYT) return;
-
-        const interval = setInterval(() => {
-            const player = ytPlayerRef.current;
-            if (!player || typeof player.getCurrentTime !== 'function') return;
-
-            try {
-                const time = Number(player.getCurrentTime()) || 0;
-                const total = Number(player.getDuration()) || duration || 0;
-                setCurrentTime(time);
-                if (total > 0) setDuration(total);
-
-                if (!isCompletedRef.current && time > maxTimeWatched.current) {
-                    maxTimeWatched.current = time;
-                }
-
-                if (time > 0 && total > 0 && (time / total) >= 0.95 && !isCompletedRef.current) {
-                    isCompletedRef.current = true;
-                    if (onEndedRef.current) onEndedRef.current();
-                }
-            } catch (e) {}
-        }, 500);
-
-        return () => clearInterval(interval);
-    }, [isYT, duration]);
+    React.useEffect(() => () => destroyHls(), [destroyHls]);
 
     const togglePlay = () => {
-        if (isYT) {
-            const player = ytPlayerRef.current;
-            if (!player || !ytReady) return;
-            try {
-                const state = player.getPlayerState();
-                if (state === window.YT.PlayerState.PLAYING) player.pauseVideo();
-                else player.playVideo();
-            } catch (e) {
-                console.warn('Não foi possível alternar Play/Pause:', e);
-            }
+        if (isYouTubeSource || isVimeoSource) {
+            const msg = 'Esta aula ainda não possui uma fonte de streaming própria configurada.';
+            setPlayerError(msg);
+            if (showNotificationRef.current) showNotificationRef.current(msg, 'error');
             return;
         }
 
         if (!videoUrl || !String(videoUrl).trim()) {
             const msg = 'Esta aula não possui uma fonte de vídeo válida configurada.';
             setPlayerError(msg);
-            console.error('Tentativa de reproduzir vídeo sem src.', { src, videoUrl });
             if (showNotificationRef.current) showNotificationRef.current(msg, 'error');
             return;
         }
 
-        if (videoRef.current) {
-            if (videoRef.current.paused) {
-                const playPromise = videoRef.current.play();
-                if (playPromise && typeof playPromise.catch === 'function') {
-                    playPromise.catch((err) => {
-                        console.error('Falha ao reproduzir fonte nativa:', err, videoUrl);
-                        setPlayerError('Esta fonte não pôde ser reproduzida como vídeo nativo.');
-                    });
-                }
-            } else videoRef.current.pause();
+        const video = videoRef.current;
+        if (!video) return;
+        if (video.paused) {
+            const promise = video.play();
+            if (promise && typeof promise.catch === 'function') {
+                promise.catch((err) => {
+                    console.error('Falha ao reproduzir fonte nativa:', err, videoUrl);
+                    const msg = 'O navegador não conseguiu reproduzir esta fonte. Verifique se o arquivo é MP4/WebM ou um HLS válido.';
+                    setPlayerError(msg);
+                });
+            }
+        } else {
+            video.pause();
         }
     };
 
     const handleSeek = (e) => {
         let newTime = parseFloat(e.target.value);
         if (!Number.isFinite(newTime)) return;
+        if (!isCompletedRef.current && newTime > maxTimeWatched.current) newTime = maxTimeWatched.current;
 
-        if (!isCompletedRef.current && newTime > maxTimeWatched.current) {
-            newTime = maxTimeWatched.current;
-        }
-
+        const video = videoRef.current;
+        if (video) video.currentTime = newTime;
         setCurrentTime(newTime);
-
-        if (isYT) {
-            const player = ytPlayerRef.current;
-            if (player && typeof player.seekTo === 'function') {
-                try { player.seekTo(newTime, true); } catch (err) {}
-            }
-        } else if (videoRef.current) {
-            videoRef.current.currentTime = newTime;
-        }
     };
 
     const handleDblClick = (e) => {
         e.preventDefault();
         e.stopPropagation();
-
         const rect = e.currentTarget.getBoundingClientRect();
         const side = (e.clientX - rect.left) < rect.width / 2 ? 'left' : 'right';
         const jump = side === 'left' ? -10 : 10;
         let newTime = currentTime + jump;
-
-        if (jump > 0 && !isCompletedRef.current && newTime > maxTimeWatched.current) {
-            newTime = maxTimeWatched.current;
-        }
+        if (jump > 0 && !isCompletedRef.current && newTime > maxTimeWatched.current) newTime = maxTimeWatched.current;
 
         setSeekAnim({ show: true, side });
         handleSeek({ target: { value: Math.max(0, Math.min(duration || 0, newTime)) } });
@@ -2388,71 +2187,53 @@ const CustomVideoPlayer = ({ src, onEnded, poster, isCompleted, showNotification
     };
 
     const mudarQualidade = (novaQualidade) => {
-        if (isYT) return;
+        const video = videoRef.current;
+        const tempoAtual = video ? video.currentTime : currentTime;
+        const estavaTocando = video ? !video.paused : false;
+
         setQualidadeAtual(novaQualidade);
         setMostrarMenuQualidade(false);
 
-        const video = videoRef.current;
-        if (video) {
-            const tempoAtual = video.currentTime;
-            const estavaTocando = !video.paused;
-            setTimeout(() => {
-                video.load();
-                video.currentTime = tempoAtual;
-                if (estavaTocando) { const p = video.play(); if (p && typeof p.catch === 'function') p.catch(() => {}); }
-            }, 50);
-        }
+        window.setTimeout(() => {
+            const currentVideo = videoRef.current;
+            if (!currentVideo) return;
+            const restore = () => {
+                if (Number.isFinite(tempoAtual) && tempoAtual > 0) {
+                    try { currentVideo.currentTime = tempoAtual; } catch (e) {}
+                }
+                if (estavaTocando) {
+                    const p = currentVideo.play();
+                    if (p && typeof p.catch === 'function') p.catch(() => {});
+                }
+                currentVideo.removeEventListener('loadedmetadata', restore);
+            };
+            currentVideo.addEventListener('loadedmetadata', restore);
+        }, 80);
     };
 
     const toggleMute = () => {
-        if (isYT) {
-            const player = ytPlayerRef.current;
-            if (!player) return;
-            try {
-                if (player.isMuted()) {
-                    player.unMute();
-                    setIsMuted(false);
-                } else {
-                    player.mute();
-                    setIsMuted(true);
-                }
-            } catch (e) {}
-        } else if (videoRef.current) {
-            videoRef.current.muted = !videoRef.current.muted;
-            setIsMuted(videoRef.current.muted);
-        }
+        const video = videoRef.current;
+        if (!video) return;
+        video.muted = !video.muted;
+        setIsMuted(video.muted);
     };
 
     const handleVolume = (e) => {
         const value = Number(e.target.value);
+        const video = videoRef.current;
         setVolume(value);
         setIsMuted(value === 0);
-
-        if (isYT) {
-            const player = ytPlayerRef.current;
-            if (!player) return;
-            try {
-                player.setVolume(value);
-                if (value === 0) player.mute(); else player.unMute();
-            } catch (err) {}
-        } else if (videoRef.current) {
-            videoRef.current.volume = value / 100;
-            videoRef.current.muted = value === 0;
+        if (video) {
+            video.volume = value / 100;
+            video.muted = value === 0;
         }
     };
 
     const mudarVelocidade = (rate) => {
+        const video = videoRef.current;
         setPlaybackRate(rate);
         setMostrarMenuVelocidade(false);
-
-        if (isYT) {
-            const player = ytPlayerRef.current;
-            if (player && typeof player.setPlaybackRate === 'function') {
-                try { player.setPlaybackRate(rate); } catch (e) {}
-            }
-        } else if (videoRef.current) {
-            videoRef.current.playbackRate = rate;
-        }
+        if (video) video.playbackRate = rate;
     };
 
     const toggleFullscreen = async () => {
@@ -2466,122 +2247,131 @@ const CustomVideoPlayer = ({ src, onEnded, poster, isCompleted, showNotification
         }
     };
 
-    const youtubeEmbedSrc = React.useMemo(() => {
-        if (!ytId) return '';
-        const params = new URLSearchParams({
-            enablejsapi: '1',
-            controls: '0',
-            playsinline: '1',
-            rel: '0',
-            fs: '0',
-            iv_load_policy: '3',
-            hl: 'pt-BR'
-        });
-        if (typeof window !== 'undefined' && window.location && /^https?:\/\//i.test(window.location.origin || '')) {
-            params.set('origin', window.location.origin);
+    const handleVideoProgress = () => {
+        const video = videoRef.current;
+        if (!video) return;
+        const time = Number(video.currentTime) || 0;
+        const total = Number(video.duration) || 0;
+        setCurrentTime(time);
+        if (total > 0 && Number.isFinite(total)) setDuration(total);
+
+        if (!isCompletedRef.current && time > maxTimeWatched.current) maxTimeWatched.current = time;
+        if (time > 0 && total > 0 && (time / total) >= 0.95 && !isCompletedRef.current) {
+            isCompletedRef.current = true;
+            if (onEndedRef.current) onEndedRef.current();
         }
-        return `https://www.youtube.com/embed/${ytId}?${params.toString()}`;
-    }, [ytId]);
+    };
+
+    const unsupportedExternalSource = isYouTubeSource || isVimeoSource;
 
     return (
         <div ref={playerShellRef} className="w-full h-full overflow-hidden bg-black relative select-none flex flex-col">
             <div
                 className="relative flex-1 min-h-0 w-full bg-black"
-                onDoubleClick={handleDblClick}
+                onDoubleClick={unsupportedExternalSource ? undefined : handleDblClick}
+                onContextMenu={(e) => e.preventDefault()}
             >
-                {isYT && ytId ? (
-                    <>
-                        <iframe
-                            key={`yt-${ytId}`}
-                            id={`aem-yt-frame-${String(ytId).replace(/[^\w-]/g, '')}`}
-                            ref={ytIframeRef}
-                            src={youtubeEmbedSrc}
-                            className="absolute inset-0 w-full h-full bg-black"
-                            title="Vídeo da aula"
-                            frameBorder="0"
-                            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
-                            referrerPolicy="strict-origin-when-cross-origin"
-                            allowFullScreen
-                        ></iframe>
-
-                        {!ytReady && !playerError && (
-                            <div className="absolute inset-0 z-20 flex items-center justify-center bg-black/95 pointer-events-none">
-                                <div className="flex flex-col items-center gap-3 text-white/70">
-                                    <div className="w-9 h-9 border-2 border-white/25 border-t-white rounded-full animate-spin"></div>
-                                    <span className="text-xs font-bold tracking-wide">Conectando ao vídeo...</span>
-                                </div>
-                            </div>
+                {unsupportedExternalSource ? (
+                    <div className="absolute inset-0 flex items-center justify-center bg-black px-6 text-center overflow-hidden">
+                        {poster && (
+                            <img
+                                src={poster}
+                                alt=""
+                                className="absolute inset-0 w-full h-full object-cover opacity-10 blur-sm scale-105 pointer-events-none select-none"
+                            />
                         )}
-
-                        {playerError && (
-                            <div className="absolute inset-0 z-30 flex items-center justify-center bg-black/95 px-6 text-center">
-                                <div className="max-w-lg">
-                                    <AlertCircle size={34} className="mx-auto mb-3 text-red-400" />
-                                    <p className="text-sm font-bold text-white mb-2">Não foi possível abrir este vídeo</p>
-                                    <p className="text-xs leading-relaxed text-slate-400">{playerError}</p>
-                                </div>
-                            </div>
-                        )}
-                    </>
-                ) : ytSourceInvalid ? (
-                    <div className="absolute inset-0 flex items-center justify-center bg-black px-6 text-center">
-                        <div className="max-w-lg">
-                            <AlertCircle size={34} className="mx-auto mb-3 text-amber-400" />
-                            <p className="text-sm font-bold text-white mb-2">Link do YouTube reconhecido, mas incompleto</p>
-                            <p className="text-xs leading-relaxed text-slate-400">Use o link do vídeo no formato youtube.com/watch?v=..., youtu.be/... ou youtube.com/embed/....</p>
+                        <div className="relative z-10 max-w-lg">
+                            <Video size={42} className="mx-auto mb-4 text-white/25" />
+                            <p className="text-base font-black text-white/90 mb-2">Vídeo aguardando fonte de streaming</p>
+                            <p className="text-sm leading-relaxed text-white/40">O conteúdo será exibido aqui quando a fonte de vídeo da plataforma estiver disponível.</p>
                         </div>
                     </div>
                 ) : (!videoUrl || !String(videoUrl).trim()) ? (
                     <div className="absolute inset-0 flex items-center justify-center bg-black px-6 text-center">
                         <div className="max-w-lg">
-                            <AlertCircle size={34} className="mx-auto mb-3 text-amber-400" />
-                            <p className="text-sm font-bold text-white mb-2">Fonte de vídeo não encontrada nesta aula</p>
-                            <p className="text-xs leading-relaxed text-slate-400">O player não recebeu uma URL de vídeo. A plataforma agora procura o link em conteudo, videoUrl, youtubeUrl, url, link e outros campos compatíveis da aula.</p>
+                            <AlertCircle size={38} className="mx-auto mb-4 text-amber-400" />
+                            <p className="text-base font-black text-white mb-2">Vídeo temporariamente indisponível</p>
+                            <p className="text-sm leading-relaxed text-slate-400">A fonte de streaming desta aula ainda não está disponível.</p>
                         </div>
                     </div>
                 ) : (
-                    <video
-                        ref={videoRef}
-                        poster={poster}
-                        src={videoUrl}
-                        className="absolute inset-0 w-full h-full object-contain bg-black"
-                        playsInline
-                        onClick={togglePlay}
-                        onPlay={() => setIsPlaying(true)}
-                        onPause={() => setIsPlaying(false)}
-                        onError={(e) => {
-                            console.error('Fonte de vídeo nativa não suportada:', videoUrl, e.currentTarget.error);
-                            setPlayerError('Este endereço não é um arquivo de vídeo compatível. Se for um link do YouTube, confira se o link foi copiado completo.');
-                        }}
-                        onVolumeChange={(e) => {
-                            setVolume(Math.round((e.currentTarget.volume || 0) * 100));
-                            setIsMuted(e.currentTarget.muted);
-                        }}
-                        onTimeUpdate={() => {
-                            const video = videoRef.current;
-                            if (!video) return;
-                            const time = video.currentTime || 0;
-                            const total = video.duration || 0;
-                            setCurrentTime(time);
-                            setDuration(total);
+                    <>
+                        <video
+                            ref={videoRef}
+                            poster={poster}
+                            className="absolute inset-0 w-full h-full object-contain bg-black"
+                            playsInline
+                            preload="metadata"
+                            disablePictureInPicture
+                            controlsList="nodownload noremoteplayback"
+                            onClick={togglePlay}
+                            onPlay={() => { setIsPlaying(true); setIsLoading(false); }}
+                            onPause={() => setIsPlaying(false)}
+                            onWaiting={() => setIsLoading(true)}
+                            onCanPlay={() => setIsLoading(false)}
+                            onLoadedData={() => setIsLoading(false)}
+                            onLoadedMetadata={(e) => {
+                                const total = Number(e.currentTarget.duration) || 0;
+                                if (total > 0 && Number.isFinite(total)) setDuration(total);
+                                setIsLoading(false);
+                            }}
+                            onError={(e) => {
+                                const mediaError = e.currentTarget.error;
+                                console.error('Fonte de vídeo nativa não suportada:', videoUrl, mediaError);
+                                const msg = mediaError?.code === 4
+                                    ? 'O arquivo não está em um formato reproduzível ou o servidor não está entregando o tipo de mídia corretamente.'
+                                    : 'Não foi possível carregar este vídeo.';
+                                setPlayerError(msg);
+                                setIsLoading(false);
+                            }}
+                            onVolumeChange={(e) => {
+                                setVolume(Math.round((e.currentTarget.volume || 0) * 100));
+                                setIsMuted(e.currentTarget.muted);
+                            }}
+                            onTimeUpdate={handleVideoProgress}
+                            onEnded={() => {
+                                setIsPlaying(false);
+                                if (!isCompletedRef.current) {
+                                    isCompletedRef.current = true;
+                                    if (onEndedRef.current) onEndedRef.current();
+                                }
+                            }}
+                        />
 
-                            if (!isCompletedRef.current && time > maxTimeWatched.current) maxTimeWatched.current = time;
-                            if (time > 0 && total > 0 && (time / total) >= 0.95 && !isCompletedRef.current) {
-                                isCompletedRef.current = true;
-                                if (onEndedRef.current) onEndedRef.current();
-                            }
-                        }}
-                        onEnded={() => {
-                            setIsPlaying(false);
-                            if (!isCompletedRef.current) {
-                                isCompletedRef.current = true;
-                                if (onEndedRef.current) onEndedRef.current();
-                            }
-                        }}
-                    />
+                        {!isPlaying && !isLoading && !playerError && (
+                            <button
+                                onClick={togglePlay}
+                                className="absolute inset-0 z-10 flex items-center justify-center bg-transparent group/play"
+                                aria-label="Reproduzir vídeo"
+                            >
+                                <span className="w-16 h-16 sm:w-20 sm:h-20 rounded-full bg-black/55 border border-white/20 backdrop-blur-md flex items-center justify-center text-white shadow-2xl transition-transform group-hover/play:scale-110">
+                                    <Play fill="currentColor" size={32} className="ml-1" />
+                                </span>
+                            </button>
+                        )}
+
+                        {isLoading && !playerError && (
+                            <div className="absolute inset-0 z-20 flex items-center justify-center bg-black/55 pointer-events-none">
+                                <div className="flex flex-col items-center gap-3 text-white/80">
+                                    <div className="w-10 h-10 border-2 border-white/25 border-t-white rounded-full animate-spin"></div>
+                                    <span className="text-xs font-bold tracking-wide">Carregando vídeo...</span>
+                                </div>
+                            </div>
+                        )}
+
+                        {playerError && (
+                            <div className="absolute inset-0 z-30 flex items-center justify-center bg-black/90 px-6 text-center">
+                                <div className="max-w-lg">
+                                    <AlertCircle size={36} className="mx-auto mb-3 text-red-400" />
+                                    <p className="text-sm font-black text-white mb-2">Não foi possível reproduzir o vídeo</p>
+                                    <p className="text-xs leading-relaxed text-slate-400">{playerError}</p>
+                                </div>
+                            </div>
+                        )}
+                    </>
                 )}
 
-                {seekAnim.show && (
+                {seekAnim.show && !unsupportedExternalSource && (
                     <div className={`absolute inset-y-0 ${seekAnim.side === 'left' ? 'left-0 rounded-r-full' : 'right-0 rounded-l-full'} w-1/3 bg-black/20 z-40 flex flex-col items-center justify-center pointer-events-none animate-fade-in`}>
                         <div className="flex text-white drop-shadow-lg mb-1">
                             <Play className={`fill-white w-8 h-8 opacity-80 ${seekAnim.side === 'left' ? 'rotate-180' : ''}`} />
@@ -2591,94 +2381,95 @@ const CustomVideoPlayer = ({ src, onEnded, poster, isCompleted, showNotification
                 )}
             </div>
 
-            {/* Controles da sua plataforma. Ficam fora da área do iframe para não bloquear cliques do player. */}
-            <div className="shrink-0 bg-[#080808] border-t border-white/10 px-3 sm:px-4 py-2.5 flex flex-col gap-2">
-                <div className="w-full relative flex items-center h-3 group/scrubber cursor-pointer">
-                    <input
-                        type="range"
-                        min="0"
-                        max={duration || 100}
-                        step="0.1"
-                        value={Math.min(currentTime, duration || 100)}
-                        onChange={handleSeek}
-                        className="w-full absolute inset-0 opacity-0 cursor-pointer z-20"
-                        aria-label="Progresso do vídeo"
-                    />
-                    <div className="w-full h-1.5 bg-white/20 rounded-full overflow-hidden pointer-events-none group-hover/scrubber:h-2 transition-all">
-                        <div className="h-full bg-indigo-500 rounded-full" style={{ width: `${Math.min(100, (currentTime / (duration || 1)) * 100)}%` }}></div>
-                    </div>
-                </div>
-
-                <div className="flex items-center justify-between gap-3">
-                    <div className="flex items-center gap-2 sm:gap-3 min-w-0">
-                        <button onClick={togglePlay} disabled={isYT && !ytReady} className="text-white hover:text-indigo-400 disabled:opacity-40 transition-colors p-1" title={isPlaying ? 'Pausar' : 'Reproduzir'}>
-                            {isPlaying ? <Pause fill="currentColor" size={23}/> : <Play fill="currentColor" size={23}/>} 
-                        </button>
-
-                        <button onClick={toggleMute} className="text-white hover:text-indigo-400 transition-colors p-1" title={isMuted ? 'Ativar som' : 'Silenciar'}>
-                            {isMuted || volume === 0 ? <VolumeX size={20}/> : <Volume2 size={20}/>} 
-                        </button>
-
+            {!unsupportedExternalSource && videoUrl && (
+                <div className="shrink-0 bg-[#080808] border-t border-white/10 px-3 sm:px-4 py-2.5 flex flex-col gap-2">
+                    <div className="w-full relative flex items-center h-3 group/scrubber cursor-pointer">
                         <input
                             type="range"
                             min="0"
-                            max="100"
-                            value={volume}
-                            onChange={handleVolume}
-                            className="hidden sm:block w-20 accent-indigo-500"
-                            aria-label="Volume"
+                            max={duration || 100}
+                            step="0.1"
+                            value={Math.min(currentTime, duration || 100)}
+                            onChange={handleSeek}
+                            className="w-full absolute inset-0 opacity-0 cursor-pointer z-20"
+                            aria-label="Progresso do vídeo"
                         />
-
-                        <span className="text-[11px] sm:text-xs font-mono font-bold text-white/80 whitespace-nowrap">
-                            {formatTime(currentTime)} / {formatTime(duration)}
-                        </span>
+                        <div className="w-full h-1.5 bg-white/20 rounded-full overflow-hidden pointer-events-none group-hover/scrubber:h-2 transition-all">
+                            <div className="h-full bg-indigo-500 rounded-full" style={{ width: `${Math.min(100, (currentTime / (duration || 1)) * 100)}%` }}></div>
+                        </div>
                     </div>
 
-                    <div className="flex items-center gap-1 sm:gap-2">
-                        <div className="relative">
-                            <button onClick={() => setMostrarMenuVelocidade(!mostrarMenuVelocidade)} className="text-[11px] sm:text-xs font-black text-white/90 hover:text-indigo-400 px-2 py-1.5 rounded-lg hover:bg-white/5 transition-colors">
-                                {playbackRate}x
+                    <div className="flex items-center justify-between gap-3">
+                        <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+                            <button onClick={togglePlay} className="text-white hover:text-indigo-400 transition-colors p-1" title={isPlaying ? 'Pausar' : 'Reproduzir'}>
+                                {isPlaying ? <Pause fill="currentColor" size={23}/> : <Play fill="currentColor" size={23}/>} 
                             </button>
-                            {mostrarMenuVelocidade && (
-                                <div className="absolute right-0 bottom-10 w-28 bg-[#111] border border-white/10 rounded-xl shadow-2xl z-[70] p-1.5">
-                                    {[0.5, 0.75, 1, 1.25, 1.5, 1.75, 2].map(rate => (
-                                        <button key={rate} onClick={() => mudarVelocidade(rate)} className={`w-full text-left px-3 py-2 rounded-lg text-xs font-bold ${playbackRate === rate ? 'bg-indigo-600/30 text-indigo-300' : 'text-slate-300 hover:bg-white/10'}`}>
-                                            {rate}x
-                                        </button>
-                                    ))}
-                                </div>
-                            )}
+
+                            <button onClick={toggleMute} className="text-white hover:text-indigo-400 transition-colors p-1" title={isMuted ? 'Ativar som' : 'Silenciar'}>
+                                {isMuted || volume === 0 ? <VolumeX size={20}/> : <Volume2 size={20}/>} 
+                            </button>
+
+                            <input
+                                type="range"
+                                min="0"
+                                max="100"
+                                value={volume}
+                                onChange={handleVolume}
+                                className="hidden sm:block w-20 accent-indigo-500"
+                                aria-label="Volume"
+                            />
+
+                            <span className="text-[11px] sm:text-xs font-mono font-bold text-white/80 whitespace-nowrap">
+                                {formatTime(currentTime)} / {formatTime(duration)}
+                            </span>
                         </div>
 
-                        {!isYT && qualidadesDisponiveis.length > 1 && (
+                        <div className="flex items-center gap-1 sm:gap-2">
                             <div className="relative">
-                                <button onClick={() => setMostrarMenuQualidade(!mostrarMenuQualidade)} className="text-white hover:text-indigo-400 p-1.5 transition-colors" title="Qualidade">
-                                    <Settings size={19}/>
+                                <button onClick={() => setMostrarMenuVelocidade(!mostrarMenuVelocidade)} className="text-[11px] sm:text-xs font-black text-white/90 hover:text-indigo-400 px-2 py-1.5 rounded-lg hover:bg-white/5 transition-colors">
+                                    {playbackRate}x
                                 </button>
-                                {mostrarMenuQualidade && (
-                                    <div className="absolute right-0 bottom-10 w-40 bg-[#111] border border-white/10 rounded-xl shadow-2xl z-[70] flex flex-col p-1.5">
-                                        {qualidadesDisponiveis.map((qualidade) => (
-                                            <button key={qualidade} onClick={() => mudarQualidade(qualidade)} className={`w-full text-left px-3 py-2.5 rounded-lg text-xs font-bold flex items-center justify-between ${qualidadeAtual === qualidade ? 'bg-indigo-600/30 text-indigo-300' : 'text-slate-300 hover:bg-white/10'}`}>
-                                                {qualidade} {qualidadeAtual === qualidade && <CheckCircle size={14}/>} 
+                                {mostrarMenuVelocidade && (
+                                    <div className="absolute right-0 bottom-10 w-28 bg-[#111] border border-white/10 rounded-xl shadow-2xl z-[70] p-1.5">
+                                        {[0.5, 0.75, 1, 1.25, 1.5, 1.75, 2].map(rate => (
+                                            <button key={rate} onClick={() => mudarVelocidade(rate)} className={`w-full text-left px-3 py-2 rounded-lg text-xs font-bold ${playbackRate === rate ? 'bg-indigo-600/30 text-indigo-300' : 'text-slate-300 hover:bg-white/10'}`}>
+                                                {rate}x
                                             </button>
                                         ))}
                                     </div>
                                 )}
                             </div>
-                        )}
 
-                        <button onClick={toggleFullscreen} className="text-white hover:text-indigo-400 p-1.5 transition-colors" title="Tela cheia">
-                            <Maximize size={20}/>
-                        </button>
+                            {qualidadesDisponiveis.length > 1 && (
+                                <div className="relative">
+                                    <button onClick={() => setMostrarMenuQualidade(!mostrarMenuQualidade)} className="text-white hover:text-indigo-400 p-1.5 transition-colors" title="Qualidade">
+                                        <Settings size={19}/>
+                                    </button>
+                                    {mostrarMenuQualidade && (
+                                        <div className="absolute right-0 bottom-10 w-40 bg-[#111] border border-white/10 rounded-xl shadow-2xl z-[70] flex flex-col p-1.5">
+                                            {qualidadesDisponiveis.map((qualidade) => (
+                                                <button key={qualidade} onClick={() => mudarQualidade(qualidade)} className={`w-full text-left px-3 py-2.5 rounded-lg text-xs font-bold flex items-center justify-between ${qualidadeAtual === qualidade ? 'bg-indigo-600/30 text-indigo-300' : 'text-slate-300 hover:bg-white/10'}`}>
+                                                    {qualidade} {qualidadeAtual === qualidade && <CheckCircle size={14}/>} 
+                                                </button>
+                                            ))}
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+
+                            <button onClick={toggleFullscreen} className="text-white hover:text-indigo-400 p-1.5 transition-colors" title="Tela cheia">
+                                <Maximize size={20}/>
+                            </button>
+                        </div>
                     </div>
                 </div>
-            </div>
+            )}
         </div>
     );
 };
 // =================================================================================
+// FIM DO PLAYER WHITE-LABEL
 // =================================================================================
-
 
 // =================================================================================
     // MOTOR DE EXTRAÇÃO DE ÁUDIO PARA A IA (Baseado no seu modelo)
@@ -3245,102 +3036,112 @@ const CustomVideoPlayer = ({ src, onEnded, poster, isCompleted, showNotification
             }, 600);
         };
 
-        // MOTOR DE VÍDEO
-        // Resolve a fonte a partir do OBJETO INTEIRO da aula. Isso evita src vazio quando
-        // o Admin salvou o link em videoUrl/youtubeUrl/url/link em vez de conteudo.
+        // MOTOR DE VÍDEO WHITE-LABEL V7
+        // Reproduz apenas fontes próprias (R2/CDN/HLS/MP4/WebM). Links externos servem somente para diagnóstico interno.
         const resolveLessonMediaSource = (lessonObj) => {
             if (!lessonObj) return '';
 
             const priorityKeys = [
-                'conteudo', 'videoUrl', 'videoURL', 'youtubeUrl', 'youtubeURL',
-                'urlVideo', 'videoLink', 'linkVideo', 'mediaUrl', 'mediaURL',
-                'fileUrl', 'downloadUrl', 'src', 'url', 'link', 'video', 'media',
-                'midia', 'content'
+                'r2Url', 'r2URL', 'r2VideoUrl', 'r2VideoURL', 'videoR2Url', 'videoR2URL',
+                'hlsUrl', 'hlsURL', 'mp4Url', 'mp4URL', 'streamUrl', 'streamURL',
+                'cdnUrl', 'cdnURL', 'videoUrl', 'videoURL', 'urlVideo', 'videoLink', 'linkVideo',
+                'mediaUrl', 'mediaURL', 'fileUrl', 'downloadUrl', 'src', 'conteudo', 'content',
+                'url', 'link', 'video', 'media', 'midia', 'youtubeUrl', 'youtubeURL'
             ];
 
             const isNonEmptyString = (v) => typeof v === 'string' && v.trim().length > 0;
-            const looksLikeYouTube = (v) => isNonEmptyString(v) && /(?:youtu\.be|youtube(?:-nocookie)?\.com)/i.test(v);
-            const looksLikeMedia = (v) => isNonEmptyString(v) && (
-                /^(?:https?:)?\/\//i.test(v) ||
-                /^blob:/i.test(v) ||
-                /^data:video\//i.test(v) ||
-                /\.(?:mp4|webm|ogg|mov|m4v|m3u8)(?:[?#].*)?$/i.test(v) ||
-                /^[A-Za-z0-9_-]{11}$/.test(v)
-            );
+            const isYouTube = (v) => isNonEmptyString(v) && /(?:youtu\.be|youtube(?:-nocookie)?\.com)/i.test(v);
+            const isVimeo = (v) => isNonEmptyString(v) && /(?:vimeo\.com|player\.vimeo\.com)/i.test(v);
+            const isExternalVideoProvider = (v) => isYouTube(v) || isVimeo(v);
 
-            const findYouTubeDeep = (value, depth = 0, seen = new Set()) => {
-                if (depth > 6 || value == null) return '';
-                if (isNonEmptyString(value)) return looksLikeYouTube(value) ? value.trim() : '';
-                if (typeof value !== 'object') return '';
-                if (seen.has(value)) return '';
+            const isOwnPlayableUrl = (v) => {
+                if (!isNonEmptyString(v) || isExternalVideoProvider(v)) return false;
+                const value = v.trim();
+                return /^(?:https?:)?\/\//i.test(value) ||
+                    /^blob:/i.test(value) ||
+                    /^data:video\//i.test(value) ||
+                    /\.(?:mp4|webm|ogg|mov|m4v|m3u8)(?:[?#].*)?$/i.test(value);
+            };
+
+            const normalizeOwnUrl = (value) => {
+                if (!isNonEmptyString(value)) return '';
+                let url = value.trim();
+                const wrongDomain = "https://pub-2ece542306d80259e71a793d20f91a60.r2.dev";
+                const rightDomain = "https://pub-263c6a7252164111a104a68e6835cfc4.r2.dev";
+                if (url.includes(wrongDomain)) url = url.replace(wrongDomain, rightDomain);
+                return url;
+            };
+
+            const extractPlayableObject = (value) => {
+                if (!value || typeof value !== 'object') return null;
+                const direct = value.r2Url || value.r2VideoUrl || value.videoR2Url || value.hlsUrl || value.mp4Url || value.streamUrl || value.cdnUrl || value.url || value.src || value.videoUrl || value.link;
+                if (isOwnPlayableUrl(direct)) return normalizeOwnUrl(direct);
+
+                // Mantém mapas de qualidade, por exemplo { "720p": "...mp4", "1080p": "...mp4" }.
+                const qualityMap = {};
+                Object.entries(value).forEach(([key, item]) => {
+                    if (isOwnPlayableUrl(item)) qualityMap[key] = normalizeOwnUrl(item);
+                    else if (item && typeof item === 'object') {
+                        const nested = item.r2Url || item.r2VideoUrl || item.videoR2Url || item.hlsUrl || item.mp4Url || item.streamUrl || item.url || item.src || item.videoUrl || item.link;
+                        if (isOwnPlayableUrl(nested)) qualityMap[key] = normalizeOwnUrl(nested);
+                    }
+                });
+                return Object.keys(qualityMap).length ? qualityMap : null;
+            };
+
+            // 1. Prioridade absoluta: R2/CDN/arquivos diretos.
+            for (const key of priorityKeys) {
+                const value = lessonObj[key];
+                if (isOwnPlayableUrl(value)) return normalizeOwnUrl(value);
+                const objectSource = extractPlayableObject(value);
+                if (objectSource) return objectSource;
+            }
+
+            // 2. Procura recursivamente uma URL própria em schemas antigos/aninhados.
+            const seen = new Set();
+            const findOwnSourceDeep = (value, depth = 0) => {
+                if (depth > 6 || value == null) return null;
+                if (isOwnPlayableUrl(value)) return normalizeOwnUrl(value);
+                if (typeof value !== 'object' || seen.has(value)) return null;
                 seen.add(value);
 
-                const keys = Array.isArray(value) ? Object.keys(value) : [...priorityKeys, ...Object.keys(value)];
-                for (const key of keys) {
-                    if (!Object.prototype.hasOwnProperty.call(value, key)) continue;
-                    const found = findYouTubeDeep(value[key], depth + 1, seen);
+                const objectSource = extractPlayableObject(value);
+                if (objectSource) return objectSource;
+
+                for (const nested of Object.values(value)) {
+                    const found = findOwnSourceDeep(nested, depth + 1);
+                    if (found) return found;
+                }
+                return null;
+            };
+
+            const ownSource = findOwnSourceDeep(lessonObj);
+            if (ownSource) return ownSource;
+
+            // 3. Se ainda só existir um provedor externo, devolve a URL somente para o player
+            // detectar a situação e exibir uma tela neutra — nunca para incorporar iframe externo.
+            const findExternalDeep = (value, depth = 0, visited = new Set()) => {
+                if (depth > 6 || value == null) return '';
+                if (isNonEmptyString(value) && isExternalVideoProvider(value)) return value.trim();
+                if (typeof value !== 'object' || visited.has(value)) return '';
+                visited.add(value);
+                for (const nested of Object.values(value)) {
+                    const found = findExternalDeep(nested, depth + 1, visited);
                     if (found) return found;
                 }
                 return '';
             };
 
-            const usableObject = (value) => {
-                if (!value || typeof value !== 'object') return false;
-                return Object.values(value).some(item => {
-                    if (looksLikeMedia(item) || looksLikeYouTube(item)) return true;
-                    if (item && typeof item === 'object') {
-                        const nested = item.url || item.src || item.videoUrl || item.youtubeUrl || item.link;
-                        return looksLikeMedia(nested) || looksLikeYouTube(nested);
-                    }
-                    return false;
-                });
-            };
-
-            // 1. Campos esperados do schema, na ordem de preferência.
-            for (const key of priorityKeys) {
-                const value = lessonObj[key];
-                if (looksLikeYouTube(value) || looksLikeMedia(value)) return value.trim();
-                if (usableObject(value)) return value;
-            }
-
-            // 2. Se o link do YouTube estiver aninhado em algum objeto legado, encontra-o.
-            const nestedYoutube = findYouTubeDeep(lessonObj);
-            if (nestedYoutube) return nestedYoutube;
-
-            // 3. Último fallback: procura qualquer URL de mídia nos valores da aula.
-            for (const value of Object.values(lessonObj)) {
-                if (looksLikeMedia(value)) return value.trim();
-            }
-
-            return '';
+            return findExternalDeep(lessonObj) || '';
         };
 
-        // YouTube passa pelo CustomVideoPlayer para preservar progresso e eventos.
-        // Vimeo continua usando iframe próprio.
-        const getEmbedUrl = (mediaSource) => {
-            if (!mediaSource) return null;
-
-            let sourceText = '';
-            try {
-                sourceText = typeof mediaSource === 'string' ? mediaSource : JSON.stringify(mediaSource || '');
-            } catch (e) {
-                sourceText = String(mediaSource || '');
-            }
-
-            const vimeoRegex = /(?:vimeo\.com\/|player\.vimeo\.com\/video\/)(\d+)/i;
-            const vimeoMatch = sourceText.match(vimeoRegex);
-
-            if (vimeoMatch && vimeoMatch[1]) {
-                return `https://player.vimeo.com/video/${vimeoMatch[1]}?autoplay=0&title=0&byline=0&portrait=0`;
-            }
-
-            return null;
-        };
+        // V7: nenhuma aula de vídeo usa iframe de provedor externo.
+        // O aluno só vê fontes próprias da plataforma (R2/CDN/HLS/MP4/WebM).
+        const getEmbedUrl = () => null;
         if(!currentLesson) return <div className="p-10 text-center text-white animate-pulse">Carregando aula...</div>;
 
         const lessonMediaSource = resolveLessonMediaSource(currentLesson);
         const isCurrentCompleted = completedMap[`${activeModuleIndex}-${activeLessonIndex}`];
-        const embedUrl = getEmbedUrl(lessonMediaSource);
 
         if (currentLesson.tipo === 'video') {
             console.info('[AEM Player] Fonte resolvida para a aula:', {
@@ -3424,25 +3225,15 @@ const CustomVideoPlayer = ({ src, onEnded, poster, isCompleted, showNotification
                             
                             {/* 👇 AQUI ESTÁ A LÓGICA DO VÍDEO vs PDF NA TELA PRINCIPAL 👇 */}
                             {currentLesson.tipo === 'video' ? (
-                                embedUrl ? (
-                                    <iframe 
-                                        src={embedUrl} 
-                                        className="w-full h-full" 
-                                        frameBorder="0" 
-                                        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" 
-                                        allowFullScreen
-                                    ></iframe>
-                                ) : (
-                                    <CustomVideoPlayer 
-                                        key={`${activeModuleIndex}-${activeLessonIndex}-${String(typeof lessonMediaSource === 'string' ? lessonMediaSource : JSON.stringify(lessonMediaSource || '')).slice(0, 80)}`}
-                                        src={lessonMediaSource} 
-                                        title={currentLesson.titulo}
-                                        poster={course.cover}
-                                        onEnded={() => markLessonAsCompleted(true)}
-                                        isCompleted={isCurrentCompleted}
-                                        showNotification={showNotification}
-                                    />
-                                )
+                                <CustomVideoPlayer 
+                                    key={`${activeModuleIndex}-${activeLessonIndex}-${String(typeof lessonMediaSource === 'string' ? lessonMediaSource : JSON.stringify(lessonMediaSource || '')).slice(0, 80)}`}
+                                    src={lessonMediaSource} 
+                                    title={currentLesson.titulo}
+                                    poster={course.cover}
+                                    onEnded={() => markLessonAsCompleted(true)}
+                                    isCompleted={isCurrentCompleted}
+                                    showNotification={showNotification}
+                                />
                             ) : (
                                 <div className="w-full h-full relative bg-[#e5e7eb] flex items-center justify-center overflow-hidden">
                                     {(() => {
@@ -3841,7 +3632,9 @@ const CustomVideoPlayer = ({ src, onEnded, poster, isCompleted, showNotification
                                                         await new Promise(r => setTimeout(r, 100)); // Breather para UI
                                                         
                                                         // PASSO 1: EXTRAIR ÁUDIO A 16KHZ MONO (PADRÃO WHISPER)
-                                                        const videoResponse = await fetch(fixUrl(currentLesson.conteudo));
+                                                        const aiVideoSource = typeof lessonMediaSource === 'string' ? lessonMediaSource : (lessonMediaSource?.Auto || Object.values(lessonMediaSource || {})[0] || '');
+                                                        if (!aiVideoSource || /(?:youtu\.be|youtube(?:-nocookie)?\.com|vimeo\.com)/i.test(aiVideoSource)) throw new Error('A IA precisa de um arquivo de vídeo hospedado no R2/CDN.');
+                                                        const videoResponse = await fetch(fixUrl(aiVideoSource));
                                                         const videoBlob = await videoResponse.blob();
                                                         
                                                         // Trava de segurança para mobile para evitar crash por falta de RAM
