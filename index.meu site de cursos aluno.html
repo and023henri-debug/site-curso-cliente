@@ -2088,7 +2088,7 @@ const CustomVideoPlayer = ({ src, onEnded, poster, isCompleted, showNotification
         return null;
     }, []);
 
-    const ytId = React.useMemo(() => extrairYouTubeId(videoUrl || src), [videoUrl, src, extrairYouTubeId]);
+    const ytId = React.useMemo(() => extrairYouTubeId(src) || extrairYouTubeId(videoUrl), [videoUrl, src, extrairYouTubeId]);
     const fonteTexto = React.useMemo(() => {
         try {
             return typeof src === 'string' ? src : JSON.stringify(src || '');
@@ -2319,6 +2319,14 @@ const CustomVideoPlayer = ({ src, onEnded, poster, isCompleted, showNotification
             return;
         }
 
+        if (!videoUrl || !String(videoUrl).trim()) {
+            const msg = 'Esta aula não possui uma fonte de vídeo válida configurada.';
+            setPlayerError(msg);
+            console.error('Tentativa de reproduzir vídeo sem src.', { src, videoUrl });
+            if (showNotificationRef.current) showNotificationRef.current(msg, 'error');
+            return;
+        }
+
         if (videoRef.current) {
             if (videoRef.current.paused) {
                 const playPromise = videoRef.current.play();
@@ -2521,6 +2529,14 @@ const CustomVideoPlayer = ({ src, onEnded, poster, isCompleted, showNotification
                             <AlertCircle size={34} className="mx-auto mb-3 text-amber-400" />
                             <p className="text-sm font-bold text-white mb-2">Link do YouTube reconhecido, mas incompleto</p>
                             <p className="text-xs leading-relaxed text-slate-400">Use o link do vídeo no formato youtube.com/watch?v=..., youtu.be/... ou youtube.com/embed/....</p>
+                        </div>
+                    </div>
+                ) : (!videoUrl || !String(videoUrl).trim()) ? (
+                    <div className="absolute inset-0 flex items-center justify-center bg-black px-6 text-center">
+                        <div className="max-w-lg">
+                            <AlertCircle size={34} className="mx-auto mb-3 text-amber-400" />
+                            <p className="text-sm font-bold text-white mb-2">Fonte de vídeo não encontrada nesta aula</p>
+                            <p className="text-xs leading-relaxed text-slate-400">O player não recebeu uma URL de vídeo. A plataforma agora procura o link em conteudo, videoUrl, youtubeUrl, url, link e outros campos compatíveis da aula.</p>
                         </div>
                     </div>
                 ) : (
@@ -3230,19 +3246,89 @@ const CustomVideoPlayer = ({ src, onEnded, poster, isCompleted, showNotification
         };
 
         // MOTOR DE VÍDEO
-        // YouTube agora passa pelo CustomVideoPlayer para preservar progresso e eventos.
-        // Vimeo continua usando iframe próprio.
-        const getEmbedUrl = (lessonObj) => {
-            if (!lessonObj) return null;
+        // Resolve a fonte a partir do OBJETO INTEIRO da aula. Isso evita src vazio quando
+        // o Admin salvou o link em videoUrl/youtubeUrl/url/link em vez de conteudo.
+        const resolveLessonMediaSource = (lessonObj) => {
+            if (!lessonObj) return '';
 
-            const conteudoPrincipal = (
-                typeof lessonObj.conteudo === 'string'
-                    ? lessonObj.conteudo
-                    : JSON.stringify(lessonObj.conteudo || '')
+            const priorityKeys = [
+                'conteudo', 'videoUrl', 'videoURL', 'youtubeUrl', 'youtubeURL',
+                'urlVideo', 'videoLink', 'linkVideo', 'mediaUrl', 'mediaURL',
+                'fileUrl', 'downloadUrl', 'src', 'url', 'link', 'video', 'media',
+                'midia', 'content'
+            ];
+
+            const isNonEmptyString = (v) => typeof v === 'string' && v.trim().length > 0;
+            const looksLikeYouTube = (v) => isNonEmptyString(v) && /(?:youtu\.be|youtube(?:-nocookie)?\.com)/i.test(v);
+            const looksLikeMedia = (v) => isNonEmptyString(v) && (
+                /^(?:https?:)?\/\//i.test(v) ||
+                /^blob:/i.test(v) ||
+                /^data:video\//i.test(v) ||
+                /\.(?:mp4|webm|ogg|mov|m4v|m3u8)(?:[?#].*)?$/i.test(v) ||
+                /^[A-Za-z0-9_-]{11}$/.test(v)
             );
 
+            const findYouTubeDeep = (value, depth = 0, seen = new Set()) => {
+                if (depth > 6 || value == null) return '';
+                if (isNonEmptyString(value)) return looksLikeYouTube(value) ? value.trim() : '';
+                if (typeof value !== 'object') return '';
+                if (seen.has(value)) return '';
+                seen.add(value);
+
+                const keys = Array.isArray(value) ? Object.keys(value) : [...priorityKeys, ...Object.keys(value)];
+                for (const key of keys) {
+                    if (!Object.prototype.hasOwnProperty.call(value, key)) continue;
+                    const found = findYouTubeDeep(value[key], depth + 1, seen);
+                    if (found) return found;
+                }
+                return '';
+            };
+
+            const usableObject = (value) => {
+                if (!value || typeof value !== 'object') return false;
+                return Object.values(value).some(item => {
+                    if (looksLikeMedia(item) || looksLikeYouTube(item)) return true;
+                    if (item && typeof item === 'object') {
+                        const nested = item.url || item.src || item.videoUrl || item.youtubeUrl || item.link;
+                        return looksLikeMedia(nested) || looksLikeYouTube(nested);
+                    }
+                    return false;
+                });
+            };
+
+            // 1. Campos esperados do schema, na ordem de preferência.
+            for (const key of priorityKeys) {
+                const value = lessonObj[key];
+                if (looksLikeYouTube(value) || looksLikeMedia(value)) return value.trim();
+                if (usableObject(value)) return value;
+            }
+
+            // 2. Se o link do YouTube estiver aninhado em algum objeto legado, encontra-o.
+            const nestedYoutube = findYouTubeDeep(lessonObj);
+            if (nestedYoutube) return nestedYoutube;
+
+            // 3. Último fallback: procura qualquer URL de mídia nos valores da aula.
+            for (const value of Object.values(lessonObj)) {
+                if (looksLikeMedia(value)) return value.trim();
+            }
+
+            return '';
+        };
+
+        // YouTube passa pelo CustomVideoPlayer para preservar progresso e eventos.
+        // Vimeo continua usando iframe próprio.
+        const getEmbedUrl = (mediaSource) => {
+            if (!mediaSource) return null;
+
+            let sourceText = '';
+            try {
+                sourceText = typeof mediaSource === 'string' ? mediaSource : JSON.stringify(mediaSource || '');
+            } catch (e) {
+                sourceText = String(mediaSource || '');
+            }
+
             const vimeoRegex = /(?:vimeo\.com\/|player\.vimeo\.com\/video\/)(\d+)/i;
-            const vimeoMatch = conteudoPrincipal.match(vimeoRegex);
+            const vimeoMatch = sourceText.match(vimeoRegex);
 
             if (vimeoMatch && vimeoMatch[1]) {
                 return `https://player.vimeo.com/video/${vimeoMatch[1]}?autoplay=0&title=0&byline=0&portrait=0`;
@@ -3252,8 +3338,17 @@ const CustomVideoPlayer = ({ src, onEnded, poster, isCompleted, showNotification
         };
         if(!currentLesson) return <div className="p-10 text-center text-white animate-pulse">Carregando aula...</div>;
 
+        const lessonMediaSource = resolveLessonMediaSource(currentLesson);
         const isCurrentCompleted = completedMap[`${activeModuleIndex}-${activeLessonIndex}`];
-        const embedUrl = getEmbedUrl(currentLesson);
+        const embedUrl = getEmbedUrl(lessonMediaSource);
+
+        if (currentLesson.tipo === 'video') {
+            console.info('[AEM Player] Fonte resolvida para a aula:', {
+                titulo: currentLesson.titulo || currentLesson.title,
+                source: lessonMediaSource,
+                camposDisponiveis: Object.keys(currentLesson || {})
+            });
+        }
         return (
             <div className="fixed inset-0 z-[100] bg-[#050505] flex flex-col font-sans text-white overflow-hidden animate-fade-in">
                 
@@ -3339,8 +3434,8 @@ const CustomVideoPlayer = ({ src, onEnded, poster, isCompleted, showNotification
                                     ></iframe>
                                 ) : (
                                     <CustomVideoPlayer 
-                                        key={`${activeModuleIndex}-${activeLessonIndex}-${String(currentLesson.conteudo || '').slice(0, 80)}`}
-                                        src={currentLesson.conteudo} 
+                                        key={`${activeModuleIndex}-${activeLessonIndex}-${String(typeof lessonMediaSource === 'string' ? lessonMediaSource : JSON.stringify(lessonMediaSource || '')).slice(0, 80)}`}
+                                        src={lessonMediaSource} 
                                         title={currentLesson.titulo}
                                         poster={course.cover}
                                         onEnded={() => markLessonAsCompleted(true)}
