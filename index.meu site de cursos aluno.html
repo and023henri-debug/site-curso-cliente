@@ -1968,7 +1968,7 @@ const StudentMarketplace = ({ db, user, settings, showNotification, promotions =
 // =================================================================================
     
 // =================================================================================
-// SUB-COMPONENTE: PLAYER PREMIUM HÍBRIDO V8 (R2/NATIVO + YOUTUBE IFRAME API)
+// SUB-COMPONENTE: PLAYER PREMIUM HÍBRIDO V9 (R2/HLS/NATIVO + FALLBACK YOUTUBE)
 // =================================================================================
 const CustomVideoPlayer = ({ src, onEnded, poster, isCompleted, showNotification }) => {
     const normalizarFontes = React.useCallback((valor) => {
@@ -2100,11 +2100,13 @@ const CustomVideoPlayer = ({ src, onEnded, poster, isCompleted, showNotification
     const isYouTubeLike = /(?:youtu\.be|youtube(?:-nocookie)?\.com)/i.test(fonteTexto) || Boolean(ytId);
     const isYT = Boolean(ytId);
     const ytSourceInvalid = isYouTubeLike && !ytId;
+    const isHls = !isYT && typeof videoUrl === 'string' && /\.m3u8(?:[?#].*)?$/i.test(videoUrl.trim());
 
     const videoRef = React.useRef(null);
     const playerShellRef = React.useRef(null);
     const ytIframeRef = React.useRef(null);
     const ytPlayerRef = React.useRef(null);
+    const hlsRef = React.useRef(null);
     const onEndedRef = React.useRef(onEnded);
     const showNotificationRef = React.useRef(showNotification);
     const isCompletedRef = React.useRef(isCompleted);
@@ -2277,6 +2279,68 @@ const CustomVideoPlayer = ({ src, onEnded, poster, isCompleted, showNotification
             ytPlayerRef.current = null;
         };
     }, [isYT, ytId, ensureYouTubeApi, videoUrl]);
+
+    // HLS V9: Safari/iOS usa suporte nativo; demais navegadores usam hls.js.
+    React.useEffect(() => {
+        if (isYT || !isHls || !videoUrl || !videoRef.current) return;
+
+        const video = videoRef.current;
+        let cancelled = false;
+        setPlayerError('');
+
+        try {
+            if (hlsRef.current && typeof hlsRef.current.destroy === 'function') {
+                hlsRef.current.destroy();
+                hlsRef.current = null;
+            }
+        } catch (e) {}
+
+        if (video.canPlayType('application/vnd.apple.mpegurl')) {
+            video.src = videoUrl;
+            video.load();
+            return () => {
+                try { video.pause(); } catch (e) {}
+                video.removeAttribute('src');
+                try { video.load(); } catch (e) {}
+            };
+        }
+
+        if (window.Hls && window.Hls.isSupported()) {
+            const hls = new window.Hls({
+                enableWorker: true,
+                lowLatencyMode: false,
+                backBufferLength: 90
+            });
+            hlsRef.current = hls;
+            hls.loadSource(videoUrl);
+            hls.attachMedia(video);
+
+            hls.on(window.Hls.Events.MANIFEST_PARSED, () => {
+                if (!cancelled) setPlayerError('');
+            });
+
+            hls.on(window.Hls.Events.ERROR, (_event, data) => {
+                if (cancelled || !data) return;
+                console.error('Erro HLS:', data);
+                if (data.fatal) {
+                    const msg = 'Não foi possível carregar o streaming HLS desta aula.';
+                    setPlayerError(msg);
+                    if (showNotificationRef.current) showNotificationRef.current(msg, 'error');
+                    try { hls.destroy(); } catch (e) {}
+                    if (hlsRef.current === hls) hlsRef.current = null;
+                }
+            });
+
+            return () => {
+                cancelled = true;
+                try { hls.destroy(); } catch (e) {}
+                if (hlsRef.current === hls) hlsRef.current = null;
+            };
+        }
+
+        setPlayerError('Este navegador não oferece suporte a HLS e não conseguiu carregar hls.js.');
+        return undefined;
+    }, [isYT, isHls, videoUrl]);
 
     // Progresso do YouTube e conclusão automática em 95%.
     React.useEffect(() => {
@@ -2544,7 +2608,7 @@ const CustomVideoPlayer = ({ src, onEnded, poster, isCompleted, showNotification
                     <video
                         ref={videoRef}
                         poster={poster}
-                        src={videoUrl}
+                        src={isHls ? undefined : videoUrl}
                         className="absolute inset-0 w-full h-full object-contain bg-black"
                         playsInline
                         onClick={togglePlay}
@@ -2552,7 +2616,7 @@ const CustomVideoPlayer = ({ src, onEnded, poster, isCompleted, showNotification
                         onPause={() => setIsPlaying(false)}
                         onError={(e) => {
                             console.error('Fonte de vídeo nativa não suportada:', videoUrl, e.currentTarget.error);
-                            setPlayerError('Este endereço não é um arquivo de vídeo compatível. Se for um link do YouTube, confira se o link foi copiado completo.');
+                            if (!isHls) setPlayerError('Este endereço não é um arquivo de vídeo compatível. Se for um link do YouTube, confira se o link foi copiado completo.');
                         }}
                         onVolumeChange={(e) => {
                             setVolume(Math.round((e.currentTarget.volume || 0) * 100));
@@ -3246,7 +3310,7 @@ const CustomVideoPlayer = ({ src, onEnded, poster, isCompleted, showNotification
             }, 600);
         };
 
-        // MOTOR DE VÍDEO HÍBRIDO V8
+        // MOTOR DE VÍDEO HÍBRIDO V9
         // Prioriza R2/CDN/arquivos próprios e usa YouTube quando a aula possui apenas link do YouTube.
         const resolveLessonMediaSource = (lessonObj) => {
             if (!lessonObj) return '';
@@ -3267,10 +3331,24 @@ const CustomVideoPlayer = ({ src, onEnded, poster, isCompleted, showNotification
             const isOwnPlayableUrl = (v) => {
                 if (!isNonEmptyString(v) || isExternalVideoProvider(v)) return false;
                 const value = v.trim();
-                return /^(?:https?:)?\/\//i.test(value) ||
-                    /^blob:/i.test(value) ||
-                    /^data:video\//i.test(value) ||
-                    /\.(?:mp4|webm|ogg|mov|m4v|m3u8)(?:[?#].*)?$/i.test(value);
+                if (/^blob:/i.test(value) || /^data:video\//i.test(value)) return true;
+                if (/\.(?:mp4|webm|ogg|mov|m4v|m3u8)(?:[?#].*)?$/i.test(value)) return true;
+                if (!/^(?:https?:)?\/\//i.test(value)) return false;
+
+                // URLs próprias podem ser assinadas e não terminar com extensão.
+                // Aceitamos explicitamente hosts de storage/CDN/streaming comuns da plataforma.
+                try {
+                    const parsed = new URL(value, window.location.href);
+                    const host = parsed.hostname.toLowerCase();
+                    return host.endsWith('.r2.dev') ||
+                        host.includes('r2.cloudflarestorage.com') ||
+                        host.includes('cloudflarestream.com') ||
+                        host.includes('videodelivery.net') ||
+                        host === window.location.hostname ||
+                        /(?:cdn|media|video|stream)/i.test(host);
+                } catch (e) {
+                    return false;
+                }
             };
 
             const normalizeOwnUrl = (value) => {
@@ -3344,7 +3422,7 @@ const CustomVideoPlayer = ({ src, onEnded, poster, isCompleted, showNotification
             return findExternalDeep(lessonObj) || '';
         };
 
-        // V8: a renderização das aulas passa pelo CustomVideoPlayer híbrido.
+        // V9: R2/CDN/HLS/MP4 tem prioridade; YouTube é fallback quando não há fonte própria.
         const getEmbedUrl = () => null;
         if(!currentLesson) return <div className="p-10 text-center text-white animate-pulse">Carregando aula...</div>;
 
