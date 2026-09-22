@@ -2000,36 +2000,105 @@ const CustomVideoPlayer = ({ src, onEnded, poster, isCompleted, showNotification
     const videoUrl = fontes[qualidadeAtual] || fontes[qualidadesDisponiveis[0]] || '';
 
     const extrairYouTubeId = React.useCallback((valor) => {
+        if (valor === null || valor === undefined) return null;
+
+        // Se algum formato antigo chegar como objeto/array, procura recursivamente por uma URL do YouTube.
+        if (typeof valor === 'object') {
+            const candidatos = Array.isArray(valor) ? valor : Object.values(valor);
+            for (const item of candidatos) {
+                const achado = extrairYouTubeId(item);
+                if (achado) return achado;
+            }
+            return null;
+        }
+
         if (typeof valor !== 'string') return null;
-        const raw = valor.trim();
-        if (/^[\w-]{11}$/.test(raw)) return raw;
+        let raw = valor.trim();
+        if (!raw) return null;
+
+        // Corrige links copiados de HTML/iframes e URLs codificadas.
+        raw = raw.replace(/&amp;/gi, '&').replace(/&#38;/gi, '&');
+        const iframeSrc = raw.match(/src=["']([^"']+)["']/i);
+        if (iframeSrc && iframeSrc[1]) raw = iframeSrc[1];
+
+        // ID puro do YouTube.
+        if (/^[A-Za-z0-9_-]{11}$/.test(raw)) return raw;
+
+        const procurarEmTexto = (texto) => {
+            if (!texto) return null;
+            const padroes = [
+                /youtu\.be\/([A-Za-z0-9_-]{11})(?:[?&#/]|$)/i,
+                /youtube(?:-nocookie)?\.com\/(?:embed|shorts|live|v)\/([A-Za-z0-9_-]{11})(?:[?&#/]|$)/i,
+                /youtube(?:-nocookie)?\.com\/watch(?:\?|[^#]*[?&])[^#]*[?&]?v=([A-Za-z0-9_-]{11})(?:[&#]|$)/i,
+                /[?&]v=([A-Za-z0-9_-]{11})(?:[&#]|$)/i
+            ];
+            for (const regex of padroes) {
+                const match = texto.match(regex);
+                if (match && match[1]) return match[1];
+            }
+            return null;
+        };
+
+        let id = procurarEmTexto(raw);
+        if (id) return id;
+
+        // Alguns links de compartilhamento/attribution vêm URL-encoded.
+        let decoded = raw;
+        for (let i = 0; i < 3; i++) {
+            try {
+                const next = decodeURIComponent(decoded);
+                if (next === decoded) break;
+                decoded = next;
+                id = procurarEmTexto(decoded);
+                if (id) return id;
+            } catch (e) {
+                break;
+            }
+        }
 
         try {
             const url = new URL(raw);
-            const host = url.hostname.replace(/^www\./, '').replace(/^m\./, '').replace(/^music\./, '');
+            const host = url.hostname.toLowerCase().replace(/^www\./, '').replace(/^m\./, '').replace(/^music\./, '');
 
             if (host === 'youtu.be') {
-                const id = url.pathname.split('/').filter(Boolean)[0];
-                return id && /^[\w-]{11}$/.test(id) ? id : null;
+                const candidate = url.pathname.split('/').filter(Boolean)[0];
+                return candidate && /^[A-Za-z0-9_-]{11}$/.test(candidate) ? candidate : null;
             }
 
-            if (host === 'youtube.com' || host === 'youtube-nocookie.com') {
+            if (host === 'youtube.com' || host.endsWith('.youtube.com') || host === 'youtube-nocookie.com' || host.endsWith('.youtube-nocookie.com')) {
                 const fromQuery = url.searchParams.get('v');
-                if (fromQuery && /^[\w-]{11}$/.test(fromQuery)) return fromQuery;
+                if (fromQuery && /^[A-Za-z0-9_-]{11}$/.test(fromQuery)) return fromQuery;
 
                 const parts = url.pathname.split('/').filter(Boolean);
-                const markerIndex = parts.findIndex(p => ['embed', 'shorts', 'live', 'v'].includes(p));
+                const markerIndex = parts.findIndex(p => ['embed', 'shorts', 'live', 'v'].includes(p.toLowerCase()));
                 const candidate = markerIndex >= 0 ? parts[markerIndex + 1] : null;
-                if (candidate && /^[\w-]{11}$/.test(candidate)) return candidate;
+                if (candidate && /^[A-Za-z0-9_-]{11}$/.test(candidate)) return candidate;
+
+                // attribution_link, redirect e links similares.
+                for (const key of ['u', 'url', 'q']) {
+                    const nested = url.searchParams.get(key);
+                    if (nested) {
+                        const nestedId = procurarEmTexto(nested) || procurarEmTexto(decodeURIComponent(nested));
+                        if (nestedId) return nestedId;
+                    }
+                }
             }
         } catch (e) {}
 
-        const fallback = raw.match(/(?:youtu\.be\/|youtube(?:-nocookie)?\.com\/(?:embed\/|v\/|watch\?v=|watch\?.+&v=|shorts\/|live\/))([\w-]{11})/i);
-        return fallback ? fallback[1] : null;
+        return null;
     }, []);
 
-    const ytId = React.useMemo(() => extrairYouTubeId(videoUrl), [videoUrl, extrairYouTubeId]);
+    const ytId = React.useMemo(() => extrairYouTubeId(videoUrl || src), [videoUrl, src, extrairYouTubeId]);
+    const fonteTexto = React.useMemo(() => {
+        try {
+            return typeof src === 'string' ? src : JSON.stringify(src || '');
+        } catch (e) {
+            return String(videoUrl || '');
+        }
+    }, [src, videoUrl]);
+    const isYouTubeLike = /(?:youtu\.be|youtube(?:-nocookie)?\.com)/i.test(fonteTexto) || Boolean(ytId);
     const isYT = Boolean(ytId);
+    const ytSourceInvalid = isYouTubeLike && !ytId;
 
     const videoRef = React.useRef(null);
     const playerShellRef = React.useRef(null);
@@ -2105,33 +2174,16 @@ const CustomVideoPlayer = ({ src, onEnded, poster, isCompleted, showNotification
         return window.__aemYouTubeApiPromise;
     }, []);
 
-    const ytEmbedSrc = React.useMemo(() => {
-        if (!ytId) return '';
-        const params = new URLSearchParams({
-            enablejsapi: '1',
-            controls: '0',
-            autoplay: '0',
-            playsinline: '1',
-            rel: '0',
-            fs: '0',
-            iv_load_policy: '3',
-            hl: 'pt-BR'
-        });
-
-        if (typeof window !== 'undefined' && window.location && /^https?:\/\//i.test(window.location.origin || '')) {
-            params.set('origin', window.location.origin);
-        }
-
-        return `https://www.youtube.com/embed/${ytId}?${params.toString()}`;
-    }, [ytId]);
-
-    // Mantemos o iframe criado pelo React e apenas conectamos a API a ele.
-    // Isso evita que o YT.Player substitua um nó que o React ainda acredita controlar.
+    // Player oficial conectado a um <iframe> real renderizado pelo React.
+    // Este é um fluxo suportado oficialmente pelo YouTube quando enablejsapi=1 está no src.
     React.useEffect(() => {
         if (!isYT || !ytId || !ytIframeRef.current) return;
 
         let cancelled = false;
         let localPlayer = null;
+        let readyTimeout = null;
+        let readyFired = false;
+
         setPlayerError('');
         setYtReady(false);
 
@@ -2140,13 +2192,29 @@ const CustomVideoPlayer = ({ src, onEnded, poster, isCompleted, showNotification
                 await ensureYouTubeApi();
                 if (cancelled || !ytIframeRef.current) return;
 
-                localPlayer = new window.YT.Player(ytIframeRef.current, {
+                const iframe = ytIframeRef.current;
+                if (!iframe.id) iframe.id = `aem-yt-frame-${String(ytId).replace(/[^\w-]/g, '')}`;
+
+                readyTimeout = setTimeout(() => {
+                    if (!cancelled && !readyFired) {
+                        const msg = 'O YouTube não confirmou o carregamento do player. Verifique se o vídeo permite incorporação e se a plataforma está no domínio HTTPS publicado.';
+                        setPlayerError(msg);
+                        if (showNotificationRef.current) showNotificationRef.current(msg, 'error');
+                    }
+                }, 15000);
+
+                localPlayer = new window.YT.Player(iframe.id, {
                     events: {
                         onReady: (e) => {
                             if (cancelled) return;
+                            readyFired = true;
+                            if (readyTimeout) clearTimeout(readyTimeout);
+
                             ytPlayerRef.current = e.target;
                             setYtReady(true);
+                            setPlayerError('');
                             setDuration(Number(e.target.getDuration()) || 0);
+
                             try {
                                 setVolume(Number(e.target.getVolume()) || 100);
                                 setIsMuted(Boolean(e.target.isMuted && e.target.isMuted()));
@@ -2165,32 +2233,33 @@ const CustomVideoPlayer = ({ src, onEnded, poster, isCompleted, showNotification
                         onPlaybackRateChange: (e) => {
                             if (!cancelled) setPlaybackRate(Number(e.data) || 1);
                         },
-                        onAutoplayBlocked: () => {
-                            // Não é erro: o aluno pode iniciar pelo botão Play do player da plataforma.
-                            setIsPlaying(false);
-                        },
+                        onAutoplayBlocked: () => setIsPlaying(false),
                         onError: (e) => {
                             if (cancelled) return;
+                            if (readyTimeout) clearTimeout(readyTimeout);
+
                             const mensagens = {
-                                2: 'O link do YouTube é inválido.',
-                                5: 'O navegador não conseguiu reproduzir este vídeo em HTML5.',
+                                2: 'O ID do vídeo do YouTube é inválido.',
+                                5: 'O navegador não conseguiu reproduzir este vídeo no player HTML5 do YouTube.',
                                 100: 'Este vídeo foi removido ou está privado.',
                                 101: 'O proprietário deste vídeo não permite reprodução incorporada.',
                                 150: 'O proprietário deste vídeo não permite reprodução incorporada.',
                                 153: 'O YouTube não recebeu a identificação do domínio (HTTP Referer). Abra a plataforma pelo domínio HTTPS publicado.'
                             };
                             const msg = mensagens[e.data] || `Não foi possível reproduzir este vídeo do YouTube (erro ${e.data}).`;
-                            console.error('Erro no player do YouTube:', e.data);
+                            console.error('Erro no player do YouTube:', e.data, { ytId, videoUrl });
                             setPlayerError(msg);
                             if (showNotificationRef.current) showNotificationRef.current(msg, 'error');
                         }
                     }
                 });
+
                 ytPlayerRef.current = localPlayer;
             } catch (err) {
                 if (cancelled) return;
-                console.error('Falha ao carregar API do YouTube:', err);
-                const msg = 'Não foi possível inicializar o player do YouTube. Verifique a conexão e recarregue a aula.';
+                if (readyTimeout) clearTimeout(readyTimeout);
+                console.error('Falha ao carregar API do YouTube:', err, { ytId, videoUrl });
+                const msg = 'Não foi possível inicializar a API do YouTube. Recarregue a aula e confirme que a página está publicada em HTTPS.';
                 setPlayerError(msg);
                 if (showNotificationRef.current) showNotificationRef.current(msg, 'error');
             }
@@ -2200,12 +2269,13 @@ const CustomVideoPlayer = ({ src, onEnded, poster, isCompleted, showNotification
 
         return () => {
             cancelled = true;
-            // Como o iframe pertence ao React, não chamamos destroy() aqui: destroy remove o nó
-            // que o React ainda precisa reconciliar. Apenas soltamos a referência da API.
+            if (readyTimeout) clearTimeout(readyTimeout);
+            try {
+                if (localPlayer && typeof localPlayer.destroy === 'function') localPlayer.destroy();
+            } catch (e) {}
             ytPlayerRef.current = null;
-            localPlayer = null;
         };
-    }, [isYT, ytId, ytEmbedSrc, ensureYouTubeApi]);
+    }, [isYT, ytId, ensureYouTubeApi, videoUrl]);
 
     // Progresso do YouTube e conclusão automática em 95%.
     React.useEffect(() => {
@@ -2250,8 +2320,15 @@ const CustomVideoPlayer = ({ src, onEnded, poster, isCompleted, showNotification
         }
 
         if (videoRef.current) {
-            if (videoRef.current.paused) videoRef.current.play();
-            else videoRef.current.pause();
+            if (videoRef.current.paused) {
+                const playPromise = videoRef.current.play();
+                if (playPromise && typeof playPromise.catch === 'function') {
+                    playPromise.catch((err) => {
+                        console.error('Falha ao reproduzir fonte nativa:', err, videoUrl);
+                        setPlayerError('Esta fonte não pôde ser reproduzida como vídeo nativo.');
+                    });
+                }
+            } else videoRef.current.pause();
         }
     };
 
@@ -2314,7 +2391,7 @@ const CustomVideoPlayer = ({ src, onEnded, poster, isCompleted, showNotification
             setTimeout(() => {
                 video.load();
                 video.currentTime = tempoAtual;
-                if (estavaTocando) video.play();
+                if (estavaTocando) { const p = video.play(); if (p && typeof p.catch === 'function') p.catch(() => {}); }
             }, 50);
         }
     };
@@ -2381,6 +2458,23 @@ const CustomVideoPlayer = ({ src, onEnded, poster, isCompleted, showNotification
         }
     };
 
+    const youtubeEmbedSrc = React.useMemo(() => {
+        if (!ytId) return '';
+        const params = new URLSearchParams({
+            enablejsapi: '1',
+            controls: '0',
+            playsinline: '1',
+            rel: '0',
+            fs: '0',
+            iv_load_policy: '3',
+            hl: 'pt-BR'
+        });
+        if (typeof window !== 'undefined' && window.location && /^https?:\/\//i.test(window.location.origin || '')) {
+            params.set('origin', window.location.origin);
+        }
+        return `https://www.youtube.com/embed/${ytId}?${params.toString()}`;
+    }, [ytId]);
+
     return (
         <div ref={playerShellRef} className="w-full h-full overflow-hidden bg-black relative select-none flex flex-col">
             <div
@@ -2390,27 +2484,29 @@ const CustomVideoPlayer = ({ src, onEnded, poster, isCompleted, showNotification
                 {isYT && ytId ? (
                     <>
                         <iframe
-                            key={ytId}
+                            key={`yt-${ytId}`}
+                            id={`aem-yt-frame-${String(ytId).replace(/[^\w-]/g, '')}`}
                             ref={ytIframeRef}
-                            src={ytEmbedSrc}
+                            src={youtubeEmbedSrc}
+                            className="absolute inset-0 w-full h-full bg-black"
                             title="Vídeo da aula"
-                            className="absolute inset-0 w-full h-full border-0 bg-black"
-                            allow="accelerometer; autoplay; encrypted-media; gyroscope; picture-in-picture; web-share"
-                            allowFullScreen
+                            frameBorder="0"
+                            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
                             referrerPolicy="strict-origin-when-cross-origin"
+                            allowFullScreen
                         ></iframe>
 
                         {!ytReady && !playerError && (
-                            <div className="absolute inset-0 z-20 flex items-center justify-center bg-black pointer-events-none">
+                            <div className="absolute inset-0 z-20 flex items-center justify-center bg-black/95 pointer-events-none">
                                 <div className="flex flex-col items-center gap-3 text-white/70">
                                     <div className="w-9 h-9 border-2 border-white/25 border-t-white rounded-full animate-spin"></div>
-                                    <span className="text-xs font-bold tracking-wide">Carregando vídeo...</span>
+                                    <span className="text-xs font-bold tracking-wide">Conectando ao vídeo...</span>
                                 </div>
                             </div>
                         )}
 
                         {playerError && (
-                            <div className="absolute inset-0 z-30 flex items-center justify-center bg-black px-6 text-center">
+                            <div className="absolute inset-0 z-30 flex items-center justify-center bg-black/95 px-6 text-center">
                                 <div className="max-w-lg">
                                     <AlertCircle size={34} className="mx-auto mb-3 text-red-400" />
                                     <p className="text-sm font-bold text-white mb-2">Não foi possível abrir este vídeo</p>
@@ -2419,6 +2515,14 @@ const CustomVideoPlayer = ({ src, onEnded, poster, isCompleted, showNotification
                             </div>
                         )}
                     </>
+                ) : ytSourceInvalid ? (
+                    <div className="absolute inset-0 flex items-center justify-center bg-black px-6 text-center">
+                        <div className="max-w-lg">
+                            <AlertCircle size={34} className="mx-auto mb-3 text-amber-400" />
+                            <p className="text-sm font-bold text-white mb-2">Link do YouTube reconhecido, mas incompleto</p>
+                            <p className="text-xs leading-relaxed text-slate-400">Use o link do vídeo no formato youtube.com/watch?v=..., youtu.be/... ou youtube.com/embed/....</p>
+                        </div>
+                    </div>
                 ) : (
                     <video
                         ref={videoRef}
@@ -2429,6 +2533,10 @@ const CustomVideoPlayer = ({ src, onEnded, poster, isCompleted, showNotification
                         onClick={togglePlay}
                         onPlay={() => setIsPlaying(true)}
                         onPause={() => setIsPlaying(false)}
+                        onError={(e) => {
+                            console.error('Fonte de vídeo nativa não suportada:', videoUrl, e.currentTarget.error);
+                            setPlayerError('Este endereço não é um arquivo de vídeo compatível. Se for um link do YouTube, confira se o link foi copiado completo.');
+                        }}
                         onVolumeChange={(e) => {
                             setVolume(Math.round((e.currentTarget.volume || 0) * 100));
                             setIsMuted(e.currentTarget.muted);
@@ -2441,10 +2549,7 @@ const CustomVideoPlayer = ({ src, onEnded, poster, isCompleted, showNotification
                             setCurrentTime(time);
                             setDuration(total);
 
-                            if (!isCompletedRef.current && time > maxTimeWatched.current) {
-                                maxTimeWatched.current = time;
-                            }
-
+                            if (!isCompletedRef.current && time > maxTimeWatched.current) maxTimeWatched.current = time;
                             if (time > 0 && total > 0 && (time / total) >= 0.95 && !isCompletedRef.current) {
                                 isCompletedRef.current = true;
                                 if (onEndedRef.current) onEndedRef.current();
