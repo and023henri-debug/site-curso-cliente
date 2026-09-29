@@ -2009,10 +2009,14 @@ const CustomVideoPlayer = ({ src, onEnded, poster, isCompleted, showNotification
                 ytPlayerRef.current = new window.YT.Player(`yt-player-mask`, {
                     videoId: ytId,
                     playerVars: { 
-                        controls: 0, disablekb: 1, modestbranding: 1, rel: 0, showinfo: 0, autoplay: 0, iv_load_policy: 3, fs: 0, playsinline: 1
+                        controls: 0, disablekb: 1, modestbranding: 1, rel: 0, showinfo: 0, autoplay: 0, iv_load_policy: 3, fs: 0, playsinline: 1, cc_load_policy: 0
                     },
                     events: {
-                        onReady: (e) => { setDuration(e.target.getDuration()); },
+                        onReady: (e) => { 
+                            setDuration(e.target.getDuration()); 
+                            // Tática agressiva para remover legendas
+                            try { e.target.unloadModule('captions'); e.target.unloadModule('cc'); } catch(err){}
+                        },
                         onStateChange: (e) => {
                             if (e.data === window.YT.PlayerState.PLAYING) setIsPlaying(true);
                             else setIsPlaying(false);
@@ -2769,7 +2773,7 @@ const CustomVideoPlayer = ({ src, onEnded, poster, isCompleted, showNotification
             }, 600);
         };
 
-        // MOTOR DE VÍDEO PROFISSIONAL (Hack Anti-Erro 153)
+       // MOTOR DE VÍDEO PROFISSIONAL (Hack Anti-Erro 153)
         const getEmbedUrl = (lessonObj) => {
             if (!lessonObj) return null;
             
@@ -2779,9 +2783,9 @@ const CustomVideoPlayer = ({ src, onEnded, poster, isCompleted, showNotification
             const ytRegex = /(?:youtu\.be\/|youtube(?:-nocookie)?\.com\/(?:embed\/|v\/|watch\?v=|watch\?.+&v=|shorts\/|live\/))([\w-]{11})/i;
             const ytMatch = textoDaAula.match(ytRegex);
             
-            if (ytMatch && ytMatch[1]) {
-        // URL limpa e oficial do YouTube + API ATIVADA + AUTOPLAY ATIVADO
-        return `https://www.youtube.com/embed/${ytMatch[1]}?autoplay=1&rel=0&modestbranding=1&enablejsapi=1`;
+           if (ytMatch && ytMatch[1]) {
+        // URL limpa e oficial do YouTube + API ATIVADA + AUTOPLAY + ATAQUE ÀS LEGENDAS (cc_lang_pref=none)
+        return `https://www.youtube.com/embed/${ytMatch[1]}?autoplay=1&rel=0&modestbranding=1&enablejsapi=1&cc_load_policy=0&iv_load_policy=3&cc_lang_pref=none`;
         }
 
         // Caça cirurgicamente o ID do Vimeo
@@ -2802,13 +2806,38 @@ const CustomVideoPlayer = ({ src, onEnded, poster, isCompleted, showNotification
             let ytPlayer;
             let vimeoPlayer;
 
-            // Função para ouvir o YouTube
+            // Função para ouvir o YouTube e caçar as legendas implacavelmente (Hack Triplo)
             const initYouTube = () => {
                 const iframe = document.getElementById('video-player-iframe');
                 if (iframe && window.YT && window.YT.Player) {
                     ytPlayer = new window.YT.Player(iframe, {
                         events: {
+                            'onReady': (event) => {
+                                // Ataque 1: Assim que carrega
+                                try {
+                                    event.target.unloadModule('captions');
+                                    event.target.unloadModule('cc');
+                                    event.target.setOption('captions', 'track', {});
+                                } catch(err) {}
+                            },
+                            'onApiChange': (event) => {
+                                // Ataque 2: Se o YouTube tentar carregar as legendas sorrateiramente depois
+                                try {
+                                    event.target.unloadModule('captions');
+                                    event.target.unloadModule('cc');
+                                    event.target.setOption('captions', 'track', {});
+                                } catch(err) {}
+                            },
                             'onStateChange': (event) => {
+                                // Ataque 3: Toda vez que o vídeo entra em PLAY, nós matamos a legenda de novo
+                                if (event.data === window.YT.PlayerState.PLAYING) {
+                                    try {
+                                        event.target.unloadModule('captions');
+                                        event.target.unloadModule('cc');
+                                        event.target.setOption('captions', 'track', {});
+                                    } catch(err) {}
+                                }
+                                
                                 // Status 0 significa ENDED (Vídeo acabou)
                                 if (event.data === window.YT.PlayerState.ENDED) {
                                     markLessonAsCompleted(true); // true = Pula para a próxima
@@ -2941,13 +2970,15 @@ const CustomVideoPlayer = ({ src, onEnded, poster, isCompleted, showNotification
             embedUrl ? (
                 <div className="relative w-full h-full bg-black overflow-hidden group pointer-events-auto">
                     
-                    {/* SOLUÇÃO DEFINITIVA DA GPU: Sem 'scale'. O zoom é feito esticando o iframe com % e margem negativa para evitar o rasgo de pixel. */}
-                    <div key={embedUrl} className="absolute z-10" style={{ width: '115%', height: '115%', top: '-7.5%', left: '-7.5%' }}>
+                    {/* SOLUÇÃO DEFINITIVA RESPONSIVA: Alturas ajustadas (115% e 107.5%) para que a base do vídeo não vaze para fora, revelando a linha do tempo */}
+                    <div 
+                        key={embedUrl} 
+                        className="absolute z-10 w-[130%] h-[115%] -top-[15%] -left-[15%] sm:w-[115%] sm:h-[107.5%] sm:-top-[7.5%] sm:-left-[7.5%]"
+                    >
                         <iframe 
                             id="video-player-iframe"
                             src={embedUrl} 
-                            className="w-full h-full border-none outline-none" 
-                            style={{ backgroundColor: 'transparent' }}
+                            className="w-full h-full border-none outline-none bg-transparent" 
                             frameBorder="0" 
                             allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" 
                             allowFullScreen
@@ -2956,9 +2987,15 @@ const CustomVideoPlayer = ({ src, onEnded, poster, isCompleted, showNotification
                     </div>
                     
                     {/* BARRAS DE CINEMA PARA MASCARAR INFORMAÇÕES DO YOUTUBE/VIMEO */}
-                    <div className="absolute top-0 left-0 w-full h-12 sm:h-16 bg-black z-20 pointer-events-none border-none"></div>
-                    <div className="absolute bottom-0 left-0 w-full h-10 sm:h-14 bg-gradient-to-t from-black via-black/80 to-transparent z-20 pointer-events-none border-none"></div>
+                    {/* Barra superior bem menor no mobile (h-4) só para dar acabamento */}
+                    <div className="absolute top-0 left-0 w-full h-4 sm:h-16 bg-black z-20 pointer-events-none border-none"></div>
                     
+                    {/* Barra inferior cirúrgica: Aumentada para garantir a ocultação dos ícones e logo do YouTube no PC e Celular, deixando a timeline (barra de progresso) livre */}
+                    <div className="absolute bottom-0 left-0 w-full h-[50px] sm:h-[55px] bg-black z-20 pointer-events-auto border-none"></div>
+                    
+                    {/* Protetores invisíveis de clique nas bordas do mobile (impede que o aluno pause o vídeo sem querer ao tentar rolar a página) */}
+                    <div className="absolute top-0 right-0 w-16 h-16 sm:w-0 sm:h-0 z-20 pointer-events-none"></div>
+                    <div className="absolute bottom-0 right-0 w-16 h-16 sm:w-0 sm:h-0 z-20 pointer-events-none"></div>
                 </div>
                                 ) : (
                                     <CustomVideoPlayer 
