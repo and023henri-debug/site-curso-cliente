@@ -679,7 +679,7 @@ const BroadcastPlayer = ({ config }) => {
     const controller = useRef(null);
     const id = platformVideoId(config.videoUrl), url = platformHttpsUrl(config.videoUrl);
     if (!url) return <p className="p-6 text-slate-500">Aguardando o vídeo da transmissão.</p>;
-    return id ? <div className="w-full aspect-video rounded-xl overflow-hidden bg-black"><CleanYouTubePlayer key={id} videoId={id} controller={controller} onEnded={() => { if (config.loop === true) { controller.current?.seekTo?.(0, true); controller.current?.playVideo?.(); } }} /></div> : <video key={url} src={url} controls autoPlay muted playsInline loop={config.loop === true} className="w-full aspect-video rounded-xl bg-black" />;
+    return id ? <div className="w-full rounded-xl overflow-hidden bg-black"><CleanYouTubePlayer key={id} videoId={id} controller={controller} onEnded={() => { if (config.loop === true) { controller.current?.seekTo?.(0, true); controller.current?.playVideo?.(); } }} /></div> : <video key={url} src={url} controls autoPlay muted playsInline loop={config.loop === true} className="w-full aspect-video rounded-xl bg-black" />;
 };
 // Live nativa: sinalização Firestore e vídeo ponto a ponto. Nenhum arquivo vai para o R2.
 const NativeBroadcast = ({ config, user, isHost = false }) => {
@@ -2638,7 +2638,14 @@ const CustomVideoPlayer = ({ src, onEnded, poster, isCompleted, showNotification
     // COMPONENTE COURSE PLAYER (LAYOUT HOTMART CLUB / NETFLIX PREMIUM) - RESPONSIVO
     // =================================================================================
 // Player com máscaras existentes e controles próprios acima da barra inferior.
-const CleanYouTubePlayer = ({ videoId, controller, onEnded, poster, isCompleted = false, restrictSeeking = false }) => {
+const CoursePauseCover = ({ sources = [], title = 'Curso' }) => {
+    const [failed, setFailed] = useState([]);
+    const candidates = sources.filter(value => typeof value === 'string' && value.trim()).map(value => value.trim());
+    const src = candidates.find(value => !failed.includes(value));
+    return src ? <img key={src} src={src} alt="Capa do curso" style={{position:'absolute', inset:0, width:'100%', height:'100%', objectFit:'contain', background:'#080b14'}} onError={() => setFailed(prev => [...prev, src])} /> : <div style={{position:'absolute', inset:0, display:'flex', alignItems:'flex-end', justifyContent:'center', padding:20, background:'linear-gradient(135deg,#161c2c,#05070c)', color:'#cbd5e1'}}><span>{title} · Capa indisponível</span></div>;
+};
+
+const CleanYouTubePlayer = ({ videoId, controller, onEnded, poster, posterFallbacks = [], courseTitle = 'Curso', isCompleted = false, restrictSeeking = false }) => {
     const completed = useRef(isCompleted); completed.current = isCompleted;
     const [volume, setVolume] = useState(100), [muted, setMuted] = useState(false);
     const mount = useRef(null), player = useRef(null), ended = useRef(onEnded);
@@ -2668,7 +2675,7 @@ const CleanYouTubePlayer = ({ videoId, controller, onEnded, poster, isCompleted 
             const script = document.createElement('script'); script.src = 'https://www.youtube.com/iframe_api'; document.head.appendChild(script);
         }
         start();
-        const clock = setInterval(() => { if (player.current?.getCurrentTime) { setTime(player.current.getCurrentTime() || 0); setDuration(player.current.getDuration() || 0); } }, 500);
+        const clock = setInterval(() => { if (player.current?.getCurrentTime) { setTime(player.current.getCurrentTime() || 0); setDuration(player.current.getDuration() || 0); const state = player.current.getPlayerState?.(); if (state === 2 || state === 0 || state === 5 || state === -1) setPlaying(false); } }, 500);
         return () => { disposed = true; clearTimeout(timer); clearInterval(clock); controller.current = null; player.current?.destroy?.(); player.current = null; };
     }, [videoId]);
     const seek = value => {
@@ -2678,22 +2685,23 @@ const CleanYouTubePlayer = ({ videoId, controller, onEnded, poster, isCompleted 
     };
     const changeVolume = value => { setVolume(value); setMuted(value === 0); player.current?.setVolume?.(value); if (value > 0) player.current?.unMute?.(); else player.current?.mute?.(); };
     const toggleMute = () => { if (muted) { player.current?.unMute?.(); if (!volume) changeVolume(50); } else player.current?.mute?.(); setMuted(!muted); };
-    const toggle = () => playing ? player.current?.pauseVideo?.() : player.current?.playVideo?.();
+    const toggle = () => { if (playing) { setPlaying(false); player.current?.pauseVideo?.(); } else { player.current?.playVideo?.(); } };
     const stamp = v => `${Math.floor(v / 60)}:${String(Math.floor(v % 60)).padStart(2, '0')}`;
-    return <div className="relative w-full h-full bg-black overflow-hidden">
-        <div ref={mount} style={{position: 'absolute', top: 0, left: 0, right: 0, bottom: 76, width: '100%', height: 'calc(100% - 76px)', zIndex: 0, pointerEvents: 'none', opacity: playing ? 1 : 0}} className="absolute w-full h-full pointer-events-none" />
-        <button aria-label={playing ? 'Pausar vídeo' : 'Reproduzir vídeo'} onClick={toggle} className="absolute inset-0 z-10 bg-transparent" />
+    return <div className="platform-youtube-player" style={{position:'relative', width:'100%', background:'#000'}}>
+        <style>{`.platform-youtube-stage{position:relative;width:100%;aspect-ratio:16/9;overflow:hidden;background:#000}.platform-youtube-top{position:absolute;top:0;left:0;right:0;height:64px;background:#000;z-index:20;pointer-events:none}.platform-youtube-bottom{position:absolute;bottom:0;left:0;right:0;height:55px;background:#000;z-index:20;pointer-events:none}@media(max-width:640px){.platform-youtube-top{height:48px}.platform-youtube-bottom{height:50px}.platform-youtube-player button{min-height:32px}.platform-youtube-player input{min-height:24px}}`}</style>
+        <div className="platform-youtube-stage">
+        <div ref={mount} style={{position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, width: '100%', height: '100%', zIndex: 0, pointerEvents: 'none', opacity: playing ? 1 : 0}} className="absolute w-full h-full pointer-events-none" />
+        <button aria-label={playing ? 'Pausar vídeo' : 'Reproduzir vídeo'} onClick={toggle} style={{position:'absolute', inset:0, width:'100%', height:'100%', zIndex:10, border:0, background:'transparent', cursor:'pointer'}} className="absolute inset-0 z-10 bg-transparent" />
         {!playing && <button type="button" aria-label="Reproduzir aula" disabled={!ready} onClick={toggle}
             style={{position:'absolute', inset:0, zIndex:25, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', gap:16, width:'100%', height:'100%', border:0, background:'#080b14', color:'#fff', cursor:ready ? 'pointer' : 'wait'}}
             className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-4 bg-[#080b14] text-white disabled:cursor-wait">
-            {poster && <img src={poster} alt="Capa do curso" style={{position:'absolute', inset:0, width:'100%', height:'100%', objectFit:'contain', background:'#080b14'}} onError={e => { e.currentTarget.style.display = 'none'; }} />}
-            <span style={{position:'absolute', inset:0, background:'rgba(0,0,0,.25)'}} />
-            <span style={{position:'relative', display:'flex', alignItems:'center', justifyContent:'center', width:88, height:88, borderRadius:'50%', background:'#4f46e5', color:'#fff'}}><Play size={34} fill="currentColor" /></span>
-            <span style={{position:'relative'}} className="text-sm font-semibold tracking-wide">{ready ? 'Assistir aula' : 'Carregando aula…'}</span>
+            <CoursePauseCover sources={[poster, ...posterFallbacks]} title={courseTitle} />
+            {!ready && <span style={{position:'relative', padding:'8px 12px', background:'rgba(0,0,0,.7)', borderRadius:8}}>Carregando aula…</span>}
         </button>}
-        <div style={{position:'absolute', top:0, left:0, right:0, height:48, background:'#000', zIndex:20, pointerEvents:'none'}} />
-        <div style={{position:'absolute', bottom:76, left:0, right:0, height:24, background:'#000', zIndex:20}} />
-        <div style={{position:'absolute', bottom:0, left:0, right:0, height:76, zIndex:30, background:'#080b14', padding:'8px 12px', boxSizing:'border-box'}} className="text-white">
+        <div className="platform-youtube-top" />
+        <div className="platform-youtube-bottom" />
+        </div>
+        <div style={{position:'relative', minHeight:76, zIndex:30, background:'#080b14', padding:'8px 12px', boxSizing:'border-box'}} className="text-white">
             <input aria-label="Progresso do vídeo" type="range" min="0" max={duration || 1} step="0.1" value={Math.min(time, duration || 1)} onChange={e => seek(Number(e.target.value))} style={{width:'100%', accentColor:'#6366f1'}} />
             <div style={{display:'flex', alignItems:'center', gap:10, flexWrap:'wrap'}}>
                 <button disabled={!ready} onClick={toggle} aria-label={playing ? 'Pausar' : 'Reproduzir'}>{playing ? <Pause size={20}/> : <Play size={20}/>}</button>
@@ -2815,6 +2823,14 @@ const YouTubeTabTranscription = ({ controller, stopRef, modelRef, onText, onActi
         const [isSummarizing, setIsSummarizing] = useState(false);
         const transcriberRef = useRef(null);
         const youtubeController = useRef(null);
+        const [currentCourseCover, setCurrentCourseCover] = useState(course.cover || course.thumbnailUrl || '');
+        useEffect(() => {
+            setCurrentCourseCover(course.cover || course.thumbnailUrl || '');
+            if (!course.id) return;
+            return onSnapshot(doc(db, 'courses', course.id), snap => {
+                if (snap.exists()) { const data = snap.data(); setCurrentCourseCover(data.cover || data.thumbnailUrl || course.cover || ''); }
+            }, () => {});
+        }, [course.id, course.cover, course.thumbnailUrl]);
         const stopTabTranscription = useRef(null); 
         const [note, setNote] = useState('');
         const [savedNote, setSavedNote] = useState(false);
@@ -3484,7 +3500,7 @@ const YouTubeTabTranscription = ({ controller, stopRef, modelRef, onText, onActi
                     
                     <div className={`flex flex-col h-auto lg:h-full overflow-visible lg:overflow-y-auto custom-scrollbar transition-all duration-500 bg-[#0f0f0f] border-b sm:border border-[#222] rounded-none sm:rounded-2xl shadow-2xl shrink-0 ${isCinemaMode ? 'w-full' : 'w-full lg:w-[70%] xl:w-[75%]'}`}>
                         
-                        <div className="w-full bg-black aspect-video relative group border-b border-[#222] sm:rounded-t-2xl overflow-hidden shrink-0">
+                        <div className={`w-full bg-black ${embedUrl?.includes("youtube.com") ? "" : "aspect-video"} relative group border-b border-[#222] sm:rounded-t-2xl overflow-hidden shrink-0`}>
                             <button 
                                 onClick={onBackToModules}
                                 className="absolute top-3 left-3 sm:top-4 sm:left-4 z-[60] bg-black/40 hover:bg-black/80 backdrop-blur-md border border-white/20 text-white p-2 sm:px-4 sm:py-2 rounded-full sm:rounded-xl transition-all duration-300 flex items-center gap-2 shadow-[0_0_15px_rgba(0,0,0,0.5)] opacity-80 hover:opacity-100"
@@ -3497,7 +3513,7 @@ const YouTubeTabTranscription = ({ controller, stopRef, modelRef, onText, onActi
                             {/* 👇 LÓGICA DO VÍDEO RESTAURADA COM MÁSCARA CINEMATOGRÁFICA 👇 */}
         {currentLesson.tipo === 'video' ? (
             embedUrl?.includes("youtube.com") ? (
-                <CleanYouTubePlayer key={embedUrl} videoId={platformVideoId(embedUrl)} poster={course.cover} isCompleted={!!isCurrentCompleted} restrictSeeking={true} controller={youtubeController} onEnded={async () => { await stopTabTranscription.current?.(); markLessonAsCompleted(true); }} />
+                <CleanYouTubePlayer key={embedUrl} videoId={platformVideoId(embedUrl)} poster={currentCourseCover || course.cover || course.thumbnailUrl} posterFallbacks={[fixUrl(currentCourseCover || ''), course.cover, fixUrl(course.thumbnailUrl || ''), course.thumbnailUrl, fixUrl(currentModule?.cover || '')]} courseTitle={course.title || course.titulo} isCompleted={!!isCurrentCompleted} restrictSeeking={true} controller={youtubeController} onEnded={async () => { await stopTabTranscription.current?.(); markLessonAsCompleted(true); }} />
             ) : embedUrl ? (
                 <div className="relative w-full h-full bg-black overflow-hidden group pointer-events-auto">
                     
@@ -3532,7 +3548,7 @@ const YouTubeTabTranscription = ({ controller, stopRef, modelRef, onText, onActi
                                     <CustomVideoPlayer key={`${activeModuleIndex}-${activeLessonIndex}`}
                                         src={currentLesson.conteudo} 
                                         title={currentLesson.titulo}
-                                        poster={course.cover}
+                                        poster={fixUrl(course.cover || course.thumbnailUrl || currentModule?.cover || '')}
                                         onEnded={() => markLessonAsCompleted(true)}
                                         isCompleted={isCurrentCompleted}
                                         showNotification={showNotification}
@@ -12394,20 +12410,4 @@ JSON Permitidos (Siga exatamente estes formatos):
             let blockMatch = aiReply.match(/```[a-z]*\s*(\{[\s\S]*?\})\s*```/i) || aiReply.match(/\{[\s\S]*"action"[\s\S]*\}/i);
             
             if (blockMatch) {
-                stringToHide = blockMatch[0];
-                try { cmdObj = JSON.parse(blockMatch[1] || blockMatch[0]); } catch(e) {}
-            }
-
-            if (cmdObj && cmdObj.action) {
-                aiReply = aiReply.replace(stringToHide, '').trim();
-                let commandExecuted = false;
-                let shouldCloseWidget = false;
-
-                if (window.AemGlobalAPI) {
-                    switch(cmdObj.action) {
-                        case 'navigate':
-                            window.AemGlobalAPI.navigate(cmdObj.target);
-                            commandExecuted = true;
-                            if (cmdObj.target === 'catalog' || cmdObj.target === 'home') {
-                                shouldCloseWidget = true;
        
