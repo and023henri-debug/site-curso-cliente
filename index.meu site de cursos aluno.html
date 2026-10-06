@@ -473,7 +473,63 @@ if(isIos() && !isStandalone()){
   <div id="root"></div>
 
   
-  <script type="text/babel" data-type="module" data-compact="true" data-generator-opts='{"compact":true}'>
+  <script>
+// Mensagens da plataforma: fila de diálogos internos, sem alert/confirm/prompt nativos.
+(() => {
+    const queue = []; let visible = false;
+    const showNext = () => {
+        if (visible || !queue.length) return;
+        visible = true;
+        const { kind, message, initial, resolve } = queue.shift();
+        const previous = document.activeElement;
+        const overlay = document.createElement('div');
+        overlay.style.cssText = 'position:fixed;inset:0;z-index:2147483647;background:rgba(0,0,0,.78);display:flex;align-items:center;justify-content:center;padding:20px;font-family:system-ui,sans-serif;color:#f8fafc;';
+        const panel = document.createElement('form');
+        panel.setAttribute('role', 'alertdialog'); panel.setAttribute('aria-modal', 'true');
+        panel.setAttribute('aria-labelledby', 'platform-dialog-title'); panel.setAttribute('aria-describedby', 'platform-dialog-message');
+        panel.style.cssText = 'width:100%;max-width:480px;max-height:90vh;overflow:auto;background:#111827;border:1px solid #374151;border-radius:20px;padding:26px;box-shadow:0 24px 80px #0008;';
+        const title = document.createElement('h2'); title.id = 'platform-dialog-title'; title.textContent = kind === 'alert' ? 'Aviso da plataforma' : kind === 'prompt' ? 'Informe o valor' : 'Confirmar ação'; title.style.cssText = 'font-size:21px;font-weight:700;margin:0 0 16px;';
+        const content = document.createElement('p'); content.id = 'platform-dialog-message'; content.textContent = String(message); content.style.cssText = 'font-size:15px;line-height:1.6;white-space:pre-wrap;overflow-wrap:anywhere;margin:0 0 22px;color:#cbd5e1;';
+        panel.append(title, content);
+        let input;
+        if (kind === 'prompt') {
+            input = document.createElement('input'); input.type = 'text'; input.value = initial || ''; input.setAttribute('aria-labelledby', content.id);
+            input.style.cssText = 'box-sizing:border-box;width:100%;padding:12px;margin-bottom:20px;background:#030712;color:white;border:1px solid #64748b;border-radius:10px;font-size:16px;'; panel.append(input);
+        }
+        const actions = document.createElement('div'); actions.style.cssText = 'display:flex;justify-content:flex-end;gap:12px;';
+        const cancel = document.createElement('button'), accept = document.createElement('button');
+        const buttonStyle = 'cursor:pointer;padding:11px 20px;border-radius:10px;border:1px solid #64748b;color:white;font-size:14px;font-weight:600;';
+        cancel.type = 'button'; cancel.textContent = 'Cancelar'; cancel.style.cssText = buttonStyle + 'background:#334155;';
+        accept.type = 'submit'; accept.textContent = kind === 'alert' ? 'Entendi' : 'Confirmar'; accept.style.cssText = buttonStyle + 'background:#4f46e5;';
+        if (kind !== 'alert') actions.append(cancel); actions.append(accept); panel.append(actions); overlay.append(panel);
+        let closed = false;
+        const close = result => {
+            if (closed) return; closed = true;
+            document.removeEventListener('keydown', keyHandler, true); overlay.remove(); visible = false;
+            if (previous?.isConnected) previous.focus();
+            resolve(result); showNext();
+        };
+        const keyHandler = event => {
+            if (event.key === 'Escape') { event.preventDefault(); event.stopImmediatePropagation(); close(kind === 'confirm' ? false : null); }
+            if (event.key === 'Tab') {
+                const focusable = [...panel.querySelectorAll('input,button')]; const first = focusable[0], last = focusable[focusable.length - 1];
+                if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+                else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+            }
+        };
+        cancel.onclick = () => close(kind === 'confirm' ? false : null);
+        panel.onsubmit = event => { event.preventDefault(); close(kind === 'prompt' ? input.value : true); };
+        (document.fullscreenElement || document.body).append(overlay);
+        document.addEventListener('keydown', keyHandler, true); (input || (kind === 'confirm' ? cancel : accept)).focus();
+    };
+    const request = (kind, message, initial) => new Promise(resolve => { queue.push({ kind, message, initial, resolve }); showNext(); });
+    window.platformAlert = message => { request('alert', message); };
+    window.platformConfirm = message => request('confirm', message);
+    window.platformPrompt = (message, initial = '') => request('prompt', message, initial);
+})();
+</script>
+
+<script type="text/babel" data-type="module" data-compact="true" data-generator-opts='{"compact":true}'>
     import React, { useState, useEffect, useRef } from 'react';
     import { createRoot } from 'react-dom/client';
  import { 
@@ -620,9 +676,10 @@ const MeetingRoom = ({ config, user }) => {
     </div>;
 };
 const BroadcastPlayer = ({ config }) => {
+    const controller = useRef(null);
     const id = platformVideoId(config.videoUrl), url = platformHttpsUrl(config.videoUrl);
     if (!url) return <p className="p-6 text-slate-500">Aguardando o vídeo da transmissão.</p>;
-    return id ? <iframe className="w-full aspect-video rounded-xl bg-black" title="Transmissão ao vivo" src={`https://www.youtube.com/embed/${id}?rel=0&autoplay=1&mute=1`} allow="autoplay; encrypted-media; fullscreen; picture-in-picture" referrerPolicy="strict-origin-when-cross-origin" allowFullScreen /> : <video key={url} src={url} controls autoPlay muted playsInline loop={config.loop === true} className="w-full aspect-video rounded-xl bg-black" />;
+    return id ? <div className="w-full aspect-video rounded-xl overflow-hidden bg-black"><CleanYouTubePlayer key={id} videoId={id} controller={controller} onEnded={() => { if (config.loop === true) { controller.current?.seekTo?.(0, true); controller.current?.playVideo?.(); } }} /></div> : <video key={url} src={url} controls autoPlay muted playsInline loop={config.loop === true} className="w-full aspect-video rounded-xl bg-black" />;
 };
 // Live nativa: sinalização Firestore e vídeo ponto a ponto. Nenhum arquivo vai para o R2.
 const NativeBroadcast = ({ config, user, isHost = false }) => {
@@ -2251,6 +2308,17 @@ const StudentMarketplace = ({ db, user, settings, showNotification, promotions =
 // =================================================================================
 // SUB-COMPONENTE: PLAYER PREMIUM UNIFICADO (NATIVO E YOUTUBE MASCARADO)
 // =================================================================================
+// O YouTube pode recarregar o módulo de legendas ao trocar de estado.
+const disableYouTubeCaptions = target => {
+    if (!target) return;
+    try {
+        const modules = target.getOptions?.();
+        if (Array.isArray(modules) && !modules.includes('captions')) return;
+        target.setOption?.('captions', 'track', {});
+        target.unloadModule?.('captions');
+    } catch (_) { /* Nem todas as versões do iframe expõem o módulo. */ }
+};
+
 const CustomVideoPlayer = ({ src, onEnded, poster, isCompleted, showNotification }) => {
     // 1. DADOS E FONTES
     const fontes = (typeof src === 'object' && src !== null) ? src : { 'Auto': src };
@@ -2295,12 +2363,15 @@ const CustomVideoPlayer = ({ src, onEnded, poster, isCompleted, showNotification
                         controls: 0, disablekb: 1, modestbranding: 1, rel: 0, showinfo: 0, autoplay: 0, iv_load_policy: 3, fs: 0, playsinline: 1, cc_load_policy: 0
                     },
                     events: {
+                        onApiChange: e => disableYouTubeCaptions(e.target),
                         onReady: (e) => { 
+                            disableYouTubeCaptions(e.target);
                             setDuration(e.target.getDuration()); 
                             // Tática agressiva para remover legendas
                             try { e.target.unloadModule('captions'); e.target.unloadModule('cc'); } catch(err){}
                         },
                         onStateChange: (e) => {
+                            disableYouTubeCaptions(e.target);
                             if (e.data === window.YT.PlayerState.PLAYING) setIsPlaying(true);
                             else setIsPlaying(false);
                             
@@ -2428,6 +2499,7 @@ const CustomVideoPlayer = ({ src, onEnded, poster, isCompleted, showNotification
                         onEnded={() => { setIsPlaying(false); if(!isCompletedRef.current){ isCompletedRef.current = true; if(onEnded) onEnded(); } }}
                     />
                 )}
+                {isYT && !isPlaying && <button type="button" aria-label="Assistir aula" onClick={e => { e.stopPropagation(); togglePlay(); }} style={{position:'absolute', inset:0, zIndex:25, display:'flex', alignItems:'center', justifyContent:'center', background:'#080b14', color:'#fff', border:0, cursor:'pointer'}}><span style={{display:'flex', alignItems:'center', justifyContent:'center', width:88, height:88, borderRadius:'50%', background:'#4f46e5'}}><Play size={34} fill="currentColor" /></span></button>}
                 {/* Camada invisível de segurança para captura de clique */}
                 <div className="absolute inset-0 z-10 bg-transparent border-none outline-none"></div>
             </div>
@@ -2566,6 +2638,7 @@ const CustomVideoPlayer = ({ src, onEnded, poster, isCompleted, showNotification
 const CleanYouTubePlayer = ({ videoId, controller, onEnded }) => {
     const mount = useRef(null), player = useRef(null), ended = useRef(onEnded);
     ended.current = onEnded;
+    const [ready, setReady] = useState(false);
     const [playing, setPlaying] = useState(false), [time, setTime] = useState(0), [duration, setDuration] = useState(0), [error, setError] = useState('');
     useEffect(() => {
         let disposed = false, timer, attempts = 0;
@@ -2577,10 +2650,11 @@ const CleanYouTubePlayer = ({ videoId, controller, onEnded }) => {
             }
             const el = document.createElement('div'); mount.current.appendChild(el);
             player.current = new window.YT.Player(el, { videoId, width: '100%', height: '100%',
-                playerVars: { controls: 0, disablekb: 1, rel: 0, playsinline: 1, iv_load_policy: 3, origin: window.location.origin },
+                playerVars: { controls: 0, disablekb: 1, rel: 0, playsinline: 1, cc_load_policy: 0, iv_load_policy: 3, origin: window.location.origin },
                 events: {
-                    onReady: e => { controller.current = e.target; setDuration(e.target.getDuration()); },
-                    onStateChange: e => { if (e.data === 1 && e.target.__transcriptionPaused) { e.target.pauseVideo(); return; } setPlaying(e.data === 1); if (e.data === 0) ended.current(); },
+                    onApiChange: e => disableYouTubeCaptions(e.target),
+                    onReady: e => { disableYouTubeCaptions(e.target); controller.current = e.target; setDuration(e.target.getDuration()); setReady(true); },
+                    onStateChange: e => { disableYouTubeCaptions(e.target); if (e.data === 1 && e.target.__transcriptionPaused) { e.target.pauseVideo(); return; } setPlaying(e.data === 1); if (e.data === 0) ended.current(); },
                     onError: () => setError('Vídeo indisponível para reprodução incorporada.')
                 }
             });
@@ -2595,8 +2669,14 @@ const CleanYouTubePlayer = ({ videoId, controller, onEnded }) => {
     const toggle = () => playing ? player.current?.pauseVideo?.() : player.current?.playVideo?.();
     const stamp = v => `${Math.floor(v / 60)}:${String(Math.floor(v % 60)).padStart(2, '0')}`;
     return <div className="relative w-full h-full bg-black overflow-hidden">
-        <div ref={mount} className="absolute w-full h-full pointer-events-none" />
+        <div ref={mount} style={{position: 'absolute', inset: 0, width: '100%', height: '100%', zIndex: 0, pointerEvents: 'none', opacity: playing ? 1 : 0}} className="absolute w-full h-full pointer-events-none" />
         <button aria-label={playing ? 'Pausar vídeo' : 'Reproduzir vídeo'} onClick={toggle} className="absolute inset-0 z-10 bg-transparent" />
+        {!playing && <button type="button" aria-label="Reproduzir aula" disabled={!ready} onClick={toggle}
+            style={{position:'absolute', inset:0, zIndex:25, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', gap:16, width:'100%', height:'100%', border:0, background:'#080b14', color:'#fff', cursor:ready ? 'pointer' : 'wait'}}
+            className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-4 bg-[#080b14] text-white disabled:cursor-wait">
+            <span style={{display:'flex', alignItems:'center', justifyContent:'center', width:88, height:88, borderRadius:'50%', background:'#4f46e5', color:'#fff'}}><Play size={34} fill="currentColor" /></span>
+            <span className="text-sm font-semibold tracking-wide">{ready ? 'Assistir aula' : 'Carregando aula…'}</span>
+        </button>}
         <div className="absolute top-0 inset-x-0 h-16 bg-black z-20 pointer-events-none" />
         <div className="absolute bottom-0 inset-x-0 h-[55px] bg-black z-20" />
         <div className="absolute bottom-0 inset-x-0 z-30 flex items-center gap-3 px-3 h-[55px] text-white">
@@ -2628,7 +2708,8 @@ const YouTubeTabTranscription = ({ controller, stopRef, modelRef, onText, onActi
     useEffect(() => { alive.current = true; return () => { alive.current = false; if (session.current) release(session.current); session.current = null; stopRef.current = null; onActive(false); }; }, []);
     const start = async () => {
         if (session.current) return;
-        if (!window.confirm('Para transcrever, selecione ESTA aba e marque “Compartilhar áudio da aba”. A transcrição começa no ponto atual e aparece em blocos. Permaneça nesta aba: ao trocar de aba ou janela, o vídeo e a captura serão pausados. O navegador não permite bloquear outras abas. Feche outros áudios nesta página. Deseja continuar?')) return;
+        if (!await window.platformConfirm('Para transcrever, selecione ESTA aba e marque “Compartilhar áudio da aba”. A transcrição começa no ponto atual e aparece em blocos. Permaneça nesta aba: ao trocar de aba ou janela, o vídeo e a captura serão pausados. O navegador não permite bloquear outras abas. Feche outros áudios nesta página. Deseja continuar?')) return;
+        if (!alive.current || session.current) return;
         const s = { stopped: false, paused: true, chunks: [], size: 0, chain: Promise.resolve(), pending: 0 };
         session.current = s; setActive(true); onActive(true); textRef.current = ''; onText('');
         controller.current?.pauseVideo?.();
@@ -5089,7 +5170,7 @@ const CertificatesSection = ({ user, courses, userProgress, certificates, custom
         
         const s3 = getS3Client(); // Usa as credenciais do Admin
         if (!s3) {
-            alert("Erro: Biblioteca de upload não carregou.");
+            window.platformAlert("Erro: Biblioteca de upload não carregou.");
             return null;
         }
 
@@ -5161,7 +5242,7 @@ const CertificatesSection = ({ user, courses, userProgress, certificates, custom
                 stopWatchingUpload();
                 if (err) {
                     console.error("❌ ERRO NO UPLOAD R2:", err);
-                    alert(`Falha no upload. Verifique o Console.`);
+                    window.platformAlert(`Falha no upload. Verifique o Console.`);
                     reject(err);
                 } else {
                     // Monta o Link Final que vai aparecer no site
@@ -5742,7 +5823,7 @@ const SupportSection = ({ user, settings }) => {
     };
     
     const handleFileUpload = async (file) => {
-         if (!chatUploadPolicy.enabled) return alert(CHAT_UPLOAD_MESSAGE);
+         if (!chatUploadPolicy.enabled) return window.platformAlert(CHAT_UPLOAD_MESSAGE);
          if (!file) return; 
          setIsSending(true); setShowAttachments(false); setAudioPreview(null); setAudioBlob(null);
          try {
@@ -5756,12 +5837,12 @@ const SupportSection = ({ user, settings }) => {
                 fileType: finalType, 
                 fileName: data.name 
             });
-         } catch (e) { alert("Erro envio: " + e.message); } finally { setIsSending(false); }
+         } catch (e) { window.platformAlert("Erro envio: " + e.message); } finally { setIsSending(false); }
     };
 
     const startRecording = async () => {
-        if (!chatUploadPolicy.enabled) return alert(CHAT_UPLOAD_MESSAGE);
-        if (!navigator.mediaDevices) return alert("Sem suporte.");
+        if (!chatUploadPolicy.enabled) return window.platformAlert(CHAT_UPLOAD_MESSAGE);
+        if (!navigator.mediaDevices) return window.platformAlert("Sem suporte.");
         setIsLoadingMic(true);
         try { 
             const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -5779,7 +5860,7 @@ const SupportSection = ({ user, settings }) => {
             }; 
             recorder.start(); mediaRecorderRef.current = recorder; setIsRecording(true); setIsLoadingMic(false);
             setRecordingTime(0); timerRef.current = setInterval(() => { setRecordingTime(prev => prev + 1); }, 1000);
-        } catch (e) { alert("Erro mic."); setIsLoadingMic(false); setIsRecording(false); }
+        } catch (e) { window.platformAlert("Erro mic."); setIsLoadingMic(false); setIsRecording(false); }
     };
 
     const stopRecording = () => { if (mediaRecorderRef.current?.state === "recording") mediaRecorderRef.current.stop(); setIsRecording(false); clearInterval(timerRef.current); };
@@ -6794,7 +6875,7 @@ const SupportSection = ({ user, settings }) => {
                 onSuccess();
             } catch (error) {
                 console.error("Erro ao salvar:", error);
-                alert("Erro ao salvar dados.");
+                window.platformAlert("Erro ao salvar dados.");
             } finally { setLoading(false); }
         };
 
@@ -7303,7 +7384,7 @@ Retorne APENAS um array JSON puro (SEM crases, SEM formatação markdown), com e
 
     const toggleListening = (e) => {
         e.preventDefault();
-        if (!recognitionRef.current) return alert("Reconhecimento de voz não suportado neste navegador.");
+        if (!recognitionRef.current) return window.platformAlert("Reconhecimento de voz não suportado neste navegador.");
         if (isListening) recognitionRef.current.stop();
         else { setIaInput(''); recognitionRef.current.start(); }
     };
@@ -8502,7 +8583,7 @@ const CommunityTab = ({ user, showNotification }) => {
     };
 
     const startRecordingChat = async () => {
-        if (!chatUploadPolicy.enabled) return alert(CHAT_UPLOAD_MESSAGE);
+        if (!chatUploadPolicy.enabled) return window.platformAlert(CHAT_UPLOAD_MESSAGE);
         if (!navigator.mediaDevices) return showNotification("Microfone sem suporte.", "error");
         setIsLoadingMicChat(true);
         try { 
@@ -12174,7 +12255,7 @@ const MindMapSection = ({ user, courses, purchasedIds, setView }) => {
     }
 
     window.AemIaWidget.toggleVoice = () => {
-        if (!recognition) return alert("Microfone não suportado no seu navegador.");
+        if (!recognition) return window.platformAlert("Microfone não suportado no seu navegador.");
         if (isListening) recognition.stop();
         else { document.getElementById('aem-ia-input').value = ''; recognition.start(); }
     };
@@ -12329,85 +12410,4 @@ JSON Permitidos (Siga exatamente estes formatos):
                                 if (window.AemGlobalAPI_Marketplace) window.AemGlobalAPI_Marketplace.buyProductByName(cmdObj.productName);
                             }, 1000);
                             commandExecuted = true;
-                            break;
-                        case 'video_control':
-                            if (window.AemVideoControl) {
-                                if (cmdObj.command === 'play') window.AemVideoControl.play();
-                                else if (cmdObj.command === 'pause') window.AemVideoControl.pause();
-                                else if (cmdObj.command === 'skip_forward') window.AemVideoControl.skip(10);
-                                else if (cmdObj.command === 'skip_backward') window.AemVideoControl.skip(-10);
-                                commandExecuted = true;
-                            } else aiReply += "<br><br><small style='color:#f87171'>Nenhum vídeo em reprodução.</small>";
-                            break;
-                        case 'edit_profile':
-                            const profRes = await window.AemGlobalAPI.updateProfileData(cmdObj.field, cmdObj.value);
-                            if(profRes) aiReply += `<br><br><small style='color:#4ade80'>Perfil atualizado! Trocamos ${cmdObj.field} para "${cmdObj.value}".</small>`;
-                            else aiReply += "<br><br><small style='color:#f87171'>Houve um erro ao atualizar o banco de dados.</small>";
-                            commandExecuted = true;
-                            break;
-                        case 'post_community':
-                            const postRes = await window.AemGlobalAPI.postToCommunity(cmdObj.text);
-                            if(postRes) aiReply += `<br><br><small style='color:#4ade80'>Mensagem publicada na comunidade!</small>`;
-                            commandExecuted = true;
-                            break;
-                        case 'take_notes':
-                            const noteRes = await window.AemGlobalAPI.takeNotesAutomated(cmdObj.courseName, cmdObj.notes);
-                            if(noteRes === 'sucesso') { aiReply += `<br><br><small style='color:#4ade80'>Anotação criada e salva no seu diário de bordo premium deste curso!</small>`; commandExecuted = true; }
-                            else aiReply += "<br><br><small style='color:#f87171'>Não encontrei o curso para salvar a anotação.</small>";
-                            break;
-                    }
-                }
-
-                if (commandExecuted) {
-                    aiReply += "<br><br><small style='color:#4ade80'><i class='fa-solid fa-bolt'></i> Ação concluída com sucesso!</small>";
-                    if (shouldCloseWidget) {
-                        setTimeout(() => { window.AemIaWidget.closeWidget(); }, 2000);
-                    }
-                }
-            } else {
-                aiReply = aiReply.replace(/```[\s\S]*?```/g, '').trim();
-            }
-            
-            appendMessage(aiReply.trim(), false);
-            
-            // 💾 SALVA A RESPOSTA DA IA NO HISTÓRICO PARA ELA LEMBRAR DEPOIS
-            chatHistory.push(`${nomeDaIA}: ${aiReply.replace(/<[^>]*>?/gm, '')}`); // Remove HTML antes de salvar
-            localStorage.setItem('aem_ia_chat_history', JSON.stringify(chatHistory));
-            
-        } catch (err) {
-            typing.classList.add('hidden');
-            appendMessage("⚠️ Sistema offline ou falha na conexão.", false);
-        }
-    });
-    }
-    
-    // 👇 INÍCIO DA LÓGICA DO BOTÃO NOVA CONVERSA 👇
-    const btnRestartIa = document.getElementById('aem-ia-restart-btn');
-    if (btnRestartIa) {
-        btnRestartIa.addEventListener('click', () => {
-            // 1. Limpa visualmente as mensagens da tela 
-            const chatBody = document.getElementById('aem-chat-box-normal');
-            if (chatBody) {
-                chatBody.innerHTML = ''; 
-            }
-            
-            // 2. Limpa a memória salva no navegador
-            localStorage.removeItem('aem_ia_chat_history'); 
-            
-            // 3. Adiciona um feedback visual no botão de rodar
-            btnRestartIa.classList.add('animate-spin');
-            setTimeout(() => btnRestartIa.classList.remove('animate-spin'), 500);
-
-            // 4. Manda a IA dar as boas-vindas oficiais puxadas do Banco de Dados
-            setTimeout(() => {
-                const msgOficial = window.AemIaWelcomeMsg || "Olá! Como posso te ajudar hoje?";
-                appendMessage(msgOficial, false);
-            }, 300);
-        });
-    }
-    
-    
-})();
-  </script>
-</body>
-</html>
+       
