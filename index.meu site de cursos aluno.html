@@ -492,7 +492,7 @@ if(isIos() && !isStandalone()){
     } from 'lucide-react';
     import { initializeApp } from 'firebase/app';
     import { getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, onAuthStateChanged, updateProfile, GoogleAuthProvider, signInWithPopup } from 'firebase/auth';
-    import { getFirestore, doc, getDoc, getDocs, setDoc, collection, addDoc, query, orderBy, onSnapshot, serverTimestamp, updateDoc, arrayUnion, arrayRemove, deleteDoc, where, limit } from 'firebase/firestore';
+    import { getDocFromServer, getFirestore, doc, getDoc, getDocs, setDoc, collection, addDoc, query, orderBy, onSnapshot, serverTimestamp, updateDoc, arrayUnion, arrayRemove, deleteDoc, where, limit } from 'firebase/firestore';
     import { jsPDF } from "jspdf";
     import { pipeline, env } from 'transformers';
 
@@ -523,6 +523,293 @@ if(isIos() && !isStandalone()){
     }
 
     // --- UI COMPONENTS CORPORATIVOS (PREMIUM & MINIMALISTAS) ---
+
+// Controle compartilhado de anexos: somente conversas e publicações da comunidade.
+const CHAT_UPLOAD_MESSAGE = 'Envio de áudios e arquivos suspenso pelo administrador. Mensagens de texto continuam disponíveis.';
+const isConversationUpload = (folder = '') => /^(Chat\/|ChatSuporte\/|AffiliateChats\/|Community\/$)/i.test(folder.replace(/^\/+/, ''));
+const assertConversationUploads = async () => {
+    let snap;
+    try { snap = await getDocFromServer(doc(db, 'config', 'chat_upload_policy')); }
+    catch (error) { throw new Error('Não foi possível verificar a permissão de envio. Verifique a conexão e tente novamente.'); }
+    if (!snap.exists() || snap.data().enabled !== true) throw new Error(CHAT_UPLOAD_MESSAGE);
+};
+
+const watchConversationUpload = (upload, folder) => {
+    if (!isConversationUpload(folder)) return () => {};
+    return onSnapshot(doc(db, 'config', 'chat_upload_policy'), snap => {
+        if (!snap.exists() || snap.data().enabled !== true) upload.abort();
+    }, () => upload.abort());
+};
+const useConversationUploads = () => {
+    const [policy, setPolicy] = useState({ enabled: false, ready: false, error: false });
+    useEffect(() => {
+        if (!db) return;
+        // Nunca mostrar os controles com uma permissão ausente, pendente ou apenas em cache.
+        return onSnapshot(doc(db, 'config', 'chat_upload_policy'), { includeMetadataChanges: true }, snap => {
+            const confirmed = !snap.metadata.fromCache && !snap.metadata.hasPendingWrites;
+            setPolicy({
+                enabled: confirmed && snap.exists() && snap.data().enabled === true,
+                ready: confirmed,
+                error: false
+            });
+        }, () => setPolicy({ enabled: false, ready: true, error: true }));
+    }, []);
+    return policy;
+};
+const ConversationUploadNotice = ({ policy }) => policy.enabled ? null : (
+    <p role="status" className="text-xs px-3 py-2 text-amber-700 bg-amber-50 dark:text-amber-200 dark:bg-amber-900/20 rounded-lg">
+        {!policy.ready ? 'Verificando permissão de anexos...' : policy.error ? 'Anexos indisponíveis: não foi possível consultar a configuração.' : CHAT_UPLOAD_MESSAGE}
+    </p>
+);
+// Fim do controle compartilhado de anexos.
+// NOVOS RECURSOS: reuniões, lives e identificação de vídeo.
+const platformVideoId = value => {
+    try {
+        const u = new URL(String(value || ''));
+        if (!['youtube.com','www.youtube.com','m.youtube.com','youtube-nocookie.com','www.youtube-nocookie.com','youtu.be'].includes(u.hostname)) return null;
+        const id = u.hostname === 'youtu.be' ? u.pathname.split('/')[1] : u.searchParams.get('v') || u.pathname.match(/^\/(?:embed|shorts|live)\/([^/]+)/)?.[1];
+        return /^[A-Za-z0-9_-]{11}$/.test(id || '') ? id : null;
+    } catch (_) { return null; }
+};
+const platformHttpsUrl = value => { try { const u = new URL(value); return u.protocol === 'https:' ? u.href : ''; } catch (_) { return ''; } };
+const platformScriptLoads = {};
+const loadPlatformScript = (src, ready) => {
+    if (ready()) return Promise.resolve();
+    if (!platformScriptLoads[src]) platformScriptLoads[src] = new Promise((resolve, reject) => {
+        const script = document.createElement('script'); script.src = src; script.async = true;
+        script.onload = () => { if (ready()) resolve(); else { delete platformScriptLoads[src]; reject(new Error('Não foi possível iniciar a integração.')); } };
+        script.onerror = () => { delete platformScriptLoads[src]; script.remove(); reject(new Error('Não foi possível carregar a integração. Verifique a conexão.')); };
+        document.head.appendChild(script);
+    });
+    return platformScriptLoads[src];
+};
+const useLiveConfiguration = () => {
+    const [state, setState] = useState({ loaded: false, enabled: false, error: '' });
+    useEffect(() => {
+        if (!db) return;
+        return onSnapshot(doc(db, 'config', 'live_sessions'), snapshot => {
+            setState({ ...(snapshot.exists() ? snapshot.data() : {}), loaded: true, enabled: snapshot.exists() && snapshot.data().enabled === true, error: '' });
+        }, () => setState({ loaded: true, enabled: false, error: 'Não foi possível carregar as transmissões. Verifique as permissões do Firebase.' }));
+    }, []);
+    return state;
+};
+const MeetingRoom = ({ config, user }) => {
+    const container = useRef(null), api = useRef(null);
+    const [joining, setJoining] = useState(false), [error, setError] = useState('');
+    useEffect(() => {
+        if (!joining) return;
+        let cancelled = false;
+        const domain = String(config.jitsiDomain || 'meet.jit.si').trim();
+        if (!/^[a-z0-9.-]+$/i.test(domain)) { setError('Endereço do servidor de reuniões inválido.'); return; }
+        loadPlatformScript(`https://${domain}/external_api.js`, () => !!window.JitsiMeetExternalAPI).then(() => {
+            if (cancelled || !container.current) return;
+            api.current = new window.JitsiMeetExternalAPI(domain, {
+                roomName: config.roomName, parentNode: container.current, width: '100%', height: '100%', lang: 'ptBR',
+                userInfo: { displayName: user?.displayName || user?.nome || user?.name || 'Participante' },
+                configOverwrite: { startWithAudioMuted: true, startWithVideoMuted: true, prejoinConfig: { enabled: true },
+                    toolbarButtons: ['microphone','camera','desktop','chat','raisehand','tileview','participants-pane','settings','fullscreen','hangup'] }
+            });
+            api.current.addListener('readyToClose', () => setJoining(false));
+        }).catch(e => { if (!cancelled) { setError(e.message); setJoining(false); } });
+        return () => { cancelled = true; api.current?.dispose(); api.current = null; };
+    }, [joining, config.roomName, config.jitsiDomain]);
+    return <div className="space-y-3">
+        {error && <p role="alert" className="text-red-500">{error}</p>}
+        {!joining ? <button className="px-5 py-3 rounded-xl bg-indigo-600 text-white font-bold" onClick={() => { setError(''); setJoining(true); }}>Entrar na reunião</button> : <button className="px-4 py-2 rounded-lg bg-slate-700 text-white" onClick={() => setJoining(false)}>Sair da reunião</button>}
+        <div ref={container} className={joining ? 'w-full h-[75vh] min-h-[420px] rounded-xl overflow-hidden bg-black' : 'hidden'} />
+    </div>;
+};
+const BroadcastPlayer = ({ config }) => {
+    const id = platformVideoId(config.videoUrl), url = platformHttpsUrl(config.videoUrl);
+    if (!url) return <p className="p-6 text-slate-500">Aguardando o vídeo da transmissão.</p>;
+    return id ? <iframe className="w-full aspect-video rounded-xl bg-black" title="Transmissão ao vivo" src={`https://www.youtube.com/embed/${id}?rel=0&autoplay=1&mute=1`} allow="autoplay; encrypted-media; fullscreen; picture-in-picture" referrerPolicy="strict-origin-when-cross-origin" allowFullScreen /> : <video key={url} src={url} controls autoPlay muted playsInline loop={config.loop === true} className="w-full aspect-video rounded-xl bg-black" />;
+};
+// Live nativa: sinalização Firestore e vídeo ponto a ponto. Nenhum arquivo vai para o R2.
+const NativeBroadcast = ({ config, user, isHost = false }) => {
+    const videoRef = useRef(null), streamRef = useRef(null), cleanupRef = useRef(() => {}), ownSession = useRef(null), mounted = useRef(true);
+    const captureStreamsRef = useRef([]), audioContextRef = useRef(null);
+    const [running, setRunning] = useState(false), [busy, setBusy] = useState(false), [message, setMessage] = useState(''), [muted, setMuted] = useState(false);
+    const report = text => { if (mounted.current) setMessage(text); };
+    const iceServers = [{ urls: 'stun:stun.l.google.com:19302' }];
+    if (config.turnUrl && /^(turn|turns):/.test(config.turnUrl)) iceServers.push({ urls: config.turnUrl, username: config.turnUsername || '', credential: config.turnCredential || '' });
+    const stop = async () => {
+        const session = ownSession.current; ownSession.current = null;
+        cleanupRef.current(); cleanupRef.current = () => {};
+        streamRef.current?.getTracks().forEach(t => t.stop()); streamRef.current = null;
+        captureStreamsRef.current.forEach(source => source.getTracks().forEach(t => t.stop())); captureStreamsRef.current = [];
+        audioContextRef.current?.close().catch(() => {}); audioContextRef.current = null;
+        if (videoRef.current) videoRef.current.srcObject = null;
+        if (mounted.current) { setRunning(false); setBusy(false); }
+        if (session) {
+            try { const ref = doc(db, 'config', 'live_sessions'); const current = await getDoc(ref);
+                if (current.data()?.broadcastId === session) await updateDoc(ref, { nativeActive: false });
+            } catch (_) { report('A captura foi encerrada. Não foi possível atualizar o status da live.'); }
+        }
+    };
+    useEffect(() => { mounted.current = true; return () => { mounted.current = false; stop(); }; }, []);
+    useEffect(() => { if (isHost && (!config.enabled || config.mode !== 'native')) stop(); }, [config.enabled, config.mode]);
+    const start = async source => {
+        if (busy || running) return;
+        setBusy(true); setMessage('');
+        let stream;
+        try {
+            if (!window.isSecureContext || !navigator.mediaDevices || !window.RTCPeerConnection) throw new Error('Use HTTPS e um navegador compatível com câmera e transmissão.');
+            if (source === 'screen') {
+                stream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
+                streamRef.current = stream;
+                // Mantém a voz do apresentador também ao compartilhar uma aba com som.
+                const display = stream;
+                const mic = await navigator.mediaDevices.getUserMedia({ audio: true });
+                captureStreamsRef.current = [display, mic];
+                if (display.getAudioTracks().length) {
+                    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+                    const audioContext = new AudioContextClass(); audioContextRef.current = audioContext;
+                    await audioContext.resume();
+                    const destination = audioContext.createMediaStreamDestination();
+                    audioContext.createMediaStreamSource(display).connect(destination);
+                    audioContext.createMediaStreamSource(mic).connect(destination);
+                    stream = new MediaStream([...display.getVideoTracks(), ...destination.stream.getAudioTracks()]);
+                } else stream = new MediaStream([...display.getVideoTracks(), ...mic.getAudioTracks()]);
+            } else stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+            streamRef.current = stream;
+            if (!mounted.current) { stream.getTracks().forEach(t => t.stop()); return; }
+            const broadcastId = crypto.randomUUID(); ownSession.current = broadcastId;
+            await updateDoc(doc(db, 'config', 'live_sessions'), { nativeActive: true, broadcastId, hostUid: auth.currentUser.uid, startedAt: serverTimestamp() });
+            if (!mounted.current) { await stop(); return; }
+            const peers = new globalThis.Map();
+            const closePeer = id => { const peer = peers.get(id); if (peer) { peer.off?.(); peer.pc.close(); peers.delete(id); } };
+            const off = onSnapshot(query(collection(db, 'live_signals'), where('broadcastId', '==', broadcastId)), snapshot => {
+                snapshot.docChanges().forEach(change => {
+                    const data = change.doc.data(), id = change.doc.id;
+                    if (change.type === 'removed' || data.closed) { closePeer(id); return; }
+                    if (!data.offer || peers.has(id)) return;
+                    const pc = new RTCPeerConnection({ iceServers }), peer = { pc, off: null }; peers.set(id, peer);
+                    const ref = doc(db, 'live_signals', id); const seen = new Set();
+                    pc.onicecandidate = e => { if (e.candidate) updateDoc(ref, { hostCandidates: arrayUnion(e.candidate.toJSON()) }).catch(() => {}); };
+                    (async () => {
+                        try {
+                            await pc.setRemoteDescription(data.offer);
+                            stream.getTracks().forEach(track => pc.addTrack(track, stream));
+                            await pc.setLocalDescription(await pc.createAnswer());
+                            await updateDoc(ref, { answer: { type: pc.localDescription.type, sdp: pc.localDescription.sdp } });
+                            if (pc.signalingState === 'closed') return;
+                            peer.off = onSnapshot(ref, snap => {
+                                const d = snap.data(); if (!d || d.closed) { closePeer(id); return; }
+                                (d.viewerCandidates || []).forEach(c => { const key = JSON.stringify(c); if (!seen.has(key)) { seen.add(key); pc.addIceCandidate(c).catch(() => {}); } });
+                            }, () => closePeer(id));
+                        } catch (_) { closePeer(id); report('Um espectador não conseguiu conectar. Verifique a rede ou configure TURN.'); }
+                    })();
+                });
+            }, () => { report('Sem permissão para conectar espectadores. Verifique as regras de live_signals.'); stop(); });
+            cleanupRef.current = () => { off(); [...peers.keys()].forEach(closePeer); };
+            stream.getVideoTracks()[0].onended = () => stop();
+            if (videoRef.current) videoRef.current.srcObject = stream;
+            setRunning(true); setMuted(false); report('Transmitindo. Os alunos recebem somente vídeo e áudio.');
+        } catch (e) { stream?.getTracks().forEach(t => t.stop()); await stop(); report(e.message || 'Não foi possível iniciar a live.'); }
+        finally { if (mounted.current) setBusy(false); }
+    };
+    useEffect(() => {
+        if (isHost || !config.enabled || !config.nativeActive || !config.broadcastId || !user?.uid) return;
+        let cancelled = false, off = () => {}, processing = false;
+        const pc = new RTCPeerConnection({ iceServers }), ref = doc(db, 'live_signals', `${user.uid}_${crypto.randomUUID()}`), seen = new Set();
+        const candidates = []; let created = false;
+        report('Conectando à transmissão...');
+        pc.addTransceiver('video', { direction: 'recvonly' }); pc.addTransceiver('audio', { direction: 'recvonly' });
+        pc.ontrack = e => { if (!cancelled && videoRef.current) { videoRef.current.srcObject = e.streams[0]; report('Ao vivo. Use os controles do vídeo para ativar o som.'); } };
+        pc.onconnectionstatechange = () => { if (['failed','disconnected'].includes(pc.connectionState)) report('Conexão interrompida. Saia e entre novamente; a rede pode exigir um servidor TURN.'); };
+        pc.onicecandidate = e => { if (!e.candidate) return; const c = e.candidate.toJSON(); if (created) updateDoc(ref, { viewerCandidates: arrayUnion(c) }).catch(() => {}); else candidates.push(c); };
+        (async () => {
+            try {
+                await pc.setLocalDescription(await pc.createOffer()); if (cancelled) return;
+                await setDoc(ref, { viewerUid: user.uid, broadcastId: config.broadcastId, hostUid: config.hostUid, offer: { type: pc.localDescription.type, sdp: pc.localDescription.sdp }, viewerCandidates: candidates, hostCandidates: [], createdAt: serverTimestamp(), closed: false });
+                created = true;
+                if (cancelled) { await deleteDoc(ref); return; }
+                if (candidates.length) await updateDoc(ref, { viewerCandidates: arrayUnion(...candidates) });
+                off = onSnapshot(ref, async snap => {
+                    const data = snap.data(); if (!data || cancelled || processing) return; processing = true;
+                    try {
+                        if (data.answer && !pc.remoteDescription) await pc.setRemoteDescription(data.answer);
+                        if (pc.remoteDescription) (data.hostCandidates || []).forEach(c => { const key = JSON.stringify(c); if (!seen.has(key)) { seen.add(key); pc.addIceCandidate(c).catch(() => {}); } });
+                    } catch (_) { report('Não foi possível conectar ao apresentador.'); } finally { processing = false; }
+                }, () => report('Não foi possível acessar a transmissão. Verifique as permissões.'));
+            } catch (_) { report('Não foi possível conectar à live. Verifique a conexão e as permissões do Firebase.'); }
+        })();
+        return () => { cancelled = true; off(); pc.close(); if (videoRef.current) videoRef.current.srcObject = null; if (created) deleteDoc(ref).catch(() => {}); };
+    }, [isHost, config.enabled, config.nativeActive, config.broadcastId, user?.uid]);
+    return <div className="space-y-3">
+        {isHost && <div className="flex flex-wrap gap-2">{!running ? <><button disabled={busy} className="px-4 py-3 bg-indigo-600 text-white rounded-xl disabled:opacity-50" onClick={() => start('camera')}>Transmitir câmera</button><button disabled={busy} className="px-4 py-3 bg-indigo-600 text-white rounded-xl disabled:opacity-50" onClick={() => start('screen')}>Transmitir aba ou tela</button></> : <><button className="px-4 py-3 bg-slate-700 text-white rounded-xl" onClick={() => { streamRef.current?.getAudioTracks().forEach(t => t.enabled = muted); setMuted(!muted); }}>{muted ? 'Ativar áudio' : 'Silenciar áudio'}</button><button className="px-4 py-3 bg-red-600 text-white rounded-xl" onClick={stop}>Encerrar transmissão</button></>}</div>}
+        <p role="status" className="text-sm text-slate-500">{message || (!isHost && !config.nativeActive ? 'Aguardando o apresentador iniciar a live.' : 'Escolha a câmera ou a tela para iniciar.')}</p>
+        <video ref={videoRef} autoPlay muted playsInline controls={!isHost} className="w-full aspect-video bg-black rounded-xl" />
+    </div>;
+};
+
+// Uma indicação vale apenas para a visita iniciada pelo link, sem cookie de visitas anteriores.
+const currentAffiliateVisit = (() => {
+    const params = new URLSearchParams(window.location.search);
+    const ref = (params.get('ref') || '').trim();
+    try { localStorage.removeItem('affiliate_ref'); } catch (_) {}
+    return { ref: /^[A-Za-z0-9_-]{1,128}$/.test(ref) ? ref : null, courseId: params.get('id'), productId: params.get('product') };
+})();
+const resolvePurchaseAttribution = async (item, kind, price) => {
+    const direct = { ref: null, affiliateId: null, affiliatePercent: 0, affiliateCommission: 0, attributionSource: 'direct', attributionVersion: 2 };
+    const visit = currentAffiliateVisit;
+    if (!visit.ref || (kind === 'course' && (visit.productId || (visit.courseId && visit.courseId !== item.id))) || (kind === 'product' && (visit.courseId || (visit.productId && visit.productId !== item.id)))) return direct;
+    const snapshot = await getDocFromServer(doc(db, 'affiliates', visit.ref));
+    if (!snapshot.exists() || snapshot.data().active === false) return direct;
+    const percent = Math.min(100, Math.max(0, Number(item.affiliatePercent) || 0));
+    return { ref: snapshot.id, affiliateId: snapshot.id, affiliatePercent: percent,
+        affiliateCommission: Math.round(Math.max(0, Number(price) || 0) * percent) / 100,
+        attributionSource: 'affiliate_link', attributionVersion: 2,
+        affiliateLink: `${window.location.origin}/?${kind === 'course' ? 'id' : 'product'}=${encodeURIComponent(item.id)}&ref=${encodeURIComponent(snapshot.id)}` };
+};
+const courseTimestampMillis = value => {
+    if (!value) return 0;
+    if (typeof value.toMillis === 'function') return value.toMillis();
+    if (typeof value.seconds === 'number') return value.seconds * 1000;
+    const ms = typeof value === 'number' ? value : Date.parse(value);
+    return Number.isFinite(ms) ? ms : 0;
+};
+const courseReleaseAccess = (course, purchases, now = Date.now()) => {
+    const paid = purchases.filter(p => p.courseId === course.id && ['pago','approved','aprovado','concluido','concluído','liberado'].includes(String(p.status).toLowerCase()));
+    if (!paid.length) return { allowed: false, full: false, unlockAt: 0 };
+    // Compras anteriores à implantação e acessos gratuitos/manuais preservam a regra original.
+    if (paid.some(p => p.releasePolicyVersion !== 1)) return { allowed: true, full: true, unlockAt: 0 };
+    const dates = paid.map(p => courseTimestampMillis(p.paidAt || p.dateApproved)).filter(Boolean);
+    const unlockAt = dates.length ? Math.min(...dates) + 7 * 24 * 60 * 60 * 1000 : 0;
+    return { allowed: true, full: !!unlockAt && now >= unlockAt, unlockAt };
+};
+const courseLessonAvailable = (course, access, moduleIndex, lessonIndex) => {
+    if (!access.allowed) return false;
+    if (access.full) return true;
+    const modules = course.modulos || [];
+    if (modules.length > 1) return moduleIndex === 0;
+    const lessons = modules[0]?.aulas || [];
+    if (lessons[lessonIndex]?.tipo !== 'video') return true;
+    return lessons.slice(0, lessonIndex + 1).filter(l => l.tipo === 'video').length <= 2;
+};
+const CourseAccessGate = ({ course, user, ...props }) => {
+    const [records, setRecords] = useState([]), [ready, setReady] = useState(false), [error, setError] = useState(''), [now, setNow] = useState(Date.now());
+    useEffect(() => {
+        setReady(false); setError('');
+        if (!user?.email) return;
+        return onSnapshot(query(collection(db, 'transactions'), where('userEmail', '==', user.email)), snap => {
+            setRecords(snap.docs.map(d => ({ id: d.id, ...d.data() })).filter(t => !t.userId || t.userId === user.uid)); setReady(true);
+        }, () => { setError('Não foi possível verificar seu acesso. Tente novamente.'); setReady(true); });
+    }, [user?.uid, user?.email, course.id]);
+    useEffect(() => { const timer = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(timer); }, []);
+    const access = courseReleaseAccess(course, records, now);
+    if (!ready || error || !access.allowed) return <div className="p-8 rounded-xl bg-slate-900 text-white"><p>{!ready ? 'Verificando seu acesso...' : error || 'Este curso não está disponível na sua conta.'}</p><button className="mt-4 px-4 py-2 rounded-lg bg-indigo-600" onClick={props.onBackToModules}>Voltar</button></div>;
+    return <CoursePlayer {...props} user={user} course={course} releaseAccess={access} />;
+};
+const StudentLiveSessions = ({ config, user, purchasedIds }) => {
+    if (!config.enabled) return <div className="p-8 text-slate-500">Não há transmissões disponíveis no momento.</div>;
+    if (config.courseId && !purchasedIds.includes(config.courseId)) return <div className="p-8 text-slate-500">Esta transmissão está disponível para alunos do curso correspondente.</div>;
+    return <section className="space-y-5 p-4 md:p-6 rounded-2xl bg-white dark:bg-slate-900 text-slate-900 dark:text-white">
+        <header><p className="text-xs font-bold uppercase text-indigo-500">{config.mode === 'meeting' ? 'Reunião e aula ao vivo' : 'Transmissão'}</p><h2 className="text-2xl font-bold">{config.title || 'Ao vivo'}</h2></header>
+        {config.mode === 'meeting' ? <MeetingRoom key={config.roomName} config={config} user={user} /> : config.mode === 'native' ? <NativeBroadcast key={config.broadcastId || 'waiting'} config={config} user={user} /> : <BroadcastPlayer config={config} />}
+    </section>;
+};
+
     const Button = ({ children, variant = 'primary', size = 'md', className, ...props }) => {
       // rounded-lg (8px), sem glow neon, transição suave
       const base = "rounded-lg font-bold transition-all duration-300 flex items-center justify-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed border border-transparent";
@@ -596,19 +883,13 @@ if(isIos() && !isStandalone()){
                 try {
                    // 👇 LÓGICA DE AFILIADOS: Captura o ID da URL ou da Memória do Navegador
                 const params = new URLSearchParams(window.location.search);
-                const currentRef = params.get('ref') || localStorage.getItem('affiliate_ref');
-                
-                // Se veio pelo link agora, salva na memória para não perder se o aluno recarregar a página
-                if (params.get('ref')) {
-                    localStorage.setItem('affiliate_ref', params.get('ref'));
-                }
+                const attribution = await resolvePurchaseAttribution(course, 'course', finalPrice);
+                const currentRef = attribution.ref;
+                const affiliateCommission = attribution.affiliateCommission;
 
-                // Calcula o valor exato da comissão baseada na porcentagem definida pelo Admin
-                const affiliatePercent = course.affiliatePercent ? Number(course.affiliatePercent) : 0;
-                const affiliateCommission = currentRef ? (finalPrice * (affiliatePercent / 100)) : 0;
-
-                // 1. CRIA TRANSAÇÃO NO BANCO COM O VALOR COM DESCONTO + AFILIADO
                 const docRef = await addDoc(collection(db, "transactions"), {
+                    ...attribution,
+                    releasePolicyVersion: 1,
                     courseId: course.id,
                     courseTitle: course.title,
                     userId: user.uid,
@@ -990,18 +1271,12 @@ const MarketplaceCheckoutModal = ({ product, user, onClose, settings, showNotifi
             try {
                 // LÓGICA DE AFILIADOS PARA PRODUTOS: Captura o ID
                 const params = new URLSearchParams(window.location.search);
-                const currentRef = params.get('ref') || localStorage.getItem('affiliate_ref');
-                
-                if (params.get('ref')) {
-                    localStorage.setItem('affiliate_ref', params.get('ref'));
-                }
+                const attribution = await resolvePurchaseAttribution(product, 'product', finalPrice);
+                const currentRef = attribution.ref;
+                const affiliateCommission = attribution.affiliateCommission;
 
-                // Calcula a comissão baseada na porcentagem que o Admin configurou no produto
-                const affiliatePercent = product.affiliatePercent ? Number(product.affiliatePercent) : 0;
-                const affiliateCommission = currentRef ? (finalPrice * (affiliatePercent / 100)) : 0;
-
-                // 1. CRIA O PEDIDO COM O VALOR REAL COM DESCONTO + AFILIADO
                 const docRef = await addDoc(collection(db, "marketplace_orders"), {
+                    ...attribution,
                     productId: product.id,
                     productTitle: product.title,
                     userId: user.uid,
@@ -1325,6 +1600,14 @@ const StudentMarketplace = ({ db, user, settings, showNotification, promotions =
     const [isLoading, setIsLoading] = useState(true);
     const [marketplaceActive, setMarketplaceActive] = useState(true);
     const [selectedProduct, setSelectedProduct] = useState(null);
+    const productLinkOpened = useRef(false);
+    useEffect(() => {
+        const productId = new URLSearchParams(window.location.search).get('product');
+        if (!productLinkOpened.current && productId) {
+            const product = products.find(p => p.id === productId);
+            if (product) { productLinkOpened.current = true; setSelectedProduct(product); }
+        }
+    }, [products]);
     const [currentImageIndex, setCurrentImageIndex] = useState(0);
     const [checkoutProduct, setCheckoutProduct] = useState(null);
     
@@ -2279,7 +2562,145 @@ const CustomVideoPlayer = ({ src, onEnded, poster, isCompleted, showNotification
     // =================================================================================
     // COMPONENTE COURSE PLAYER (LAYOUT HOTMART CLUB / NETFLIX PREMIUM) - RESPONSIVO
     // =================================================================================
-    const CoursePlayer = ({ user, course, onBackToModules, onFinishCourse, showNotification, onGoToCertificates }) => {
+// Player com máscaras existentes e controles próprios acima da barra inferior.
+const CleanYouTubePlayer = ({ videoId, controller, onEnded }) => {
+    const mount = useRef(null), player = useRef(null), ended = useRef(onEnded);
+    ended.current = onEnded;
+    const [playing, setPlaying] = useState(false), [time, setTime] = useState(0), [duration, setDuration] = useState(0), [error, setError] = useState('');
+    useEffect(() => {
+        let disposed = false, timer, attempts = 0;
+        const start = () => {
+            if (disposed) return;
+            if (!window.YT?.Player) {
+                if (++attempts > 100) { setError('Não foi possível carregar o player. Reabra a aula.'); return; }
+                timer = setTimeout(start, 200); return;
+            }
+            const el = document.createElement('div'); mount.current.appendChild(el);
+            player.current = new window.YT.Player(el, { videoId, width: '100%', height: '100%',
+                playerVars: { controls: 0, disablekb: 1, rel: 0, playsinline: 1, iv_load_policy: 3, origin: window.location.origin },
+                events: {
+                    onReady: e => { controller.current = e.target; setDuration(e.target.getDuration()); },
+                    onStateChange: e => { if (e.data === 1 && e.target.__transcriptionPaused) { e.target.pauseVideo(); return; } setPlaying(e.data === 1); if (e.data === 0) ended.current(); },
+                    onError: () => setError('Vídeo indisponível para reprodução incorporada.')
+                }
+            });
+        };
+        if (!window.YT?.Player && !document.querySelector('script[src="https://www.youtube.com/iframe_api"]')) {
+            const script = document.createElement('script'); script.src = 'https://www.youtube.com/iframe_api'; document.head.appendChild(script);
+        }
+        start();
+        const clock = setInterval(() => { if (player.current?.getCurrentTime) { setTime(player.current.getCurrentTime() || 0); setDuration(player.current.getDuration() || 0); } }, 500);
+        return () => { disposed = true; clearTimeout(timer); clearInterval(clock); controller.current = null; player.current?.destroy?.(); player.current = null; };
+    }, [videoId]);
+    const toggle = () => playing ? player.current?.pauseVideo?.() : player.current?.playVideo?.();
+    const stamp = v => `${Math.floor(v / 60)}:${String(Math.floor(v % 60)).padStart(2, '0')}`;
+    return <div className="relative w-full h-full bg-black overflow-hidden">
+        <div ref={mount} className="absolute w-full h-full pointer-events-none" />
+        <button aria-label={playing ? 'Pausar vídeo' : 'Reproduzir vídeo'} onClick={toggle} className="absolute inset-0 z-10 bg-transparent" />
+        <div className="absolute top-0 inset-x-0 h-16 bg-black z-20 pointer-events-none" />
+        <div className="absolute bottom-0 inset-x-0 h-[55px] bg-black z-20" />
+        <div className="absolute bottom-0 inset-x-0 z-30 flex items-center gap-3 px-3 h-[55px] text-white">
+            <button onClick={toggle} aria-label={playing ? 'Pausar' : 'Reproduzir'} className="p-2">{playing ? <Pause size={20}/> : <Play size={20}/>}</button>
+            <input aria-label="Progresso do vídeo" type="range" min="0" max={duration || 1} step="0.1" value={Math.min(time, duration || 1)} onChange={e => { const value = Number(e.target.value); player.current?.seekTo?.(value, true); setTime(value); }} className="flex-1 min-w-0 accent-indigo-500" />
+            <span className="text-xs whitespace-nowrap">{stamp(time)} / {stamp(duration)}</span>
+        </div>
+        {error && <div role="alert" className="absolute inset-0 z-40 bg-black flex items-center justify-center p-8">{error}</div>}
+    </div>;
+};
+
+// A captura exige identidade da própria aba; nunca usa áudio do microfone/sistema.
+const YouTubeTabTranscription = ({ controller, stopRef, modelRef, onText, onActive }) => {
+    const session = useRef(null), alive = useRef(true), textRef = useRef('');
+    const [status, setStatus] = useState(''), [active, setActive] = useState(false), [paused, setPaused] = useState(false);
+    const release = s => {
+        s.stopped = true; s.stream?.getTracks().forEach(t => t.stop());
+        if (s.processor) { s.processor.onaudioprocess = null; s.processor.disconnect(); }
+        s.source?.disconnect(); s.gain?.disconnect(); s.context?.close().catch(() => {});
+        s.removeListeners?.(); controller.current?.pauseVideo?.();
+        if (controller.current) controller.current.__transcriptionPaused = false;
+    };
+    const finish = () => {
+        const s = session.current; if (!s) return Promise.resolve(); if (s.stopped) return s.chain;
+        release(s); setPaused(false); setStatus('Finalizando os últimos trechos…'); s.flush?.();
+        return s.chain.finally(() => { if (alive.current && session.current === s) { session.current = null; setActive(false); onActive(false); setStatus('Transcrição encerrada. Você pode gerar o resumo com a IA abaixo.'); } });
+    };
+    stopRef.current = finish;
+    useEffect(() => { alive.current = true; return () => { alive.current = false; if (session.current) release(session.current); session.current = null; stopRef.current = null; onActive(false); }; }, []);
+    const start = async () => {
+        if (session.current) return;
+        if (!window.confirm('Para transcrever, selecione ESTA aba e marque “Compartilhar áudio da aba”. A transcrição começa no ponto atual e aparece em blocos. Permaneça nesta aba: ao trocar de aba ou janela, o vídeo e a captura serão pausados. O navegador não permite bloquear outras abas. Feche outros áudios nesta página. Deseja continuar?')) return;
+        const s = { stopped: false, paused: true, chunks: [], size: 0, chain: Promise.resolve(), pending: 0 };
+        session.current = s; setActive(true); onActive(true); textRef.current = ''; onText('');
+        controller.current?.pauseVideo?.();
+        if (controller.current) controller.current.__transcriptionPaused = true;
+        try {
+            if (!controller.current || !navigator.mediaDevices?.getDisplayMedia || !navigator.mediaDevices?.setCaptureHandleConfig) throw new Error('Use Chrome ou Edge atualizado no computador, em HTTPS, e aguarde o vídeo carregar.');
+            const handle = crypto.randomUUID();
+            navigator.mediaDevices.setCaptureHandleConfig({ handle, exposeOrigin: true, permittedOrigins: [location.origin] });
+            s.stream = await navigator.mediaDevices.getDisplayMedia({ video: { displaySurface: 'browser' }, audio: { suppressLocalAudioPlayback: false }, preferCurrentTab: true, selfBrowserSurface: 'include', surfaceSwitching: 'exclude', systemAudio: 'exclude', monitorTypeSurfaces: 'exclude' });
+            if (s.stopped) { s.stream.getTracks().forEach(t => t.stop()); return; }
+            const track = s.stream.getVideoTracks()[0];
+            const valid = () => track?.getSettings().displaySurface === 'browser' && track.getCaptureHandle?.()?.handle === handle;
+            if (!valid() || !s.stream.getAudioTracks().length) throw new Error('Selecione a própria aba do curso e ative o compartilhamento do áudio. Nenhuma outra fonte será aceita.');
+            setStatus('Carregando o modelo de transcrição. Aguarde com o vídeo pausado…');
+            if (!modelRef.current) modelRef.current = await pipeline('automatic-speech-recognition', 'Xenova/whisper-base');
+            if (s.stopped) return;
+            s.context = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
+            await s.context.resume();
+            if (s.stopped) return;
+            s.source = s.context.createMediaStreamSource(new MediaStream(s.stream.getAudioTracks()));
+            s.processor = s.context.createScriptProcessor(4096, 1, 1);
+            s.gain = s.context.createGain(); s.gain.gain.value = 0;
+            const pause = reason => { if (s.stopped) return; s.paused = true; if (controller.current) controller.current.__transcriptionPaused = true; controller.current?.pauseVideo?.(); if (alive.current) { setPaused(true); setStatus(reason); } };
+            s.pause = pause;
+            s.flush = () => {
+                if (!s.size) return;
+                const raw = new Float32Array(s.size); let offset = 0;
+                s.chunks.forEach(c => { raw.set(c, offset); offset += c.length; }); s.chunks = []; s.size = 0;
+                const ratio = s.context.sampleRate / 16000, audio = new Float32Array(Math.floor(raw.length / ratio));
+                for (let i = 0; i < audio.length; i++) { const at = i * ratio, lo = Math.floor(at), mix = at - lo; audio[i] = raw[lo] * (1 - mix) + (raw[Math.min(lo + 1, raw.length - 1)] || 0) * mix; }
+                s.pending++;
+                if (s.pending >= 2 && !s.stopped) pause('Pausa para a IA acompanhar o vídeo. Retome após processar os trechos.');
+                s.chain = s.chain.then(async () => {
+                    if (!alive.current || (session.current && session.current !== s)) return;
+                    let energy = 0; for (const v of audio) energy += v * v;
+                    if (audio.length < 1600 || energy / audio.length < 0.000001) return;
+                    const result = await modelRef.current(audio, { language: 'portuguese', task: 'transcribe', chunk_length_s: 30, stride_length_s: 0 });
+                    if (!alive.current || (session.current && session.current !== s)) return;
+                    const words = result.text?.trim();
+                    if (words) { textRef.current = [textRef.current, words].filter(Boolean).join(' '); onText(textRef.current); }
+                }).catch(() => { if (alive.current) pause('Falha ao processar um trecho. Encerre e volte o vídeo para tentar novamente.'); }).finally(() => { s.pending--; if (alive.current && s.stopped && !s.pending && !session.current) setStatus('Transcrição encerrada. Você pode gerar o resumo com a IA abaixo.'); });
+            };
+            s.processor.onaudioprocess = event => {
+                if (s.stopped || s.paused || document.hidden || !document.hasFocus()) return;
+                const samples = new Float32Array(event.inputBuffer.getChannelData(0)); s.chunks.push(samples); s.size += samples.length;
+                if (s.size >= s.context.sampleRate * 15) s.flush();
+            };
+            s.source.connect(s.processor); s.processor.connect(s.gain); s.gain.connect(s.context.destination);
+            const away = () => { if (document.hidden || !document.hasFocus()) pause('Você saiu da aba. Volte e clique em Retomar para continuar.'); };
+            const changed = () => { if (!valid()) finish(); };
+            document.addEventListener('visibilitychange', away); window.addEventListener('blur', away); track.addEventListener('capturehandlechange', changed);
+            s.stream.getTracks().forEach(t => t.addEventListener('ended', finish, { once: true }));
+            s.removeListeners = () => { document.removeEventListener('visibilitychange', away); window.removeEventListener('blur', away); track.removeEventListener('capturehandlechange', changed); };
+            pause('Pronto. Clique em Retomar para iniciar o vídeo e a transcrição.');
+        } catch (err) { release(s); if (session.current === s) session.current = null; if (alive.current) { setActive(false); onActive(false); setStatus(err.message || 'Captura não autorizada.'); } }
+    };
+    return <div className="bg-[#0a0a15] border border-white/10 rounded-3xl p-8 space-y-4">
+        <h3 className="text-2xl font-black">Transcrição do áudio da aula</h3>
+        <p className="text-slate-400">A IA escuta somente esta aba, sem baixar o vídeo do YouTube. O texto aparece em blocos de aproximadamente 15 segundos, mais o tempo de processamento. Use Chrome ou Edge no computador e permaneça nesta aba.</p>
+        <p className="text-amber-300 text-sm">Ao sair da aba ou janela, o vídeo e a captura pausam. Outras abas não podem ser bloqueadas pelo site. A transcrição começa no ponto atual; para transcrever tudo, volte o vídeo ao início.</p>
+        <div className="flex flex-wrap gap-3">
+            {!active && <button className="bg-indigo-600 px-5 py-3 rounded-xl" onClick={start}>Iniciar transcrição</button>}
+            {active && paused && <button className="bg-indigo-600 px-5 py-3 rounded-xl" onClick={() => { const s = session.current; if (!s || s.stopped || s.pending >= 2 || !document.hasFocus()) return; s.paused = false; if (controller.current) controller.current.__transcriptionPaused = false; setPaused(false); setStatus('Escutando esta aba…'); controller.current?.playVideo?.(); }}>Retomar</button>}
+            {active && <button className="bg-slate-700 px-5 py-3 rounded-xl" onClick={finish}>Encerrar</button>}
+        </div>
+        <p role="status" className="text-indigo-300">{status}</p>
+    </div>;
+};
+
+    const CoursePlayer = ({ user, course, onBackToModules, onFinishCourse, showNotification, onGoToCertificates, releaseAccess }) => {
+        const canOpenLesson = (m, l) => courseLessonAvailable(course, releaseAccess, m, l);
+        const releaseMessage = releaseAccess.unlockAt ? `Disponível em ${new Date(releaseAccess.unlockAt).toLocaleString("pt-BR")}.` : "A liberação deste conteúdo está sendo atualizada.";
         const [activeModuleIndex, setActiveModuleIndex] = useState(0);
         const [activeLessonIndex, setActiveLessonIndex] = useState(0);
         
@@ -2291,7 +2712,9 @@ const CustomVideoPlayer = ({ src, onEnded, poster, isCompleted, showNotification
         const [transcriptionProgress, setTranscriptionProgress] = useState(0);
         const [statusText, setStatusText] = useState('');
         const [isSummarizing, setIsSummarizing] = useState(false);
-        const transcriberRef = useRef(null); 
+        const transcriberRef = useRef(null);
+        const youtubeController = useRef(null);
+        const stopTabTranscription = useRef(null); 
         const [note, setNote] = useState('');
         const [savedNote, setSavedNote] = useState(false);
         const [isCinemaMode, setIsCinemaMode] = useState(false);
@@ -2368,7 +2791,8 @@ const CustomVideoPlayer = ({ src, onEnded, poster, isCompleted, showNotification
 
         const modules = course.modulos || [];
         const currentModule = modules[activeModuleIndex] || { aulas: [] };
-        const currentLesson = currentModule.aulas ? currentModule.aulas[activeLessonIndex] : null;
+        const selectedLesson = currentModule.aulas ? currentModule.aulas[activeLessonIndex] : null;
+        const currentLesson = canOpenLesson(activeModuleIndex, activeLessonIndex) ? selectedLesson : null;
 
         const lessonUniqueId = `${course.id}_m${activeModuleIndex}_l${activeLessonIndex}`;
         const noteStorageKey = `milton_note_${user.uid}_${lessonUniqueId}`;
@@ -2488,6 +2912,9 @@ const CustomVideoPlayer = ({ src, onEnded, poster, isCompleted, showNotification
         };
 
         const handleNextLesson = (forcedPercent = null) => {
+            const nextModule = activeLessonIndex < currentModule.aulas.length - 1 ? activeModuleIndex : activeModuleIndex + 1;
+            const nextLesson = nextModule === activeModuleIndex ? activeLessonIndex + 1 : 0;
+            if (nextModule < modules.length && !canOpenLesson(nextModule, nextLesson)) { showNotification(releaseMessage, "info"); return; }
             if (activeLessonIndex < currentModule.aulas.length - 1) {
                 setActiveLessonIndex(activeLessonIndex + 1);
             } 
@@ -2519,6 +2946,7 @@ const CustomVideoPlayer = ({ src, onEnded, poster, isCompleted, showNotification
         };
 
         const markLessonAsCompleted = async (autoPlayNext = false) => {
+            if (!currentLesson || !canOpenLesson(activeModuleIndex, activeLessonIndex)) return;
             const lessonKey = `${activeModuleIndex}-${activeLessonIndex}`;
             const isAlreadyCompleted = !!completedMap[lessonKey]; 
             
@@ -2801,7 +3229,7 @@ const CustomVideoPlayer = ({ src, onEnded, poster, isCompleted, showNotification
         // 👇 PASSO 3: CÓDIGO DETECTOR DE FIM DE VÍDEO (YOUTUBE E VIMEO) 👇
         React.useEffect(() => {
             const currentEmbed = getEmbedUrl(currentLesson);
-            if (!currentLesson || currentLesson.tipo !== 'video' || !currentEmbed) return;
+            if (!currentLesson || currentLesson.tipo !== 'video' || !currentEmbed || currentEmbed.includes('youtube.com')) return;
 
             let ytPlayer;
             let vimeoPlayer;
@@ -2888,7 +3316,7 @@ const CustomVideoPlayer = ({ src, onEnded, poster, isCompleted, showNotification
         }, [currentLesson]);
         // 👆 FIM DO PASSO 3 👆
         
-        if(!currentLesson) return <div className="p-10 text-center text-white animate-pulse">Carregando aula...</div>;
+        if(!currentLesson) return <div className="p-10 text-center text-white bg-slate-900 rounded-xl"><p>{selectedLesson ? releaseMessage : 'Não há aula disponível neste módulo.'}</p><button className="mt-4 px-4 py-2 bg-indigo-600 rounded-lg" onClick={onBackToModules}>Voltar ao curso</button></div>;
 
         const isCurrentCompleted = completedMap[`${activeModuleIndex}-${activeLessonIndex}`];
         const embedUrl = getEmbedUrl(currentLesson);
@@ -2967,7 +3395,9 @@ const CustomVideoPlayer = ({ src, onEnded, poster, isCompleted, showNotification
                             
                             {/* 👇 LÓGICA DO VÍDEO RESTAURADA COM MÁSCARA CINEMATOGRÁFICA 👇 */}
         {currentLesson.tipo === 'video' ? (
-            embedUrl ? (
+            embedUrl?.includes("youtube.com") ? (
+                <CleanYouTubePlayer key={embedUrl} videoId={platformVideoId(embedUrl)} controller={youtubeController} onEnded={async () => { await stopTabTranscription.current?.(); markLessonAsCompleted(true); }} />
+            ) : embedUrl ? (
                 <div className="relative w-full h-full bg-black overflow-hidden group pointer-events-auto">
                     
                     {/* SOLUÇÃO DEFINITIVA RESPONSIVA: Alturas ajustadas (115% e 107.5%) para que a base do vídeo não vaze para fora, revelando a linha do tempo */}
@@ -3370,6 +3800,7 @@ const CustomVideoPlayer = ({ src, onEnded, poster, isCompleted, showNotification
                             {/* 👇 NOVA ABA DE TRANSCRIÇÃO POR IA (WHISPER LOCAL) 👇 */}
                             {activeTab === 'transcricao' && (
                                 <div className="animate-fade-in space-y-6">
+                                    {embedUrl?.includes('youtube.com') ? <YouTubeTabTranscription key={embedUrl} controller={youtubeController} stopRef={stopTabTranscription} modelRef={transcriberRef} onActive={setIsTranscribing} onText={text => { setTranscriptionText(text); setStreamingWords(text.split(/\s+/).filter(Boolean)); setAiSummary(''); }} /> : (
                                     <div className="bg-gradient-to-br from-[#0a0a15] to-[#050505] border border-white/10 rounded-[2.5rem] p-8 md:p-12 flex flex-col items-center text-center relative overflow-hidden shadow-2xl">
                                         
                                         {/* Barra de Progresso do Download do Modelo */}
@@ -3520,6 +3951,8 @@ const CustomVideoPlayer = ({ src, onEnded, poster, isCompleted, showNotification
                                             {isTranscribing && <p className="text-indigo-400 text-[10px] font-bold uppercase tracking-[0.2em] animate-pulse">{statusText}</p>}
                                         </div>
                                     </div>
+
+                                    )}
 
                                     {/* ÁREA DE VISUALIZAÇÃO DAS PALAVRAS EM FLUXO */}
                                     {(streamingWords.length > 0 || transcriptionText) && (
@@ -3697,19 +4130,21 @@ const CustomVideoPlayer = ({ src, onEnded, poster, isCompleted, showNotification
                                                     return (
                                                         <div 
                                                             key={lIdx} 
-                                                            onClick={() => { setActiveModuleIndex(mIdx); setActiveLessonIndex(lIdx); }}
+                                                            onClick={() => { if (!canOpenLesson(mIdx, lIdx)) { showNotification(releaseMessage, "info"); return; } setActiveModuleIndex(mIdx); setActiveLessonIndex(lIdx); }}
+                                                            aria-disabled={!canOpenLesson(mIdx, lIdx)}
                                                             className={`px-4 sm:px-6 py-3 sm:py-4 flex gap-3 sm:gap-4 cursor-pointer transition-all border-l-4 ${isActive ? 'bg-indigo-600/10 border-indigo-500' : 'border-transparent hover:bg-white/5'}`}
                                                         >
                                                             <div className="w-20 sm:w-24 h-14 sm:h-16 bg-[#1a1a1a] rounded-lg overflow-hidden shrink-0 relative border border-[#333]">
                                                                 <img src={lesson.thumbnailUrl || course.cover || "https://images.unsplash.com/photo-1616469829941-c7200edec809?q=80&w=600&auto=format&fit=crop"} className="w-full h-full object-cover opacity-60" alt="Thumb" />
                                                                 <div className="absolute inset-0 flex items-center justify-center">
-                                                                    {isActive ? <Play size={16} className="text-white" fill="currentColor"/> : (isCompleted ? <CheckCircle size={16} className="text-green-400" fill="currentColor"/> : <Play size={16} className="text-white/50" />)}
+                                                                    {!canOpenLesson(mIdx, lIdx) ? <Lock size={16} className="text-amber-400" /> : isActive ? <Play size={16} className="text-white" fill="currentColor"/> : (isCompleted ? <CheckCircle size={16} className="text-green-400" fill="currentColor"/> : <Play size={16} className="text-white/50" />)}
                                                                 </div>
                                                             </div>
                                                             
                                                             <div className="flex-1 flex flex-col justify-center min-w-0">
                                                                 <h5 className={`text-xs font-bold line-clamp-2 leading-tight ${isActive ? 'text-indigo-400' : 'text-white/80'}`}>
                                                                     {lIdx + 1}. {lesson.titulo}
+                                                                    {!canOpenLesson(mIdx, lIdx) && <small className="block mt-1 text-amber-400 normal-case">{releaseMessage}</small>}
                                                                 </h5>
                                                                 <span className="text-[10px] text-white/40 mt-1 flex items-center gap-1 font-bold uppercase">
                                                                     {lesson.tipo === 'video' ? <Video size={10}/> : <FileText size={10}/>} {lesson.tipo}
@@ -4649,6 +5084,7 @@ const CertificatesSection = ({ user, courses, userProgress, certificates, custom
     // 2. FUNÇÃO DE UPLOAD CONECTADA (CONFIGURAÇÃO DEFINITIVA)
     // ======================================================
     const uploadToCustomDrive = async (file, folder = 'Community/') => {
+        if (file && isConversationUpload(folder)) await assertConversationUploads();
         if (!file) return null;
         
         const s3 = getS3Client(); // Usa as credenciais do Admin
@@ -4714,6 +5150,7 @@ const CertificatesSection = ({ user, courses, userProgress, certificates, custom
 
         return new Promise((resolve, reject) => {
             const upload = s3.upload(params);
+            const stopWatchingUpload = watchConversationUpload(upload, folder);
 
             upload.on('httpUploadProgress', (evt) => {
                 const percent = parseInt((evt.loaded * 100) / evt.total);
@@ -4721,6 +5158,7 @@ const CertificatesSection = ({ user, courses, userProgress, certificates, custom
             });
 
             upload.send((err, data) => {
+                stopWatchingUpload();
                 if (err) {
                     console.error("❌ ERRO NO UPLOAD R2:", err);
                     alert(`Falha no upload. Verifique o Console.`);
@@ -5101,6 +5539,7 @@ const NotificationBell = ({ db, user }) => {
 // COMPONENTE: ABA DE SUPORTE (TELA CHEIA SEM SIDEBAR)
 // =================================================================================
 const SupportSection = ({ user, settings }) => {
+    const chatUploadPolicy = useConversationUploads();
     const [messages, setMessages] = useState([]);
     const [input, setInput] = useState('');
     
@@ -5129,6 +5568,19 @@ const SupportSection = ({ user, settings }) => {
     const mediaRecorderRef = useRef(null);
     const audioChunksRef = useRef([]);
     const timerRef = useRef(null);
+    useEffect(() => {
+        if (chatUploadPolicy.enabled) return;
+        const recorder = mediaRecorderRef.current;
+        if (recorder) {
+            recorder.onstop = null;
+            if (recorder.state !== 'inactive') recorder.stop();
+            recorder.stream?.getTracks().forEach(track => track.stop());
+        }
+        clearInterval(timerRef.current);
+        setIsRecording(false); setRecordingTime(0);
+        setAudioPreview(previous => { if (previous) URL.revokeObjectURL(previous); return null; }); setAudioBlob(null); setShowAttachments(false);
+    }, [chatUploadPolicy.enabled]);
+
 
     // 1. Carregar Mensagens
     useEffect(() => {
@@ -5272,6 +5724,7 @@ const SupportSection = ({ user, settings }) => {
 
     // 5. Enviar Mensagem
     const sendMessageToFirebase = async (msgData) => {
+         if (msgData.fileUrl) await assertConversationUploads();
          const chatDocRef = doc(db, 'support_chats', user.uid);
          const docSnap = await getDoc(chatDocRef);
          const newMessage = { id: Date.now().toString(), sender: 'student', studentName: user.displayName, timestamp: new Date().toISOString(), read: false, delivered: true, hiddenFor: [], reactions: {}, ...msgData };
@@ -5289,6 +5742,7 @@ const SupportSection = ({ user, settings }) => {
     };
     
     const handleFileUpload = async (file) => {
+         if (!chatUploadPolicy.enabled) return alert(CHAT_UPLOAD_MESSAGE);
          if (!file) return; 
          setIsSending(true); setShowAttachments(false); setAudioPreview(null); setAudioBlob(null);
          try {
@@ -5306,10 +5760,12 @@ const SupportSection = ({ user, settings }) => {
     };
 
     const startRecording = async () => {
+        if (!chatUploadPolicy.enabled) return alert(CHAT_UPLOAD_MESSAGE);
         if (!navigator.mediaDevices) return alert("Sem suporte.");
         setIsLoadingMic(true);
         try { 
-            const stream = await navigator.mediaDevices.getUserMedia({ audio: true }); 
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            try { await assertConversationUploads(); } catch (error) { stream.getTracks().forEach(track => track.stop()); throw error; } 
             let options = { mimeType: 'audio/webm' };
             if (MediaRecorder.isTypeSupported('audio/webm;codecs=opus')) { options = { mimeType: 'audio/webm;codecs=opus' }; }
             const recorder = new MediaRecorder(stream, options); 
@@ -5529,19 +5985,19 @@ const SupportSection = ({ user, settings }) => {
                 
                 {/* FOOTER DE INPUT COM BOTÕES LADO A LADO - WHATSAPP STYLE */}
                 <div className="bg-[#f0f2f5] dark:bg-[#202c33] px-3 md:px-6 py-3 flex items-center gap-2 shrink-0 z-20 border-t border-slate-200 dark:border-white/5">
-                    {isLoadingMic ? (
+                    {chatUploadPolicy.enabled && isLoadingMic ? (
                         <div className="flex-1 flex items-center justify-center gap-2 text-slate-500 animate-pulse text-sm py-2"><Mic size={18} /> <span>Acedendo ao microfone...</span></div>
-                    ) : audioPreview ? (
+                    ) : chatUploadPolicy.enabled && audioPreview ? (
                         <div className="flex-1 flex items-center gap-3 bg-white dark:bg-[#2a3942] p-2 rounded-2xl animate-fade-in">
                             <button onClick={cancelAudio} className="p-2.5 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/10 rounded-full transition-colors"><Trash2 size={22} /></button>
                             <div className="flex-1 px-2 border-l border-slate-200 dark:border-slate-700">
                                 <MiniAudioPlayer src={audioPreview} isMe={true} avatarUrl={user.photoURL} />
                             </div>
-                            <button onClick={sendAudio} disabled={isSending} className="w-12 h-12 bg-[#00a884] text-white rounded-full shadow-lg flex items-center justify-center transition-all hover:scale-105 active:scale-95">
+                            {chatUploadPolicy.enabled && (<button onClick={sendAudio} disabled={isSending} className="w-12 h-12 bg-[#00a884] text-white rounded-full shadow-lg flex items-center justify-center transition-all hover:scale-105 active:scale-95">
                                 {isSending ? <div className="w-5 h-5 border-2 border-white/50 border-t-white rounded-full animate-spin"></div> : <Send size={20} className="ml-1" />}
-                            </button>
+                            </button>)}
                         </div>
-                    ) : isRecording ? (
+                    ) : chatUploadPolicy.enabled && isRecording ? (
                         <div className="flex-1 bg-white dark:bg-[#2a3942] rounded-full flex items-center justify-between p-1.5 shadow-sm animate-fade-in pl-4 pr-1 border border-red-200 dark:border-red-900/30">
                             <div className="flex items-center gap-3">
                                 <Mic size={20} className="text-red-500 animate-pulse" />
@@ -5560,13 +6016,13 @@ const SupportSection = ({ user, settings }) => {
                         <>
                             <div className="relative shrink-0 flex gap-1">
                                 <button onClick={() => setShowEmojiPicker(!showEmojiPicker)} className="p-2 text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 rounded-full transition-colors"><Smile size={26}/></button>
-                                <button onClick={() => setShowAttachments(!showAttachments)} className="p-2 text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 rounded-full transition-colors"><Paperclip size={24} className="-rotate-45"/></button>
-                                {showAttachments && <div className="absolute bottom-full left-0 mb-4 bg-white dark:bg-[#233138] p-2 rounded-2xl shadow-2xl flex flex-col gap-2 w-48 animate-fade-in-up z-50 border border-slate-200 dark:border-slate-700">
-                                    <label className="cursor-pointer flex items-center gap-3 p-3 hover:bg-slate-100 dark:hover:bg-[#111b21] rounded-xl text-sm font-medium text-slate-700 dark:text-slate-200"><div className="bg-purple-100 text-purple-600 p-2.5 rounded-full"><Camera size={18}/></div> Galeria <input type="file" className="hidden" accept="image/*,video/*" onChange={(e) => handleFileUpload(e.target.files[0])} /></label>
-                                    <label className="cursor-pointer flex items-center gap-3 p-3 hover:bg-slate-100 dark:hover:bg-[#111b21] rounded-xl text-sm font-medium text-slate-700 dark:text-slate-200"><div className="bg-blue-100 text-blue-600 p-2.5 rounded-full"><FileText size={18}/></div> Documento <input type="file" className="hidden" accept=".pdf" onChange={(e) => handleFileUpload(e.target.files[0])} /></label>
+                                {chatUploadPolicy.enabled && (<button disabled={!chatUploadPolicy.enabled} title={chatUploadPolicy.enabled ? "Anexar arquivo" : CHAT_UPLOAD_MESSAGE} onClick={() => setShowAttachments(!showAttachments)} className="p-2 text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 rounded-full transition-colors"><Paperclip size={24} className="-rotate-45"/></button>)}
+                                {chatUploadPolicy.enabled && showAttachments && <div className="absolute bottom-full left-0 mb-4 bg-white dark:bg-[#233138] p-2 rounded-2xl shadow-2xl flex flex-col gap-2 w-48 animate-fade-in-up z-50 border border-slate-200 dark:border-slate-700">
+                                    {chatUploadPolicy.enabled && (<label className="cursor-pointer flex items-center gap-3 p-3 hover:bg-slate-100 dark:hover:bg-[#111b21] rounded-xl text-sm font-medium text-slate-700 dark:text-slate-200"><div className="bg-purple-100 text-purple-600 p-2.5 rounded-full"><Camera size={18}/></div> Galeria <input type="file" className="hidden" accept="image/*,video/*" disabled={!chatUploadPolicy.enabled} onChange={(e) => handleFileUpload(e.target.files[0])} /></label>)}
+                                    {chatUploadPolicy.enabled && (<label className="cursor-pointer flex items-center gap-3 p-3 hover:bg-slate-100 dark:hover:bg-[#111b21] rounded-xl text-sm font-medium text-slate-700 dark:text-slate-200"><div className="bg-blue-100 text-blue-600 p-2.5 rounded-full"><FileText size={18}/></div> Documento <input type="file" className="hidden" accept=".pdf" disabled={!chatUploadPolicy.enabled} onChange={(e) => handleFileUpload(e.target.files[0])} /></label>)}
                                 </div>}
                             </div>
-                            <form onSubmit={handleSendText} className="flex-1 bg-white dark:bg-[#2a3942] rounded-xl flex items-center px-4 shadow-sm min-h-[48px]">
+                            <ConversationUploadNotice policy={chatUploadPolicy} /><form onSubmit={handleSendText} className="flex-1 bg-white dark:bg-[#2a3942] rounded-xl flex items-center px-4 shadow-sm min-h-[48px]">
                                 <input value={input} onChange={(e) => setInput(e.target.value)} className="w-full py-3 bg-transparent border-none focus:ring-0 text-[15px] dark:text-white placeholder-slate-400 outline-none" placeholder="Escreva uma mensagem" disabled={isSending} />
                             </form>
                             <div className="flex gap-1">
@@ -5575,9 +6031,9 @@ const SupportSection = ({ user, settings }) => {
                                         <Send size={20} className="ml-1" />
                                     </button>
                                 ) : (
-                                    <button onClick={startRecording} className="w-12 h-12 bg-[#00a884] text-white rounded-full shadow-md flex items-center justify-center transition-all hover:scale-105 active:scale-95">
+                                    (chatUploadPolicy.enabled && (<button disabled={!chatUploadPolicy.enabled} title={chatUploadPolicy.enabled ? "Gravar áudio" : CHAT_UPLOAD_MESSAGE} onClick={startRecording} className="w-12 h-12 bg-[#00a884] text-white rounded-full shadow-md flex items-center justify-center transition-all hover:scale-105 active:scale-95">
                                         <Mic size={22} />
-                                    </button>
+                                    </button>))
                                 )}
                             </div>
                         </>
@@ -7605,6 +8061,7 @@ const CatalogSection = ({ onSelectCourse, onBuyCourse, purchasedIds = [], allCou
 // COMPONENTE COMUNIDADE (SISTEMA AVANÇADO DE TRIBOS COM CAPAS E AVATARES)
 // =================================================================================
 const CommunityTab = ({ user, showNotification }) => {
+    const chatUploadPolicy = useConversationUploads();
     const [posts, setPosts] = useState([]);
     const [userProfiles, setUserProfiles] = useState({}); 
     const [studentCommunities, setStudentCommunities] = useState([]); 
@@ -7661,6 +8118,19 @@ const CommunityTab = ({ user, showNotification }) => {
     const mediaRecorderRefChat = useRef(null);
     const audioChunksRefChat = useRef([]);
     const timerRefChat = useRef(null);
+    useEffect(() => {
+        if (chatUploadPolicy.enabled) return;
+        const recorder = mediaRecorderRefChat.current;
+        if (recorder) {
+            recorder.onstop = null;
+            if (recorder.state !== 'inactive') recorder.stop();
+            recorder.stream?.getTracks().forEach(track => track.stop());
+        }
+        clearInterval(timerRefChat.current);
+        setIsRecordingChat(false); setRecordingTimeChat(0);
+        setAudioPreviewChat(previous => { if (previous) URL.revokeObjectURL(previous); return null; }); setAudioBlobChat(null); setShowAttachmentsChat(false); setNewPostMedia(null); setMediaPreview(previous => { if (previous) URL.revokeObjectURL(previous); return null; });
+    }, [chatUploadPolicy.enabled]);
+
     const quickEmojis = ["😀", "😂", "🥰", "👍", "🙏", "✅", "🔥", "🤔"];
     const formatDuration = (sec) => { const m = Math.floor(sec / 60); const s = sec % 60; return `${m}:${s < 10 ? '0' : ''}${s}`; };
 
@@ -7849,7 +8319,8 @@ const CommunityTab = ({ user, showNotification }) => {
     };
 
     const handleCreatePost = async (e) => {
-        if (e) e.preventDefault(); 
+        if (e) e.preventDefault();
+        if (newPostMedia && !chatUploadPolicy.enabled) return showNotification(CHAT_UPLOAD_MESSAGE, "warning");
         const safeText = typeof newPostText === 'string' ? newPostText : "";
         if (!safeText.trim() && !newPostMedia) return;
         setIsPosting(true);
@@ -7869,7 +8340,7 @@ const CommunityTab = ({ user, showNotification }) => {
             });
             setNewPostText(""); setNewPostMedia(null); setMediaPreview(null);
             showNotification("Post publicado com sucesso!", "success");
-        } catch (error) { showNotification("Erro ao publicar.", "error"); } finally { setIsPosting(false); }
+        } catch (error) { showNotification(error.message || "Erro ao publicar.", "error"); } finally { setIsPosting(false); }
     };
 
     const visiblePosts = posts.filter(post => {
@@ -7883,6 +8354,7 @@ const CommunityTab = ({ user, showNotification }) => {
     });
 
     const handleFileSelect = (e) => {
+        if (!chatUploadPolicy.enabled) { e.target.value = ""; return showNotification(CHAT_UPLOAD_MESSAGE, "warning"); }
         const file = e.target.files[0];
         if (file) {
             if (file.size > 200 * 1024 * 1024) return showNotification("Arquivo muito grande (Max 200MB)!", "warning");
@@ -7993,6 +8465,7 @@ const CommunityTab = ({ user, showNotification }) => {
     }, [selectedChatUser, user, db]);
 
     const sendChatMessage = async (type = 'text', content = chatInput, extraData = {}) => {
+        if (type !== 'text') { try { await assertConversationUploads(); } catch (error) { showNotification(error.message, 'warning'); return; } }
         if (!content.trim() && type === 'text') return;
         if (!selectedChatUser || !db) return;
         const chatId = getChatId();
@@ -8029,10 +8502,12 @@ const CommunityTab = ({ user, showNotification }) => {
     };
 
     const startRecordingChat = async () => {
+        if (!chatUploadPolicy.enabled) return alert(CHAT_UPLOAD_MESSAGE);
         if (!navigator.mediaDevices) return showNotification("Microfone sem suporte.", "error");
         setIsLoadingMicChat(true);
         try { 
-            const stream = await navigator.mediaDevices.getUserMedia({ audio: true }); 
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            try { await assertConversationUploads(); } catch (error) { stream.getTracks().forEach(track => track.stop()); throw error; } 
             let options = { mimeType: 'audio/webm' };
             if (MediaRecorder.isTypeSupported('audio/webm;codecs=opus')) { options = { mimeType: 'audio/webm;codecs=opus' }; }
             const recorder = new MediaRecorder(stream, options); 
@@ -8050,18 +8525,20 @@ const CommunityTab = ({ user, showNotification }) => {
     };
     const stopRecordingChat = () => { if (mediaRecorderRefChat.current?.state === "recording") mediaRecorderRefChat.current.stop(); setIsRecordingChat(false); clearInterval(timerRefChat.current); };
     const cancelAudioChat = () => { setAudioPreviewChat(null); setAudioBlobChat(null); setRecordingTimeChat(0); };
-    const sendAudioChat = async () => { 
+    const sendAudioChat = async () => {
+        if (!chatUploadPolicy.enabled) return showNotification(CHAT_UPLOAD_MESSAGE, "warning"); 
         if (audioBlobChat) {
             const file = new File([audioBlobChat], `voice_${Date.now()}.webm`, { type: 'audio/webm' });
             setIsUploadingChat(true); setAudioPreviewChat(null); setAudioBlobChat(null); setShowAttachmentsChat(false);
             try {
                 const uploadResult = await uploadToCustomDrive(file, 'Chat/Alunos/');
                 if (uploadResult && uploadResult.url) sendChatMessage('audio', uploadResult.url, { fileName: uploadResult.name });
-            } catch(e) { } finally { setIsUploadingChat(false); }
+            } catch(e) { showNotification(e.message || "Erro ao enviar áudio.", "warning"); } finally { setIsUploadingChat(false); }
         } 
     };
 
     const handleChatFileUpload = async (e) => {
+        if (!chatUploadPolicy.enabled) return showNotification(CHAT_UPLOAD_MESSAGE, "warning");
         const file = e.target.files[0];
         if (!file) return;
         setIsUploadingChat(true); setShowAttachmentsChat(false);
@@ -8072,7 +8549,7 @@ const CommunityTab = ({ user, showNotification }) => {
                 const finalType = uploadResult.type || 'file';
                 sendChatMessage(finalType, uploadResult.url, { fileName: uploadResult.name, fileUrl: uploadResult.url });
             }
-        } catch (error) {} finally { setIsUploadingChat(false); }
+        } catch (error) { showNotification(error.message || "Erro ao enviar arquivo.", "warning"); } finally { setIsUploadingChat(false); }
     };
 
     const startEditingChat = (msg) => { setEditingMsgIdChat(msg.id); setEditingTextChat(msg.content); setContextMenuMsgIdChat(null); };
@@ -8300,41 +8777,41 @@ const CommunityTab = ({ user, showNotification }) => {
                         </div>
                         
                         <div className="bg-[#f0f2f5] dark:bg-[#202c33] px-3 py-3 flex items-end gap-2 shrink-0 z-20 shadow-sm border-t border-slate-200 dark:border-slate-800">
-                            {isLoadingMicChat ? (
+                            {chatUploadPolicy.enabled && isLoadingMicChat ? (
                                 <div className="flex-1 flex items-center justify-center gap-2 text-slate-500 animate-pulse text-sm py-2"><Mic size={18} /> <span>Iniciando gravação...</span></div>
-                            ) : audioPreviewChat ? (
+                            ) : chatUploadPolicy.enabled && audioPreviewChat ? (
                                 <div className="flex items-center gap-2 w-full bg-white dark:bg-[#2a3942] p-2 rounded-2xl animate-fade-in">
                                     <button onClick={cancelAudioChat} className="p-2.5 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-full transition-colors shrink-0" title="Apagar áudio"><Trash2 size={22} /></button>
                                     <div className="flex-1 overflow-hidden">
                                         <MiniAudioPlayer src={audioPreviewChat} isMe={true} />
                                     </div>
-                                    <button onClick={sendAudioChat} disabled={isUploadingChat} className="w-12 h-12 shrink-0 bg-[#00a884] text-white rounded-full shadow-md transition-transform hover:scale-105 active:scale-95 flex items-center justify-center">
+                                    {chatUploadPolicy.enabled && (<button onClick={sendAudioChat} disabled={isUploadingChat} className="w-12 h-12 shrink-0 bg-[#00a884] text-white rounded-full shadow-md transition-transform hover:scale-105 active:scale-95 flex items-center justify-center">
                                         {isUploadingChat ? <div className="w-5 h-5 border-2 border-white/50 border-t-white rounded-full animate-spin"></div> : <Send size={20} className="ml-1"/>}
-                                    </button>
+                                    </button>)}
                                 </div>
                             ) : (
                                 <>
-                                    {!isRecordingChat ? (
+                                    {!chatUploadPolicy.enabled || !isRecordingChat ? (
                                         <>
                                             <div className="relative shrink-0 flex gap-1 items-center">
                                                 <button onClick={(e) => { e.stopPropagation(); setShowEmojiPickerChat(!showEmojiPickerChat); setShowAttachmentsChat(false); }} className="p-2 text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 rounded-full"><Smile size={26}/></button>
-                                                <button onClick={(e) => { e.stopPropagation(); setShowAttachmentsChat(!showAttachmentsChat); setShowEmojiPickerChat(false); }} className="p-2 text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 rounded-full"><Paperclip size={24} className="-rotate-45"/></button>
-                                                {showAttachmentsChat && <div className="absolute bottom-full left-0 mb-4 bg-white dark:bg-[#233138] p-2 rounded-2xl shadow-2xl flex flex-col gap-2 w-48 animate-fade-in-up z-50 border border-slate-200 dark:border-slate-700">
-                                                    <label className="cursor-pointer flex items-center gap-3 p-3 hover:bg-slate-100 dark:hover:bg-[#111b21] rounded-xl text-sm font-medium text-slate-700 dark:text-slate-200"><div className="bg-purple-100 text-purple-600 p-2.5 rounded-full"><Camera size={18}/></div> Galeria <input type="file" className="hidden" accept="image/*,video/*" onChange={handleChatFileUpload} disabled={isUploadingChat} /></label>
-                                                    <label className="cursor-pointer flex items-center gap-3 p-3 hover:bg-slate-100 dark:hover:bg-[#111b21] rounded-xl text-sm font-medium text-slate-700 dark:text-slate-200"><div className="bg-blue-100 text-blue-600 p-2.5 rounded-full"><FileText size={18}/></div> Documento <input type="file" className="hidden" accept=".pdf,.doc,.docx" onChange={handleChatFileUpload} disabled={isUploadingChat} /></label>
+                                                {chatUploadPolicy.enabled && (<button disabled={!chatUploadPolicy.enabled} title={chatUploadPolicy.enabled ? "Anexar arquivo" : CHAT_UPLOAD_MESSAGE} onClick={(e) => { e.stopPropagation(); setShowAttachmentsChat(!showAttachmentsChat); setShowEmojiPickerChat(false); }} className="p-2 text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 rounded-full"><Paperclip size={24} className="-rotate-45"/></button>)}
+                                                {chatUploadPolicy.enabled && showAttachmentsChat && <div className="absolute bottom-full left-0 mb-4 bg-white dark:bg-[#233138] p-2 rounded-2xl shadow-2xl flex flex-col gap-2 w-48 animate-fade-in-up z-50 border border-slate-200 dark:border-slate-700">
+                                                    {chatUploadPolicy.enabled && (<label className="cursor-pointer flex items-center gap-3 p-3 hover:bg-slate-100 dark:hover:bg-[#111b21] rounded-xl text-sm font-medium text-slate-700 dark:text-slate-200"><div className="bg-purple-100 text-purple-600 p-2.5 rounded-full"><Camera size={18}/></div> Galeria <input disabled={!chatUploadPolicy.enabled} type="file" className="hidden" accept="image/*,video/*" onChange={handleChatFileUpload} /></label>)}
+                                                    {chatUploadPolicy.enabled && (<label className="cursor-pointer flex items-center gap-3 p-3 hover:bg-slate-100 dark:hover:bg-[#111b21] rounded-xl text-sm font-medium text-slate-700 dark:text-slate-200"><div className="bg-blue-100 text-blue-600 p-2.5 rounded-full"><FileText size={18}/></div> Documento <input disabled={!chatUploadPolicy.enabled} type="file" className="hidden" accept=".pdf,.doc,.docx" onChange={handleChatFileUpload} /></label>)}
                                                 </div>}
                                                 {showEmojiPickerChat && <div className="absolute bottom-full left-0 mb-4 bg-white dark:bg-[#233138] p-3 rounded-2xl shadow-2xl grid grid-cols-4 gap-2 w-64 animate-fade-in-up z-50 border border-slate-200 dark:border-slate-700">
                                                     {quickEmojis.map(e => <button key={e} onClick={(ev) => { ev.stopPropagation(); setChatInput(prev => prev + e); setShowEmojiPickerChat(false); }} className="text-2xl hover:bg-slate-100 dark:hover:bg-[#111b21] rounded p-1 transition-colors">{e}</button>)}
                                                 </div>}
                                             </div>
                                             <form onSubmit={(e) => { e.preventDefault(); sendChatMessage('text'); }} className="flex-1 bg-white dark:bg-[#2a3942] rounded-xl flex items-center px-4 shadow-sm min-h-[48px]">
-                                                <input id="chatInputFocus" value={chatInput} onChange={(e) => setChatInput(e.target.value)} className="w-full py-2 bg-transparent border-none focus:ring-0 text-[15px] dark:text-white placeholder-slate-400 outline-none" placeholder={isUploadingChat ? "A enviar..." : "Mensagem"} disabled={isUploadingChat} />
+                                                <input title={chatUploadPolicy.enabled ? "Mensagem" : CHAT_UPLOAD_MESSAGE} id="chatInputFocus" value={chatInput} onChange={(e) => setChatInput(e.target.value)} className="w-full py-2 bg-transparent border-none focus:ring-0 text-[15px] dark:text-white placeholder-slate-400 outline-none" placeholder={isUploadingChat ? "A enviar..." : "Mensagem"} disabled={isUploadingChat} />
                                             </form>
                                             <div className="shrink-0">
                                                 {chatInput.trim() ? (
                                                     <button onClick={() => sendChatMessage('text')} disabled={isUploadingChat} className="w-12 h-12 bg-[#00a884] text-white rounded-full shadow-md flex items-center justify-center transition-transform hover:scale-105 active:scale-95 disabled:opacity-50"><Send size={20} className="ml-1" /></button>
                                                 ) : (
-                                                    <button onClick={startRecordingChat} className="w-12 h-12 bg-[#00a884] text-white rounded-full shadow-md flex items-center justify-center transition-transform hover:scale-105 active:scale-95"><Mic size={24} /></button>
+                                                    (chatUploadPolicy.enabled && (<button disabled={!chatUploadPolicy.enabled} title={chatUploadPolicy.enabled ? "Gravar áudio" : CHAT_UPLOAD_MESSAGE} onClick={startRecordingChat} className="w-12 h-12 bg-[#00a884] text-white rounded-full shadow-md flex items-center justify-center transition-transform hover:scale-105 active:scale-95"><Mic size={24} /></button>))
                                                 )}
                                             </div>
                                         </>
@@ -8671,10 +9148,10 @@ const CommunityTab = ({ user, showNotification }) => {
                                             )}
 
                                             <div className="flex justify-between items-center border-t border-white/10 pt-5 mt-2">
-                                                <label className="flex items-center gap-2 text-slate-300 text-sm font-bold cursor-pointer hover:bg-white/5 px-4 py-2.5 rounded-xl transition-colors">
-                                                    <ImageIcon size={20} className="text-emerald-500" /> <span className="hidden sm:inline">Adicionar Imagem/Vídeo</span>
-                                                    <input type="file" className="hidden" accept="image/*,video/*" onChange={handleFileSelect} />
-                                                </label>
+                                                {chatUploadPolicy.enabled && (<label className="flex items-center gap-2 text-slate-300 text-sm font-bold cursor-pointer hover:bg-white/5 px-4 py-2.5 rounded-xl transition-colors">
+                                                    <ImageIcon size={20} className="text-emerald-500" /> <span className="hidden sm:inline">{chatUploadPolicy.enabled ? "Adicionar Imagem/Vídeo" : "Anexos suspensos"}</span>
+                                                    <input disabled={!chatUploadPolicy.enabled} type="file" className="hidden" accept="image/*,video/*" onChange={handleFileSelect} />
+                                                </label>)}
                                                 <button onClick={handleCreatePost} disabled={isPosting || (!(typeof newPostText === 'string' ? newPostText : "").trim() && !newPostMedia)} className="bg-indigo-600 hover:bg-indigo-700 text-white px-8 py-3 rounded-xl font-extrabold shadow-lg disabled:opacity-50 flex items-center gap-2 transition-all active:scale-95">
                                                     {isPosting ? <div className="w-4 h-4 border-2 border-white/50 border-t-white rounded-full animate-spin"></div> : <><Send size={18} /> Publicar</>}
                                                 </button>
@@ -9777,6 +10254,7 @@ const MindMapSection = ({ user, courses, purchasedIds, setView }) => {
        const [unreadCount, setUnreadCount] = useState(0);
        const [userProgress, setUserProgress] = useState({});
 
+       const liveConfiguration = useLiveConfiguration();
        const menuItems = [
            { id: 'home', label: 'Início', icon: Home, badge: 0 },
            { id: 'catalog', label: 'Portais', icon: Search, badge: 0 },
@@ -9787,6 +10265,7 @@ const MindMapSection = ({ user, courses, purchasedIds, setView }) => {
            { id: 'community', label: 'Comunidade', icon: LayoutGrid, badge: 0 },
            { id: 'support', label: 'Suporte', icon: MessageSquare, badge: unreadCount },
            { id: 'wallet', label: 'Carteira', icon: CreditCard, badge: 0 },
+           ...(liveConfiguration.enabled ? [{ id: "live_sessions", label: "Reuniões e lives", icon: Video, badge: 0 }] : []),
            { id: 'informacoes', label: 'Informações', icon: AlertCircle, badge: 0 }
        ];
        
@@ -9880,7 +10359,8 @@ const MindMapSection = ({ user, courses, purchasedIds, setView }) => {
                                } catch(e){}
 
                                await updateDoc(doc(db, "transactions", order.id), { 
-                                   status: novoStatus, 
+                                   ...(novoStatus === 'pago' ? { paidAt: order.paidAt || mpData?.date_approved || serverTimestamp() } : {}),
+                                status: novoStatus, 
                                    mpPaymentId: mpData ? String(mpData.id) : order.mpPaymentId, 
                                    updatedAt: serverTimestamp() 
                                });
@@ -10265,8 +10745,13 @@ const MindMapSection = ({ user, courses, purchasedIds, setView }) => {
                                         capaDoCurso = cursoInfo.cover || cursoInfo.thumbnailUrl;
                                     }
 
-                                    // ATUALIZA NO BANCO COMO LIBERADO
-                                    await updateDoc(transRef, { 
+                                    // Confirma o pagamento com o provedor antes de liberar a compra.
+                                    if (!paymentId || transData.userId !== user.uid) throw new Error('Pagamento ainda não confirmado.');
+                                    const approvalResponse = await fetch(`https://api.mercadopago.com/v1/payments/${encodeURIComponent(paymentId)}`, { headers: { Authorization: `Bearer ${currentSettings.mercadopagoAccessToken || currentSettings.mercadoPagoAccessToken || BACKUP_ACCESS_TOKEN}` } });
+                                    const approvedPayment = await approvalResponse.json();
+                                    if (!approvalResponse.ok || approvedPayment.status !== 'approved' || String(approvedPayment.external_reference) !== String(lastTransId) || Math.abs(Number(approvedPayment.transaction_amount) - Number(transData.valor)) > 0.01) throw new Error('Aguardando confirmação do pagamento.');
+                                    await updateDoc(transRef, {
+                                        paidAt: transData.paidAt || approvedPayment.date_approved || serverTimestamp(), 
                                         status: 'pago',
                                         mpPaymentId: paymentId || 'N/A', 
                                         updatedAt: serverTimestamp() 
@@ -10496,6 +10981,7 @@ const MindMapSection = ({ user, courses, purchasedIds, setView }) => {
             if (!loadingData && allCourses.length > 0) {
                 const params = new URLSearchParams(window.location.search);
                 const courseId = params.get('id');
+                if (params.get('product')) setView('loja');
                 
                 if (courseId) {
                     const found = allCourses.find(c => c.id === courseId);
@@ -10714,6 +11200,7 @@ const MindMapSection = ({ user, courses, purchasedIds, setView }) => {
                             view === 'wallet' ? 'p-4 md:p-10 max-w-5xl mx-auto' : 
                             'p-4 sm:p-6 md:p-10 lg:p-12 max-w-[100rem] mx-auto'
                         }`}>
+                            {view === 'live_sessions' && <StudentLiveSessions config={liveConfiguration} user={updatedUser} purchasedIds={purchasedIds} />}
                             {view === 'home' && <HomeSection user={updatedUser} courses={allCourses} purchasedIds={purchasedIds} userProgress={userProgress} db={db} showNotification={showNotification} setView={setView} onSelectCourse={handleSelectCourse} />}
                             {view === 'mindmap' && <MindMapSection user={updatedUser} courses={allCourses} purchasedIds={purchasedIds} setView={setView} />}
                             {view === 'catalog' && <CatalogSection onSelectCourse={handleSelectCourse} onBuyCourse={setCheckoutCourse} purchasedIds={purchasedIds} allCourses={allCourses} settings={currentSettings} userPoints={realProfile.pointsBalance} currentUser={updatedUser} showNotification={showNotification} db={db} setPurchasedIds={setPurchasedIds} requestConfirmation={requestConfirmation} promotions={promotions} />}
@@ -10742,7 +11229,7 @@ const MindMapSection = ({ user, courses, purchasedIds, setView }) => {
                                 />
                             )}
                             {view === 'course_player' && selectedCourse && (
-                                <CoursePlayer 
+                                <CourseAccessGate 
                                     user={updatedUser} 
                                     course={selectedCourse} 
                                     onBackToModules={() => setView('course_details')} 
@@ -10919,6 +11406,7 @@ const MindMapSection = ({ user, courses, purchasedIds, setView }) => {
                             // 👆 FIM DA CAPA 👇
 
                             await updateDoc(doc(db, "transactions", order.id), { 
+                                ...(novoStatus === 'pago' ? { paidAt: order.paidAt || mpData?.date_approved || serverTimestamp() } : {}),
                                 status: novoStatus, 
                                 mpPaymentId: mpData ? String(mpData.id) : order.mpPaymentId, 
                                 updatedAt: serverTimestamp() 
