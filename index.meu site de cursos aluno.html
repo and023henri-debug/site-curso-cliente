@@ -1,6 +1,86 @@
 <!DOCTYPE html>
 <html lang="pt-BR" class="dark">
 <head>
+<!-- =====================================================================
+ BLOCO DE BLOQUEIO VISUAL — INÍCIO — EDITÁVEL / REMOVÍVEL
+ Localização: início do <head>. Para desativar: enabled: false.
+ ATENÇÃO: isto NÃO oculta HTML/chaves, NÃO bloqueia requisições externas
+ e limpar o console NÃO impede injeção de scripts. Proteções reais no servidor.
+ A impressão ficará oculta, inclusive documentos/certificados desta página.
+====================================================================== -->
+<script>
+window.PLATFORM_VISUAL_LOCK = { enabled: true, clearConsole: true };
+window.addEventListener('DOMContentLoaded', () => {
+    if (!window.PLATFORM_VISUAL_LOCK.enabled) return;
+    document.addEventListener('contextmenu', e => {
+        if (window.PLATFORM_VISUAL_LOCK.enabled) e.preventDefault();
+    });
+    document.addEventListener('keydown', e => {
+        if (!window.PLATFORM_VISUAL_LOCK.enabled) return;
+        const key = String(e.key || '').toLowerCase();
+        if (key === 'f12' || e.keyCode === 123 ||
+            (e.ctrlKey && e.shiftKey && ['i','j','c'].includes(key)) ||
+            (e.ctrlKey && ['u','s'].includes(key)) ||
+            (e.metaKey && e.altKey && ['i','j','u'].includes(key))) e.preventDefault();
+    });
+    let previousDisplay = '';
+    window.addEventListener('beforeprint', () => {
+        if (!window.PLATFORM_VISUAL_LOCK.enabled) return;
+        previousDisplay = document.body.style.display;
+        document.body.style.display = 'none';
+    });
+    window.addEventListener('afterprint', () => { document.body.style.display = previousDisplay; });
+    setInterval(() => {
+        if (!window.PLATFORM_VISUAL_LOCK.enabled || !window.PLATFORM_VISUAL_LOCK.clearConsole) return;
+        console.clear();
+        console.log('%c⛔ ACESSO RESTRITO', 'color:red;font-size:24px;font-weight:bold;text-shadow:1px 1px 0px black;');
+    }, 1000);
+});
+</script>
+<!-- BLOCO DE BLOQUEIO VISUAL — FIM -->
+
+<!-- LIMITADOR LOCAL DE ACESSO — INÍCIO
+ 5 tentativas por 15 minutos por navegador/origem e operação.
+ Não armazena senha/email. Não substitui limites do Firebase/servidor.
+ Pode ser contornado limpando armazenamento, mudando navegador ou acessando API.
+-->
+<script>
+(() => {
+    const LIMIT = 5, WINDOW = 15 * 60 * 1000;
+    const memory = {}, pending = new Set();
+    const read = key => { try { return JSON.parse(localStorage.getItem(key)) || memory[key]; } catch (_) { return memory[key]; } };
+    const write = (key, value) => { memory[key] = value; try { localStorage.setItem(key, JSON.stringify(value)); } catch (_) {} };
+    const blocked = until => {
+        const error = new Error(`Limite de tentativas atingido neste navegador. Aguarde ${Math.max(1, Math.ceil((until - Date.now()) / 60000))} minuto(s) e tente novamente.`);
+        error.code = 'platform/too-many-attempts'; return error;
+    };
+    window.platformAuthAttempt = async (kind, action) => {
+        const key = 'platform-auth-attempts-v1:' + kind;
+        if (pending.has(key)) { const error = new Error('Uma tentativa já está em andamento. Aguarde.'); error.code = 'platform/auth-pending'; throw error; }
+        pending.add(key);
+        const run = async () => {
+            const now = Date.now(); let state = read(key);
+            if (!state || !Number.isFinite(state.until) || state.until <= now) state = { count: 0, until: now + WINDOW };
+            if (state.count >= LIMIT) throw blocked(state.until);
+            state = { ...state, count: state.count + 1 }; write(key, state);
+            try {
+                const result = await action();
+                if (kind === 'password') write(key, {count:0, until:0});
+                return result;
+            } catch (error) {
+                if (error.code === 'auth/too-many-requests') write(key, {count:LIMIT, until:Date.now() + WINDOW});
+                if (error.code === 'auth/network-request-failed' || error.code === 'auth/popup-closed-by-user') write(key, {...state, count:Math.max(0, state.count - 1)});
+                if (read(key)?.count >= LIMIT) throw blocked(read(key).until);
+                throw error;
+            }
+        };
+        try { return navigator.locks?.request ? await navigator.locks.request(key, { mode:'exclusive' }, run) : await run(); }
+        finally { pending.delete(key); }
+    };
+})();
+</script>
+<!-- LIMITADOR LOCAL DE ACESSO — FIM -->
+
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Sua Plataforma | Área do Aluno</title>
@@ -619,6 +699,8 @@ const ConversationUploadNotice = ({ policy }) => policy.enabled ? null : (
 );
 // Fim do controle compartilhado de anexos.
 // NOVOS RECURSOS: reuniões, lives e identificação de vídeo.
+const guardedPasswordSignIn = (instance, email, password) => window.platformAuthAttempt('password', () => signInWithEmailAndPassword(instance, String(email || '').trim(), password));
+
 const platformVideoId = value => {
     try {
         const u = new URL(String(value || ''));
@@ -6685,6 +6767,7 @@ const SupportSection = ({ user, settings }) => {
 
       const handleSubmit = async (e) => {
         e.preventDefault();
+        if (loading) return;
         setLoading(true); setError('');
         if (!auth) {
             setError("Erro de conexão. Verifique sua internet.");
@@ -6693,11 +6776,11 @@ const SupportSection = ({ user, settings }) => {
 
         try {
           if (isLogin) {
-            await signInWithEmailAndPassword(auth, formData.email, formData.password);
+            await guardedPasswordSignIn(auth, formData.email, formData.password);
           } else {
              if (!formData.name) throw new Error("Preencha seu nome completo.");
              
-             const cred = await createUserWithEmailAndPassword(auth, formData.email, formData.password);
+             const cred = await window.platformAuthAttempt('registration', () => createUserWithEmailAndPassword(auth, formData.email.trim(), formData.password));
              await updateProfile(cred.user, { displayName: formData.name });
              
              if (db) {
@@ -6729,7 +6812,7 @@ const SupportSection = ({ user, settings }) => {
         setLoading(true); setError('');
         const provider = new GoogleAuthProvider();
         try {
-          const result = await signInWithPopup(auth, provider);
+          const result = await window.platformAuthAttempt('google', () => signInWithPopup(auth, provider));
           if (db) {
               const docSnap = await getDoc(doc(db, "users", result.user.uid));
               if (!docSnap.exists()) {
@@ -6739,7 +6822,7 @@ const SupportSection = ({ user, settings }) => {
                   });
               }
           }
-        } catch (err) { setError("Erro ao entrar com Google."); setLoading(false); }
+        } catch (err) { setError(err.code?.startsWith("platform/") ? err.message : "Erro ao entrar com Google."); setLoading(false); }
       };
 
       return (
