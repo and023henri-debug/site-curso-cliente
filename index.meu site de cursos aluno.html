@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html lang="pt-BR" class="dark">
 <head>
+  <meta name="referrer" content="strict-origin-when-cross-origin">
 <!-- =====================================================================
  BLOCO DE BLOQUEIO VISUAL — INÍCIO — EDITÁVEL / REMOVÍVEL
  Localização: início do <head>. Para desativar: enabled: false.
@@ -699,13 +700,36 @@ const ConversationUploadNotice = ({ policy }) => policy.enabled ? null : (
 );
 // Fim do controle compartilhado de anexos.
 // NOVOS RECURSOS: reuniões, lives e identificação de vídeo.
+const PLATFORM_DEFAULT_STUDENT = window.location.origin;
+const normalizePlatformDomain = value => {
+    const text = String(value || '').trim();
+    if (!text) return '';
+    const url = new URL(text.includes('://') ? text : `https://${text}`);
+    if (url.protocol !== 'https:' || url.username || url.password || url.search || url.hash || (url.pathname !== '/' && url.pathname !== '')) throw new Error('Informe apenas o domínio HTTPS, sem caminho, senha ou parâmetros.');
+    return url.origin;
+};
+let platformDomains = { student: '', admin: '' };
+const getPlatformStudentUrl = () => platformDomains.student || PLATFORM_DEFAULT_STUDENT;
+const usePlatformDomains = () => {
+    const [value, setValue] = useState(platformDomains);
+    useEffect(() => onSnapshot(doc(db, 'config', 'platform_domains'), snap => {
+        const data = snap.data() || {};
+        try { platformDomains = {student:normalizePlatformDomain(data.student), admin:normalizePlatformDomain(data.admin)}; setValue(platformDomains); } catch (_) {}
+    }, () => {}), []);
+    return value;
+};
+
 const guardedPasswordSignIn = (instance, email, password) => window.platformAuthAttempt('password', () => signInWithEmailAndPassword(instance, String(email || '').trim(), password));
 
 const platformVideoId = value => {
     try {
-        const u = new URL(String(value || ''));
-        if (!['youtube.com','www.youtube.com','m.youtube.com','youtube-nocookie.com','www.youtube-nocookie.com','youtu.be'].includes(u.hostname)) return null;
-        const id = u.hostname === 'youtu.be' ? u.pathname.split('/')[1] : u.searchParams.get('v') || u.pathname.match(/^\/(?:embed|shorts|live)\/([^/]+)/)?.[1];
+        let text = String(value || '').trim().replace(/&amp;/g, '&');
+        if (/^[A-Za-z0-9_-]{11}$/.test(text)) return text;
+        if (/^(?:www\.|m\.)?(?:youtube\.com|youtube-nocookie\.com|youtu\.be)\//i.test(text)) text = 'https://' + text;
+        const u = new URL(text);
+        if (!['http:', 'https:'].includes(u.protocol)) return null;
+        if (!['youtube.com','www.youtube.com','m.youtube.com','youtube-nocookie.com','www.youtube-nocookie.com','youtu.be','www.youtu.be'].includes(u.hostname)) return null;
+        const id = /^(?:www\.)?youtu\.be$/.test(u.hostname) ? u.pathname.split('/')[1] : u.searchParams.get('v') || u.pathname.match(/^\/(?:embed|shorts|live|v)\/([^/]+)/)?.[1];
         return /^[A-Za-z0-9_-]{11}$/.test(id || '') ? id : null;
     } catch (_) { return null; }
 };
@@ -1045,7 +1069,7 @@ const StudentLiveSessions = ({ config, user, purchasedIds }) => {
                     localStorage.setItem('last_transaction_id', docRef.id);
 
                     // 2. GERA O LINK DE PAGAMENTO
-                    const currentUrl = window.location.href.split('?')[0]; 
+                    const currentUrl = getPlatformStudentUrl() + "/"; 
                     
                     const preferenceData = {
                         items: [{
@@ -1433,7 +1457,7 @@ const MarketplaceCheckoutModal = ({ product, user, onClose, settings, showNotifi
                 localStorage.setItem('last_mp_order_id', docRef.id);
 
                 // 2. GERA PREFERÊNCIA COM O VALOR FINAL
-                const currentUrl = window.location.href.split('?')[0]; 
+                const currentUrl = getPlatformStudentUrl() + "/"; 
                 const preferenceData = {
                     items: [{
                         id: product.id,
@@ -2029,7 +2053,7 @@ const StudentMarketplace = ({ db, user, settings, showNotification, promotions =
                             if (showNotification) showNotification(`O pagamento do produto "${nomeDoProduto}" foi aprovado e liberado!`, "success");
 
                             const platformName = settings?.siteName || "Nossa Plataforma";
-                            const linkPlataforma = window.location.origin; 
+                            const linkPlataforma = getPlatformStudentUrl(); 
                             const logoUrl = settings?.siteLogoUrl || settings?.logoUrl || ""; 
 
                             const compraBodyHTML = `
@@ -2733,23 +2757,46 @@ const CleanYouTubePlayer = ({ videoId, controller, onEnded, poster, posterFallba
     const mount = useRef(null), player = useRef(null), ended = useRef(onEnded);
     ended.current = onEnded;
     const [ready, setReady] = useState(false);
+    const [retry, setRetry] = useState(0);
     const [playing, setPlaying] = useState(false), [time, setTime] = useState(0), [duration, setDuration] = useState(0), [error, setError] = useState('');
     useEffect(() => {
-        let disposed = false, timer, attempts = 0;
+        let disposed = false, timer, readyTimer, attempts = 0;
+        setReady(false); setPlaying(false); setError(''); setTime(0); setDuration(0);
         const start = () => {
             if (disposed) return;
             if (!window.YT?.Player) {
                 if (++attempts > 100) { setError('Não foi possível carregar o player. Reabra a aula.'); return; }
                 timer = setTimeout(start, 200); return;
             }
-            const el = document.createElement('div'); mount.current.appendChild(el);
+            if (!mount.current || !platformVideoId(videoId)) { setError('O link desta aula é inválido. Informe o administrador.'); return; }
+            const el = document.createElement('iframe');
+            el.title = courseTitle || 'Vídeo da aula';
+            el.width = '100%'; el.height = '100%'; el.style.border = '0';
+            el.referrerPolicy = 'strict-origin-when-cross-origin';
+            el.allow = 'autoplay; encrypted-media; fullscreen; picture-in-picture';
+            el.allowFullscreen = true;
+            el.src = 'https://www.youtube.com/embed/' + videoId + '?enablejsapi=1&playsinline=1&controls=0&rel=0&origin=' + encodeURIComponent(window.location.origin);
+            mount.current.replaceChildren(el);
+            readyTimer = setTimeout(() => { if (!disposed) setError('O YouTube não respondeu. Verifique a conexão e tente novamente.'); }, 25000);
             player.current = new window.YT.Player(el, { videoId, width: '100%', height: '100%',
                 playerVars: { controls: 0, disablekb: 1, rel: 0, playsinline: 1, cc_load_policy: 0, iv_load_policy: 3, origin: window.location.origin },
                 events: {
                     onApiChange: e => disableYouTubeCaptions(e.target),
-                    onReady: e => { disableYouTubeCaptions(e.target); controller.current = e.target; setDuration(e.target.getDuration()); setReady(true); },
-                    onStateChange: e => { disableYouTubeCaptions(e.target); if (e.data === 1 && e.target.__transcriptionPaused) { e.target.pauseVideo(); return; } setPlaying(e.data === 1); if (e.data === 0) ended.current(); },
-                    onError: () => setError('Vídeo indisponível para reprodução incorporada.')
+                    onReady: e => { if (disposed) return; clearTimeout(readyTimer); setError(''); disableYouTubeCaptions(e.target); controller.current = e.target; setDuration(e.target.getDuration()); setReady(true); },
+                    onStateChange: e => { disableYouTubeCaptions(e.target); if (e.data === 1 && e.target.__transcriptionPaused) { e.target.pauseVideo(); return; } setPlaying(e.data === 1); if (e.data === 0) ended.current?.(); },
+                    onError: e => {
+                        if (disposed) return;
+                        clearTimeout(readyTimer);
+                        const messages = {
+                            2: 'O link desta aula é inválido. Informe o administrador.',
+                            5: 'Não foi possível reproduzir o vídeo neste navegador. Tente novamente.',
+                            100: 'O vídeo está privado, foi removido ou não está disponível. O administrador deve conferir a visibilidade no YouTube Studio.',
+                            101: 'O canal não permite reproduzir este vídeo no site. O administrador deve habilitar a incorporação no YouTube Studio.',
+                            150: 'O canal não permite reproduzir este vídeo no site. O administrador deve habilitar a incorporação no YouTube Studio.',
+                            153: 'O YouTube não conseguiu identificar o site. Abra a aula pelo endereço HTTPS da plataforma e confira bloqueadores de privacidade.'
+                        };
+                        setError(messages[e.data] || 'Vídeo indisponível. Se foi enviado agora, aguarde o processamento no YouTube.');
+                    }
                 }
             });
         };
@@ -2758,8 +2805,8 @@ const CleanYouTubePlayer = ({ videoId, controller, onEnded, poster, posterFallba
         }
         start();
         const clock = setInterval(() => { if (player.current?.getCurrentTime) { setTime(player.current.getCurrentTime() || 0); setDuration(player.current.getDuration() || 0); const state = player.current.getPlayerState?.(); if (state === 2 || state === 0 || state === 5 || state === -1) setPlaying(false); } }, 500);
-        return () => { disposed = true; clearTimeout(timer); clearInterval(clock); controller.current = null; player.current?.destroy?.(); player.current = null; };
-    }, [videoId]);
+        return () => { disposed = true; clearTimeout(timer); clearTimeout(readyTimer); clearInterval(clock); controller.current = null; player.current?.destroy?.(); player.current = null; };
+    }, [videoId, retry]);
     const seek = value => {
         const current = player.current?.getCurrentTime?.() || 0;
         const target = Math.max(0, Math.min(duration || 0, restrictSeeking && !completed.current ? Math.min(value, current) : value));
@@ -2794,7 +2841,7 @@ const CleanYouTubePlayer = ({ videoId, controller, onEnded, poster, posterFallba
                 <span style={{fontSize:11, marginLeft:'auto'}}>{stamp(time)} / {stamp(duration)}</span>
             </div>
         </div>
-        {error && <div role="alert" className="absolute inset-0 z-40 bg-black flex items-center justify-center p-8">{error}</div>}
+        {error && <div role="alert" className="absolute inset-0 z-40 bg-black flex flex-col gap-4 items-center justify-center p-8 text-white text-center"><p>{error}</p><button type="button" onClick={() => setRetry(n => n + 1)} className="px-4 py-2 rounded bg-indigo-600 text-white">Tentar novamente</button></div>}
     </div>;
 };
 
@@ -3403,26 +3450,18 @@ const YouTubeTabTranscription = ({ controller, stopRef, modelRef, onText, onActi
        // MOTOR DE VÍDEO PROFISSIONAL (Hack Anti-Erro 153)
         const getEmbedUrl = (lessonObj) => {
             if (!lessonObj) return null;
-            
-            const textoDaAula = JSON.stringify(lessonObj);
-
-            // Caça cirurgicamente o ID do YouTube
-            const ytRegex = /(?:youtu\.be\/|youtube(?:-nocookie)?\.com\/(?:embed\/|v\/|watch\?v=|watch\?.+&v=|shorts\/|live\/))([\w-]{11})/i;
-            const ytMatch = textoDaAula.match(ytRegex);
-            
-           if (ytMatch && ytMatch[1]) {
-        // URL limpa e oficial do YouTube + API ATIVADA + AUTOPLAY + ATAQUE ÀS LEGENDAS (cc_lang_pref=none)
-        return `https://www.youtube.com/embed/${ytMatch[1]}?autoplay=1&rel=0&modestbranding=1&enablejsapi=1&cc_load_policy=0&iv_load_policy=3&cc_lang_pref=none`;
-        }
-
-        // Caça cirurgicamente o ID do Vimeo
-        const vimeoRegex = /(?:vimeo\.com\/|player\.vimeo\.com\/video\/)(\d+)/i;
-        const vimeoMatch = textoDaAula.match(vimeoRegex);
-        if (vimeoMatch && vimeoMatch[1]) {
-            return `https://player.vimeo.com/video/${vimeoMatch[1]}?autoplay=1&title=0&byline=0&portrait=0`;
-        }
-
-            return null; 
+            // Only the lesson media field determines the video, never links in its description.
+            const source = String(lessonObj.conteudo || '').trim();
+            const id = platformVideoId(source);
+            if (id) return 'https://www.youtube.com/embed/' + id;
+            try {
+                const u = new URL(source);
+                if (['vimeo.com', 'www.vimeo.com', 'player.vimeo.com'].includes(u.hostname)) {
+                    const match = u.pathname.match(/^\/(?:video\/)?(\d+)/);
+                    if (match) return 'https://player.vimeo.com/video/' + match[1] + '?autoplay=1&title=0&byline=0&portrait=0';
+                }
+            } catch (_) {}
+            return null;
         };
         
         // 👇 PASSO 3: CÓDIGO DETECTOR DE FIM DE VÍDEO (YOUTUBE E VIMEO) 👇
@@ -11511,6 +11550,7 @@ const MindMapSection = ({ user, courses, purchasedIds, setView }) => {
    
     // --- APP PRINCIPAL ---
     const App = () => {
+        usePlatformDomains();
        const [user, setUser] = useState(null);
        const [loading, setLoading] = useState(true);
        const [showAuth, setShowAuth] = useState(false); 
@@ -11619,7 +11659,7 @@ const MindMapSection = ({ user, courses, purchasedIds, setView }) => {
                                // 👇 DISPARO DE E-MAIL ANIMADO (CURSO) 👇
                                 const platformName = currentSettings?.siteName || "Nossa Plataforma";
                                 const logoUrl = currentSettings?.siteLogoUrl || currentSettings?.logoUrl || "";
-                                const linkPlataforma = window.location.origin;
+                                const linkPlataforma = getPlatformStudentUrl();
 
                                 const compraCursoHTML = `
                                     <div style="background-color: #030303; padding: 40px 20px; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;">
@@ -12493,4 +12533,121 @@ JSON Permitidos (Siga exatamente estes formatos):
             let blockMatch = aiReply.match(/```[a-z]*\s*(\{[\s\S]*?\})\s*```/i) || aiReply.match(/\{[\s\S]*"action"[\s\S]*\}/i);
             
             if (blockMatch) {
-       
+                stringToHide = blockMatch[0];
+                try { cmdObj = JSON.parse(blockMatch[1] || blockMatch[0]); } catch(e) {}
+            }
+
+            if (cmdObj && cmdObj.action) {
+                aiReply = aiReply.replace(stringToHide, '').trim();
+                let commandExecuted = false;
+                let shouldCloseWidget = false;
+
+                if (window.AemGlobalAPI) {
+                    switch(cmdObj.action) {
+                        case 'navigate':
+                            window.AemGlobalAPI.navigate(cmdObj.target);
+                            commandExecuted = true;
+                            if (cmdObj.target === 'catalog' || cmdObj.target === 'home') {
+                                shouldCloseWidget = true;
+                            }
+                            break;
+                        case 'open_course':
+                            const result = window.AemGlobalAPI.openCourseByName(cmdObj.courseName);
+                            if (result.status === 'not_found') aiReply += "<br><br><small style='color:#f87171'>Não encontrei nenhum portal com esse nome exato.</small>";
+                            else if (result.status === 'multiple') aiReply += `<br><br><small style='color:#fbbf24'>Encontrei várias opções. Qual destes você quer?<br>• ${result.data.join('<br>• ')}</small>`;
+                            else { aiReply += `<br><br><small style='color:#4ade80'>Abrindo o portal ${result.data}...</small>`; commandExecuted = true; } 
+                            break;
+                        case 'buy_course':
+                            const boughtC = window.AemGlobalAPI.buyCourseByName(cmdObj.courseName);
+                            if (!boughtC) aiReply += "<br><br><small style='color:#f87171'>Não encontrei este curso.</small>";
+                            else if (boughtC === 'owned') { aiReply += "<br><br><small style='color:#4ade80'>Você já tem acesso! Abrindo...</small>"; commandExecuted = true; }
+                            else { commandExecuted = true; }
+                            break;
+                        case 'buy_product':
+                            window.AemGlobalAPI.navigate('loja');
+                            setTimeout(() => {
+                                if (window.AemGlobalAPI_Marketplace) window.AemGlobalAPI_Marketplace.buyProductByName(cmdObj.productName);
+                            }, 1000);
+                            commandExecuted = true;
+                            break;
+                        case 'video_control':
+                            if (window.AemVideoControl) {
+                                if (cmdObj.command === 'play') window.AemVideoControl.play();
+                                else if (cmdObj.command === 'pause') window.AemVideoControl.pause();
+                                else if (cmdObj.command === 'skip_forward') window.AemVideoControl.skip(10);
+                                else if (cmdObj.command === 'skip_backward') window.AemVideoControl.skip(-10);
+                                commandExecuted = true;
+                            } else aiReply += "<br><br><small style='color:#f87171'>Nenhum vídeo em reprodução.</small>";
+                            break;
+                        case 'edit_profile':
+                            const profRes = await window.AemGlobalAPI.updateProfileData(cmdObj.field, cmdObj.value);
+                            if(profRes) aiReply += `<br><br><small style='color:#4ade80'>Perfil atualizado! Trocamos ${cmdObj.field} para "${cmdObj.value}".</small>`;
+                            else aiReply += "<br><br><small style='color:#f87171'>Houve um erro ao atualizar o banco de dados.</small>";
+                            commandExecuted = true;
+                            break;
+                        case 'post_community':
+                            const postRes = await window.AemGlobalAPI.postToCommunity(cmdObj.text);
+                            if(postRes) aiReply += `<br><br><small style='color:#4ade80'>Mensagem publicada na comunidade!</small>`;
+                            commandExecuted = true;
+                            break;
+                        case 'take_notes':
+                            const noteRes = await window.AemGlobalAPI.takeNotesAutomated(cmdObj.courseName, cmdObj.notes);
+                            if(noteRes === 'sucesso') { aiReply += `<br><br><small style='color:#4ade80'>Anotação criada e salva no seu diário de bordo premium deste curso!</small>`; commandExecuted = true; }
+                            else aiReply += "<br><br><small style='color:#f87171'>Não encontrei o curso para salvar a anotação.</small>";
+                            break;
+                    }
+                }
+
+                if (commandExecuted) {
+                    aiReply += "<br><br><small style='color:#4ade80'><i class='fa-solid fa-bolt'></i> Ação concluída com sucesso!</small>";
+                    if (shouldCloseWidget) {
+                        setTimeout(() => { window.AemIaWidget.closeWidget(); }, 2000);
+                    }
+                }
+            } else {
+                aiReply = aiReply.replace(/```[\s\S]*?```/g, '').trim();
+            }
+            
+            appendMessage(aiReply.trim(), false);
+            
+            // 💾 SALVA A RESPOSTA DA IA NO HISTÓRICO PARA ELA LEMBRAR DEPOIS
+            chatHistory.push(`${nomeDaIA}: ${aiReply.replace(/<[^>]*>?/gm, '')}`); // Remove HTML antes de salvar
+            localStorage.setItem('aem_ia_chat_history', JSON.stringify(chatHistory));
+            
+        } catch (err) {
+            typing.classList.add('hidden');
+            appendMessage("⚠️ Sistema offline ou falha na conexão.", false);
+        }
+    });
+    }
+    
+    // 👇 INÍCIO DA LÓGICA DO BOTÃO NOVA CONVERSA 👇
+    const btnRestartIa = document.getElementById('aem-ia-restart-btn');
+    if (btnRestartIa) {
+        btnRestartIa.addEventListener('click', () => {
+            // 1. Limpa visualmente as mensagens da tela 
+            const chatBody = document.getElementById('aem-chat-box-normal');
+            if (chatBody) {
+                chatBody.innerHTML = ''; 
+            }
+            
+            // 2. Limpa a memória salva no navegador
+            localStorage.removeItem('aem_ia_chat_history'); 
+            
+            // 3. Adiciona um feedback visual no botão de rodar
+            btnRestartIa.classList.add('animate-spin');
+            setTimeout(() => btnRestartIa.classList.remove('animate-spin'), 500);
+
+            // 4. Manda a IA dar as boas-vindas oficiais puxadas do Banco de Dados
+            setTimeout(() => {
+                const msgOficial = window.AemIaWelcomeMsg || "Olá! Como posso te ajudar hoje?";
+                appendMessage(msgOficial, false);
+            }, 300);
+        });
+    }
+    
+    
+})();
+  </script>
+</body>
+</html>
