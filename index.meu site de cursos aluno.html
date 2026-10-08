@@ -2575,9 +2575,15 @@ const CustomVideoPlayer = ({ src, onEnded, poster, isCompleted, showNotification
     };
 
     const mudarQualidade = (novaQualidade) => {
-        if (isYT) return showNotification && showNotification("O YouTube ajusta a qualidade automaticamente para evitar travamentos.", "info");
         setQualidadeAtual(novaQualidade);
         setMostrarMenuQualidade(false);
+        
+        // Se for YouTube, executa o comando da API nativa
+        if (isYT && ytPlayerRef.current && typeof ytPlayerRef.current.setPlaybackQuality === 'function') {
+            ytPlayerRef.current.setPlaybackQuality(novaQualidade.toLowerCase());
+            return;
+        }
+
         const video = videoRef.current;
         if (video) {
             const tempoAtual = video.currentTime;
@@ -2761,16 +2767,37 @@ const CoursePauseCover = ({ sources = [], title = 'Curso' }) => {
 };
 
 const CleanYouTubePlayer = ({ videoId, controller, onEnded, poster, posterFallbacks = [], courseTitle = 'Curso', lessonTitle = 'Aula', moduleTitle = '', isCompleted = false, restrictSeeking = false }) => {
-    // Menu demonstrativo: valores fixos, sem leitura ou alteração da qualidade do YouTube.
+    // Controle Real de Qualidade (Via API Oficial do YouTube)
     const [qualityPreviewOpen, setQualityPreviewOpen] = useState(false);
     const [qualityPreviewValue, setQualityPreviewValue] = useState('auto');
+    const [availableQualities, setAvailableQualities] = useState([['auto', 'Automático', '']]);
     const qualityPreviewRef = useRef(null);
-    const previewQualities = [
-        ['2160p', '2160p', '4K'], ['1440p', '1440p', 'HD'],
-        ['1080p', '1080p', 'HD'], ['720p', '720p', 'HD'],
-        ['480p', '480p', ''], ['360p', '360p', ''],
-        ['240p', '240p', ''], ['144p', '144p', ''], ['auto', 'Automático', '']
-    ];
+
+    // Dicionário de conversão para as nomenclaturas internas do YouTube
+    const ytQualityMap = {
+        'highres': ['2160p', '4K'],
+        'hd2160': ['2160p', '4K'],
+        'hd1440': ['1440p', 'HD'],
+        'hd1080': ['1080p', 'HD'],
+        'hd720': ['720p', 'HD'],
+        'large': ['480p', ''],
+        'medium': ['360p', ''],
+        'small': ['240p', ''],
+        'tiny': ['144p', ''],
+        'auto': ['Automático', '']
+    };
+
+    const changeQuality = (ytValue) => {
+        setQualityPreviewValue(ytValue);
+        setQualityPreviewOpen(false);
+        coverVideo(); 
+        revealVideo();
+        
+        // Dispara o comando real de mudança de resolução para a API do YouTube
+        if (player.current && typeof player.current.setPlaybackQuality === 'function') {
+            player.current.setPlaybackQuality(ytValue);
+        }
+    };
     useEffect(() => {
         if (!qualityPreviewOpen) return;
         const outside = e => { if (!qualityPreviewRef.current?.contains(e.target)) setQualityPreviewOpen(false); };
@@ -2836,7 +2863,31 @@ const CleanYouTubePlayer = ({ videoId, controller, onEnded, poster, posterFallba
                 playerVars: platformYouTubePlayerVars(),
                 events: {
                     onApiChange: e => disableYouTubeCaptions(e.target),
-                    onReady: e => { if (disposed) return; clearTimeout(readyTimer); setError(''); disableYouTubeCaptions(e.target); controller.current = e.target; setDuration(e.target.getDuration()); setSpeeds(e.target.getAvailablePlaybackRates?.() || [1]); setSpeed(e.target.getPlaybackRate?.() || 1); setReady(true); },
+                    onReady: e => { 
+                        if (disposed) return; 
+                        clearTimeout(readyTimer); 
+                        setError(''); 
+                        disableYouTubeCaptions(e.target); 
+                        controller.current = e.target; 
+                        setDuration(e.target.getDuration()); 
+                        setSpeeds(e.target.getAvailablePlaybackRates?.() || [1]); 
+                        setSpeed(e.target.getPlaybackRate?.() || 1); 
+                        
+                        // Busca dinamicamente quais resoluções este vídeo em específico suporta
+                        if (typeof e.target.getAvailableQualityLevels === 'function') {
+                            const levels = e.target.getAvailableQualityLevels();
+                            if (levels && levels.length > 0) {
+                                const mappedLevels = levels.map(level => {
+                                    const info = ytQualityMap[level] || [level, ''];
+                                    return [level, info[0], info[1]];
+                                });
+                                // Garante que a opção Automático sempre exista
+                                if (!levels.includes('auto')) mappedLevels.push(['auto', 'Automático', '']);
+                                setAvailableQualities(mappedLevels);
+                            }
+                        }
+                        setReady(true); 
+                    },
                     onStateChange: e => {
                         if (disposed) return;
                         disableYouTubeCaptions(e.target);
@@ -2980,16 +3031,18 @@ const CleanYouTubePlayer = ({ videoId, controller, onEnded, poster, posterFallba
                     {Array.from(new Set([...speeds, speed])).sort((a,b) => a-b).map(rate => <option key={rate} value={rate}>{rate}×</option>)}
                 </select>
                 <div className="platform-quality-preview" ref={qualityPreviewRef}>
-                    <button type="button" className="platform-youtube-quality-button" title="Qualidade — prévia visual" aria-label="Abrir opções visuais de qualidade" aria-haspopup="dialog" aria-expanded={qualityPreviewOpen} onClick={() => { setQualityPreviewOpen(value => !value); coverVideo(); revealVideo(); }}>⚙</button>
-                    {qualityPreviewOpen && <div className="platform-quality-preview-panel" role="dialog" aria-label="Prévia visual de qualidade">
+                    <button type="button" className="platform-youtube-quality-button" title="Ajustar Qualidade" aria-label="Abrir opções de qualidade" aria-haspopup="dialog" aria-expanded={qualityPreviewOpen} onClick={() => { setQualityPreviewOpen(value => !value); coverVideo(); revealVideo(); }}>⚙</button>
+                    {qualityPreviewOpen && <div className="platform-quality-preview-panel" role="dialog" aria-label="Opções de qualidade">
                         <div className="platform-quality-preview-heading">⚙ Qualidade do vídeo</div>
                         <div className="platform-quality-preview-options">
-                            {previewQualities.map(([value, label, badge]) => <button key={value} type="button" className="platform-quality-preview-option" aria-pressed={qualityPreviewValue === value} onClick={() => { setQualityPreviewValue(value); setQualityPreviewOpen(false); }}>
-                                <span>{label}</span>{badge && <span className="platform-quality-preview-badge">{badge}</span>}
-                                {qualityPreviewValue === value && <span className="platform-quality-preview-check" aria-hidden="true">✓</span>}
-                            </button>)}
+                            {availableQualities.map(([value, label, badge]) => (
+                                <button key={value} type="button" className="platform-quality-preview-option" aria-pressed={qualityPreviewValue === value} onClick={() => changeQuality(value)}>
+                                    <span>{label}</span>{badge && <span className="platform-quality-preview-badge">{badge}</span>}
+                                    {qualityPreviewValue === value && <span className="platform-quality-preview-check" aria-hidden="true">✓</span>}
+                                </button>
+                            ))}
                         </div>
-                        <div className="platform-quality-preview-note">Demonstração visual — não altera a qualidade do vídeo.</div>
+                        <div className="platform-quality-preview-note" style={{ color: '#8b5cf6' }}>Qualidade processada pela API nativa do YouTube.</div>
                     </div>}
                 </div>
             </div>
