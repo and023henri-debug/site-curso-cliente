@@ -2772,22 +2772,6 @@ const CleanYouTubePlayer = ({ videoId, controller, onEnded, poster, posterFallba
     const [speed, setSpeed] = useState(1), [speeds, setSpeeds] = useState([1]);
     const revealTimer = useRef(null), topBar = useRef(null), bottomBar = useRef(null);
     const [screenState, setScreenState] = useState(-1);
-    const [qualityMode, setQualityMode] = useState(false);
-    const qualityModeRef = useRef(false);
-    const nativePosition = useRef({time:0, at:0});
-    // Mantém o mesmo iframe e a seleção nativa ao retornar para a plataforma.
-    const syncNativeAccess = enabled => {
-        const host = mount.current;
-        const frame = host?.querySelector('iframe');
-        if (!host) return;
-        if (enabled) host.removeAttribute('inert'); else host.setAttribute('inert', '');
-        if (frame) {
-            frame.tabIndex = enabled ? 0 : -1;
-            frame.style.pointerEvents = enabled ? 'auto' : 'none';
-            if (enabled) frame.removeAttribute('aria-hidden'); else frame.setAttribute('aria-hidden', 'true');
-        }
-    };
-    useEffect(() => { syncNativeAccess(qualityMode); }, [qualityMode, ready]);
     // Ajuste em milissegundos: a API não informa quando as informações desaparecem.
     // Gravação: elementos visíveis por ~3.20 s; versão gravada ocultava 0.80 s.
     // 4.00 s desde PLAYING + 0.10 s de margem para a atualização do navegador.
@@ -2808,7 +2792,6 @@ const CleanYouTubePlayer = ({ videoId, controller, onEnded, poster, posterFallba
     };
     useEffect(() => {
         let disposed = false, timer, readyTimer, attempts = 0;
-        qualityModeRef.current = false; setQualityMode(false); nativePosition.current = {time:0, at:0};
         coverVideo(); setScreenState(-1); setSpeed(1); setSpeeds([1]);
         setReady(false); setPlaying(false); setError(''); setTime(0); setDuration(0);
         const start = () => {
@@ -2828,13 +2811,11 @@ const CleanYouTubePlayer = ({ videoId, controller, onEnded, poster, posterFallba
             el.referrerPolicy = 'strict-origin-when-cross-origin';
             el.allow = 'autoplay; encrypted-media; fullscreen; picture-in-picture';
             el.allowFullscreen = true;
-            const nativeUrl = new URL(platformYouTubeEmbedUrl(videoId));
-            nativeUrl.searchParams.set('controls', '1');
-            el.src = nativeUrl.toString();
+            el.src = platformYouTubeEmbedUrl(videoId);
             mount.current.replaceChildren(el);
             readyTimer = setTimeout(() => { if (!disposed) setError('O YouTube não respondeu. Verifique a conexão e tente novamente.'); }, 25000);
             player.current = new window.YT.Player(el, { videoId, width: '100%', height: '100%',
-                playerVars: { ...platformYouTubePlayerVars(), controls: 1 },
+                playerVars: platformYouTubePlayerVars(),
                 events: {
                     onApiChange: e => disableYouTubeCaptions(e.target),
                     onReady: e => { if (disposed) return; clearTimeout(readyTimer); setError(''); disableYouTubeCaptions(e.target); controller.current = e.target; setDuration(e.target.getDuration()); setSpeeds(e.target.getAvailablePlaybackRates?.() || [1]); setSpeed(e.target.getPlaybackRate?.() || 1); setReady(true); },
@@ -2869,28 +2850,7 @@ const CleanYouTubePlayer = ({ videoId, controller, onEnded, poster, posterFallba
             const script = document.createElement('script'); script.src = 'https://www.youtube.com/iframe_api'; document.head.appendChild(script);
         }
         start();
-        const clock = setInterval(() => {
-            const target = player.current;
-            if (!target?.getCurrentTime) return;
-            let position = target.getCurrentTime() || 0;
-            const now = Date.now(), previous = nativePosition.current;
-            // Preserva a restrição de avanço das aulas ainda não concluídas.
-            if (qualityModeRef.current && restrictSeeking && !completed.current && previous.at) {
-                const naturalAdvance = Math.max(0, now - previous.at) / 1000 * (target.getPlaybackRate?.() || 1);
-                if (position > previous.time + naturalAdvance + 2) {
-                    position = previous.time;
-                    target.seekTo(position, true);
-                }
-            }
-            nativePosition.current = {time:position, at:now};
-            setTime(position); setDuration(target.getDuration() || 0);
-            if (qualityModeRef.current) {
-                setVolume(target.getVolume?.() ?? 100);
-                setMuted(target.isMuted?.() ?? false);
-            }
-            const state = target.getPlayerState?.();
-            if (state === 2 || state === 0 || state === 5 || state === -1) { coverVideo(); setPlaying(false); }
-        }, 500);
+        const clock = setInterval(() => { if (player.current?.getCurrentTime) { setTime(player.current.getCurrentTime() || 0); setDuration(player.current.getDuration() || 0); const state = player.current.getPlayerState?.(); if (state === 2 || state === 0 || state === 5 || state === -1) { coverVideo(); setPlaying(false); } } }, 500);
         return () => { disposed = true; clearTimeout(revealTimer.current); clearTimeout(timer); clearTimeout(readyTimer); clearInterval(clock); controller.current = null; player.current?.destroy?.(); player.current = null; };
     }, [videoId, retry]);
     const seek = value => {
@@ -2916,31 +2876,11 @@ const CleanYouTubePlayer = ({ videoId, controller, onEnded, poster, posterFallba
         player.current?.setPlaybackRate?.(value);
         revealVideo();
     };
-    const toggleQualityMode = () => {
-        if (!ready) return;
-        const enabled = !qualityModeRef.current;
-        qualityModeRef.current = enabled;
-        nativePosition.current = {time:player.current?.getCurrentTime?.() || 0, at:Date.now()};
-        setQualityMode(enabled);
-        syncNativeAccess(enabled);
-        if (enabled) clearTimeout(revealTimer.current);
-        else {
-            setVolume(player.current?.getVolume?.() ?? volume);
-            setMuted(player.current?.isMuted?.() ?? muted);
-            setSpeed(player.current?.getPlaybackRate?.() || 1);
-            coverVideo(); revealVideo();
-        }
-    };
     const stamp = v => `${Math.floor(v / 60)}:${String(Math.floor(v % 60)).padStart(2, '0')}`;
     return <div className="platform-youtube-player" style={{position:'relative', width:'100%', background:'#000'}}>
         <style>{`
 .platform-youtube-stage{position:relative;width:100%;aspect-ratio:16/9;overflow:hidden;background:#000;isolation:isolate}
 .platform-youtube-stage iframe{pointer-events:none!important;user-select:none}
-.platform-youtube-stage.is-quality-mode iframe{pointer-events:auto!important}
-.platform-youtube-stage.is-quality-mode .platform-youtube-brand-bar,.platform-youtube-stage.is-quality-mode .platform-youtube-shield{display:none}
-.platform-youtube-quality-notice{padding:12px 16px;background:#24203e;border-bottom:1px solid #6551a3;color:#ede9fe;font:13px/1.5 system-ui,sans-serif}
-.platform-youtube-quality-button{padding:6px 10px;border:1px solid #7560c0;border-radius:8px;background:#27203f;color:#f5f3ff;font:12px/1.5 system-ui,sans-serif;cursor:pointer}
-.platform-youtube-quality-button:disabled{opacity:.5;cursor:wait}
 .platform-youtube-brand-bar{position:absolute;left:0;right:0;z-index:28;background:linear-gradient(110deg,#151325 0%,#222044 52%,#121624 100%);color:#fff;box-sizing:border-box;pointer-events:none;display:flex;align-items:center;padding:12px 24px;overflow:hidden;box-shadow:0 6px 20px #05051166}
 .platform-youtube-brand-top{top:0;height:80px;border-bottom:1px solid #52417d;gap:12px}
 .platform-youtube-brand-top::before{content:'';position:absolute;left:0;top:0;bottom:0;width:4px;background:linear-gradient(#a78bfa,#6366f1)}
@@ -2958,10 +2898,9 @@ const CleanYouTubePlayer = ({ videoId, controller, onEnded, poster, posterFallba
 .platform-youtube-shield{position:absolute;inset:0;z-index:30;background:transparent;pointer-events:auto;cursor:default;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;touch-action:pan-y}
 @media(max-width:640px){.platform-youtube-player button{min-height:32px}.platform-youtube-player input{min-height:24px}}
 `}</style>
-        {qualityMode && <div className="platform-youtube-quality-notice" role="status">No vídeo, clique na engrenagem ⚙ → Qualidade e escolha a resolução. Feche o menu pela engrenagem e clique em <strong>Concluir</strong> abaixo. Se a engrenagem não aparecer, dê play e toque ou mova o cursor sobre o vídeo.</div>}
-        <div className={`platform-youtube-stage ${qualityMode ? 'is-quality-mode' : ''}`}>
-        <div ref={mount} aria-hidden={qualityMode ? undefined : true} style={{position:'absolute', inset:0, width:'100%', height:'100%', zIndex:0, pointerEvents:qualityMode ? 'auto' : 'none', opacity:qualityMode || ready && screenState !== -1 && screenState !== 5 && screenState !== 0 ? 1 : 0}} />
-        {!qualityMode && (!ready || screenState === -1 || screenState === 5 || screenState === 0) && <div style={{position:'absolute', inset:0, zIndex:25, display:'flex', alignItems:'center', justifyContent:'center', background:'#080b14', color:'#fff'}}>
+        <div className="platform-youtube-stage">
+        <div ref={mount} aria-hidden="true" style={{position:'absolute', inset:0, width:'100%', height:'100%', zIndex:0, pointerEvents:'none', opacity:ready && screenState !== -1 && screenState !== 5 && screenState !== 0 ? 1 : 0}} />
+        {(!ready || screenState === -1 || screenState === 5 || screenState === 0) && <div style={{position:'absolute', inset:0, zIndex:25, display:'flex', alignItems:'center', justifyContent:'center', background:'#080b14', color:'#fff'}}>
             <CoursePauseCover sources={[poster, ...posterFallbacks]} title={courseTitle} />
             <span style={{position:'relative', padding:'8px 12px', background:'rgba(0,0,0,.7)', borderRadius:8}}>{!ready ? 'Carregando aula…' : screenState === 0 ? 'Aula encerrada' : 'Use o botão ▶ abaixo para reproduzir'}</span>
         </div>}
@@ -2998,7 +2937,6 @@ const CleanYouTubePlayer = ({ videoId, controller, onEnded, poster, posterFallba
                         {Array.from(new Set([...speeds, speed])).sort((a,b) => a-b).map(rate => <option key={rate} value={rate}>{rate}×</option>)}
                     </select>
                 </label>
-                <button type="button" className="platform-youtube-quality-button" disabled={!ready} onClick={toggleQualityMode} aria-pressed={qualityMode} aria-label={qualityMode ? 'Concluir ajuste de qualidade' : 'Ajustar qualidade'}>{qualityMode ? '✓ Concluir' : '⚙ Ajustar qualidade'}</button>
                 <span style={{fontSize:11, marginLeft:'auto'}}>{stamp(time)} / {stamp(duration)}</span>
             </div>
         </div>
