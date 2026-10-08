@@ -2937,17 +2937,18 @@ const CleanYouTubePlayer = ({ videoId, controller, onEnded, poster, posterFallba
 .platform-youtube-stage{position:relative;width:100%;aspect-ratio:16/9;overflow:hidden;background:#000;isolation:isolate}
 .platform-youtube-stage iframe{pointer-events:none!important;user-select:none}
 .platform-youtube-stage.is-quality-mode iframe{pointer-events:auto!important}
-.platform-youtube-stage.is-quality-mode{--native-menu-width:min(360px,calc(100% - 16px));--native-gear-right:104px;--native-gear-width:48px;min-height:480px}
+.platform-youtube-stage.is-quality-mode{--native-menu-width:min(340px,calc(100% - 16px));--native-menu-height:min(340px,calc(100% - 128px));--native-gear-right:104px;--native-gear-width:48px}
 /* Aberturas por posição: a interface interna do YouTube pode variar por aparelho. */
 .platform-youtube-stage.is-quality-mode .platform-youtube-shield{display:none}
 .platform-youtube-stage.is-quality-mode .platform-youtube-brand-bar{opacity:1!important;pointer-events:auto;z-index:34;box-shadow:none}
 .platform-youtube-stage.is-quality-mode .platform-youtube-brand-top{height:80px}
-.platform-youtube-stage.is-quality-mode .platform-youtube-brand-bottom{height:72px;clip-path:polygon(0 0,100% 0,100% 100%,calc(100% - var(--native-gear-right)) 100%,calc(100% - var(--native-gear-right)) calc(100% - 48px),calc(100% - var(--native-gear-right) - var(--native-gear-width)) calc(100% - 48px),calc(100% - var(--native-gear-right) - var(--native-gear-width)) 100%,0 100%);padding-right:172px}
+.platform-youtube-stage.is-quality-mode .platform-youtube-brand-bottom{height:48px;clip-path:polygon(0 0,100% 0,100% 100%,calc(100% - var(--native-gear-right)) 100%,calc(100% - var(--native-gear-right)) calc(100% - 48px),calc(100% - var(--native-gear-right) - var(--native-gear-width)) calc(100% - 48px),calc(100% - var(--native-gear-right) - var(--native-gear-width)) 100%,0 100%);padding-right:172px}
 .platform-youtube-stage.is-quality-mode .platform-youtube-brand-bottom>.platform-youtube-brand-status{display:none}
-.platform-native-block{position:absolute;z-index:32;background:linear-gradient(110deg,#151325,#222044);pointer-events:auto;touch-action:pan-y}
-.platform-native-block-left{left:0;top:80px;bottom:72px;width:calc(100% - var(--native-menu-width) - 8px)}
-.platform-native-block-right{right:0;top:80px;bottom:72px;width:8px}
-.platform-native-menu-outline{position:absolute;right:8px;top:80px;bottom:72px;width:var(--native-menu-width);border:1px solid #7962b8;border-radius:12px;box-sizing:border-box;pointer-events:none;z-index:33}
+.platform-native-block{position:absolute;z-index:32;background:transparent;pointer-events:auto;touch-action:pan-y}
+.platform-native-block-left{left:0;top:80px;bottom:48px;width:calc(100% - var(--native-menu-width) - 8px)}
+.platform-native-block-right{right:0;top:80px;bottom:48px;width:8px}
+.platform-native-block-above{left:0;right:0;top:80px;bottom:calc(48px + var(--native-menu-height))}
+.platform-native-menu-outline{position:absolute;right:8px;bottom:48px;height:var(--native-menu-height);width:var(--native-menu-width);border:1px solid #7962b8;border-radius:12px;box-sizing:border-box;pointer-events:none;z-index:33}
 .platform-native-gear-outline{position:absolute;right:var(--native-gear-right);bottom:0;width:var(--native-gear-width);height:48px;border:1px solid #a78bfa;border-radius:8px;box-sizing:border-box;pointer-events:none;z-index:35}
 .platform-youtube-quality-notice{padding:12px 16px;background:#24203e;border-bottom:1px solid #6551a3;color:#ede9fe;font:13px/1.5 system-ui,sans-serif}
 .platform-youtube-quality-button{padding:6px 10px;border:1px solid #7560c0;border-radius:8px;background:#27203f;color:#f5f3ff;font:12px/1.5 system-ui,sans-serif;cursor:pointer}
@@ -2968,6 +2969,21 @@ const CleanYouTubePlayer = ({ videoId, controller, onEnded, poster, posterFallba
 
 .platform-youtube-shield{position:absolute;inset:0;z-index:30;background:transparent;pointer-events:auto;cursor:default;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;touch-action:pan-y}
 @media(max-width:640px){.platform-youtube-player button{min-height:32px}.platform-youtube-player input{min-height:24px}}
+
+.platform-youtube-player{border:1px solid #292833;border-radius:16px;overflow:hidden;font-family:system-ui,sans-serif}
+.platform-player-controls{position:relative;z-index:30;padding:10px 16px 12px;background:linear-gradient(#0d0d15,#09090f);color:#eee}
+.platform-player-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:7px}
+.platform-player-controls button{display:inline-flex;align-items:center;justify-content:center;min-width:34px;height:36px;border:1px solid transparent;border-radius:9px;background:transparent;color:#eee;cursor:pointer}
+.platform-player-controls button:hover{background:#242038;border-color:#423967}
+.platform-player-controls button:focus-visible,.platform-player-controls select:focus-visible{outline:2px solid #a78bfa;outline-offset:2px}
+.platform-player-controls button:disabled{opacity:.4;cursor:default}
+.platform-player-clock{font-size:11px;font-variant-numeric:tabular-nums;color:#c6c4d3;margin-right:auto;white-space:nowrap}
+.platform-player-controls input[type=range]{accent-color:#7454ff;cursor:pointer}
+.platform-player-controls .platform-youtube-quality-button{background:#201b32;border-color:#4c3e78;font-size:22px;min-width:42px}
+.platform-player-controls .platform-youtube-quality-button[aria-pressed=true]{background:#4f35cc;border-color:#9584f7}
+.platform-player-volume{width:60px}
+.platform-player-speed{color:#ddd;background:#15131f;border:1px solid #353047;border-radius:7px;padding:6px 3px;font-size:11px}
+@media(max-width:640px){.platform-youtube-stage.is-quality-mode{min-height:410px}.platform-player-controls{padding:8px}.platform-player-row{gap:4px}.platform-player-volume{width:42px}}
 `}</style>
         {qualityMode && <div className="platform-youtube-quality-notice" role="status">Clique na engrenagem dentro da abertura destacada, depois em <strong>Qualidade</strong>. Escolha a resolução, feche o menu pela engrenagem e clique em <strong>Concluir</strong>. Se necessário, use o play abaixo e mova o cursor sobre a abertura para exibir os controles.</div>}
         <div className={`platform-youtube-stage ${qualityMode ? 'is-quality-mode' : ''}`}>
@@ -2989,6 +3005,7 @@ const CleanYouTubePlayer = ({ videoId, controller, onEnded, poster, posterFallba
         {qualityMode && <>
             <div aria-hidden="true" className="platform-native-block platform-native-block-left" />
             <div aria-hidden="true" className="platform-native-block platform-native-block-right" />
+            <div aria-hidden="true" className="platform-native-block platform-native-block-above" />
             <div aria-hidden="true" className="platform-native-menu-outline" />
             <div aria-hidden="true" className="platform-native-gear-outline" />
         </>}
@@ -3001,22 +3018,21 @@ const CleanYouTubePlayer = ({ videoId, controller, onEnded, poster, posterFallba
             onAuxClick={e => { e.preventDefault(); e.stopPropagation(); }}
             onDragStart={e => { e.preventDefault(); e.stopPropagation(); }} />
         </div>
-        <div style={{position:'relative', minHeight:76, zIndex:30, background:'#080b14', padding:'8px 12px', boxSizing:'border-box'}} className="text-white">
-            <input disabled={!ready} aria-label="Progresso do vídeo" type="range" min="0" max={duration || 1} step="0.1" value={Math.min(time, duration || 1)} onChange={e => seek(Number(e.target.value))} style={{width:'100%', accentColor:'#6366f1'}} />
-            <div style={{display:'flex', alignItems:'center', gap:10, flexWrap:'wrap'}}>
-                <button disabled={!ready} onClick={toggle} aria-label={playing ? 'Pausar' : 'Reproduzir'}>{playing ? <Pause size={20}/> : <Play size={20}/>}</button>
-                <button disabled={!ready} onClick={() => seek(time - 10)} aria-label="Voltar 10 segundos" title="Voltar 10 segundos">↶ 10s</button>
-                {(!restrictSeeking || isCompleted) && <button disabled={!ready} onClick={() => seek(time + 10)} aria-label="Avançar 10 segundos" title="Avançar 10 segundos">10s ↷</button>}
-                <button disabled={!ready} onClick={toggleMute} aria-label={muted ? 'Ativar som' : 'Silenciar'}>{muted ? 'Sem som' : 'Som'}</button>
-                <input aria-label="Volume" type="range" min="0" max="100" value={muted ? 0 : volume} onChange={e => changeVolume(Number(e.target.value))} style={{width:64, accentColor:'#6366f1'}} />
-                <label style={{display:'flex', alignItems:'center', gap:6, fontSize:12}}>
-                    Velocidade
-                    <select aria-label="Velocidade de reprodução" disabled={!ready || speeds.length < 2} value={speed} onChange={e => changeSpeed(Number(e.target.value))} style={{background:'#080b14', color:'#fff', border:'1px solid #475569', borderRadius:6, padding:'4px 6px'}}>
-                        {Array.from(new Set([...speeds, speed])).sort((a,b) => a-b).map(rate => <option key={rate} value={rate}>{rate}×</option>)}
-                    </select>
-                </label>
-                <button type="button" className="platform-youtube-quality-button" disabled={!ready} onClick={toggleQualityMode} aria-pressed={qualityMode} aria-label={qualityMode ? 'Concluir ajuste de qualidade' : 'Ajustar qualidade'}>{qualityMode ? '✓ Concluir' : '⚙ Qualidade'}</button>
-                <span style={{fontSize:11, marginLeft:'auto'}}>{stamp(time)} / {stamp(duration)}</span>
+        <div className="platform-player-controls">
+            <input disabled={!ready} aria-label="Progresso do vídeo" type="range" min="0" max={duration || 1} step="0.1" value={Math.min(time, duration || 1)} onChange={e => seek(Number(e.target.value))} style={{width:'100%', display:'block', height:6}} />
+            <div className="platform-player-row">
+                <button type="button" disabled={!ready} onClick={toggle} aria-label={playing ? 'Pausar' : 'Reproduzir'}>{playing ? <Pause size={20}/> : <Play size={20}/>}</button>
+                <span className="platform-player-clock">{stamp(time)} / {stamp(duration)}</span>
+                <button type="button" disabled={!ready} onClick={() => seek(time - 10)} aria-label="Voltar 10 segundos" title="Voltar 10 segundos" style={{fontSize:12}}>↶10</button>
+                {(!restrictSeeking || isCompleted) && <button type="button" disabled={!ready} onClick={() => seek(time + 10)} aria-label="Avançar 10 segundos" title="Avançar 10 segundos" style={{fontSize:12}}>10↷</button>}
+                <button type="button" disabled={!ready} onClick={toggleMute} aria-label={muted ? 'Ativar som' : 'Silenciar'} title={muted ? 'Ativar som' : 'Silenciar'}>
+                    <svg aria-hidden="true" width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M11 5 6 9H3v6h3l5 4z"/>{muted ? <path d="m16 9 5 6m0-6-5 6"/> : <><path d="M15 8a6 6 0 0 1 0 8"/><path d="M18 5a10 10 0 0 1 0 14"/></>}</svg>
+                </button>
+                <input className="platform-player-volume" disabled={!ready} aria-label="Volume" type="range" min="0" max="100" value={muted ? 0 : volume} onChange={e => changeVolume(Number(e.target.value))} />
+                <select className="platform-player-speed" title="Velocidade" aria-label="Velocidade de reprodução" disabled={!ready || speeds.length < 2} value={speed} onChange={e => changeSpeed(Number(e.target.value))}>
+                    {Array.from(new Set([...speeds, speed])).sort((a,b) => a-b).map(rate => <option key={rate} value={rate}>{rate}×</option>)}
+                </select>
+                <button type="button" className="platform-youtube-quality-button" title={qualityMode ? 'Concluir ajuste de qualidade' : 'Qualidade do vídeo'} disabled={!ready} onClick={toggleQualityMode} aria-pressed={qualityMode} aria-label={qualityMode ? 'Concluir ajuste de qualidade' : 'Ajustar qualidade'}>{qualityMode ? '✓' : '⚙'}</button>
             </div>
         </div>
         {error && <div role="alert" className="absolute inset-0 z-40 bg-black flex flex-col gap-4 items-center justify-center p-8 text-white text-center"><p>{error}</p><button type="button" onClick={() => setRetry(n => n + 1)} className="px-4 py-2 rounded bg-indigo-600 text-white">Tentar novamente</button></div>}
