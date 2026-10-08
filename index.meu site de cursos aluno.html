@@ -2768,8 +2768,26 @@ const CleanYouTubePlayer = ({ videoId, controller, onEnded, poster, posterFallba
     const [ready, setReady] = useState(false);
     const [retry, setRetry] = useState(0);
     const [playing, setPlaying] = useState(false), [time, setTime] = useState(0), [duration, setDuration] = useState(0), [error, setError] = useState('');
+    const [covered, setCovered] = useState(true);
+    const [speed, setSpeed] = useState(1), [speeds, setSpeeds] = useState([1]);
+    const revealTimer = useRef(null);
+    // Oculta antes de enviar comandos; não depende do tempo de resposta do iframe.
+    const coverVideo = () => {
+        clearTimeout(revealTimer.current);
+        if (mount.current) mount.current.style.opacity = '0';
+        setCovered(true);
+    };
+    const revealVideo = () => {
+        clearTimeout(revealTimer.current);
+        revealTimer.current = setTimeout(() => {
+            if (player.current?.getPlayerState?.() !== 1 || player.current?.__transcriptionPaused) return;
+            if (mount.current) mount.current.style.opacity = '1';
+            setCovered(false);
+        }, 800); // Transição visual; não é detecção das sobreposições internas do YouTube.
+    };
     useEffect(() => {
         let disposed = false, timer, readyTimer, attempts = 0;
+        coverVideo(); setSpeed(1); setSpeeds([1]);
         setReady(false); setPlaying(false); setError(''); setTime(0); setDuration(0);
         const start = () => {
             if (disposed) return;
@@ -2795,8 +2813,17 @@ const CleanYouTubePlayer = ({ videoId, controller, onEnded, poster, posterFallba
                 playerVars: platformYouTubePlayerVars(),
                 events: {
                     onApiChange: e => disableYouTubeCaptions(e.target),
-                    onReady: e => { if (disposed) return; clearTimeout(readyTimer); setError(''); disableYouTubeCaptions(e.target); controller.current = e.target; setDuration(e.target.getDuration()); setReady(true); },
-                    onStateChange: e => { disableYouTubeCaptions(e.target); if (e.data === 1 && e.target.__transcriptionPaused) { e.target.pauseVideo(); return; } setPlaying(e.data === 1); if (e.data === 0) ended.current?.(); },
+                    onReady: e => { if (disposed) return; clearTimeout(readyTimer); setError(''); disableYouTubeCaptions(e.target); controller.current = e.target; setDuration(e.target.getDuration()); setSpeeds(e.target.getAvailablePlaybackRates?.() || [1]); setSpeed(e.target.getPlaybackRate?.() || 1); setReady(true); },
+                    onStateChange: e => {
+                        if (disposed) return;
+                        disableYouTubeCaptions(e.target);
+                        if (e.data === 1 && e.target.__transcriptionPaused) { coverVideo(); setPlaying(false); e.target.pauseVideo(); return; }
+                        if (e.data === 1) { setPlaying(true); revealVideo(); }
+                        else { coverVideo(); if (e.data !== 3) setPlaying(false); }
+                        if (e.data === 0) ended.current?.();
+                    },
+                    onPlaybackRateChange: e => { if (!disposed) setSpeed(e.data); },
+                    onAutoplayBlocked: () => { if (!disposed) { coverVideo(); setPlaying(false); } },
                     onError: e => {
                         if (disposed) return;
                         clearTimeout(readyTimer);
@@ -2817,17 +2844,32 @@ const CleanYouTubePlayer = ({ videoId, controller, onEnded, poster, posterFallba
             const script = document.createElement('script'); script.src = 'https://www.youtube.com/iframe_api'; document.head.appendChild(script);
         }
         start();
-        const clock = setInterval(() => { if (player.current?.getCurrentTime) { setTime(player.current.getCurrentTime() || 0); setDuration(player.current.getDuration() || 0); const state = player.current.getPlayerState?.(); if (state === 2 || state === 0 || state === 5 || state === -1) setPlaying(false); } }, 500);
-        return () => { disposed = true; clearTimeout(timer); clearTimeout(readyTimer); clearInterval(clock); controller.current = null; player.current?.destroy?.(); player.current = null; };
+        const clock = setInterval(() => { if (player.current?.getCurrentTime) { setTime(player.current.getCurrentTime() || 0); setDuration(player.current.getDuration() || 0); const state = player.current.getPlayerState?.(); if (state === 2 || state === 0 || state === 5 || state === -1) { coverVideo(); setPlaying(false); } } }, 500);
+        return () => { disposed = true; clearTimeout(revealTimer.current); clearTimeout(timer); clearTimeout(readyTimer); clearInterval(clock); controller.current = null; player.current?.destroy?.(); player.current = null; };
     }, [videoId, retry]);
     const seek = value => {
         const current = player.current?.getCurrentTime?.() || 0;
         const target = Math.max(0, Math.min(duration || 0, restrictSeeking && !completed.current ? Math.min(value, current) : value));
+        coverVideo();
+        const wasPlaying = player.current?.getPlayerState?.() === 1 || playing;
         player.current?.seekTo?.(target, true); setTime(target);
+        if (wasPlaying) revealVideo();
+        else player.current?.pauseVideo?.();
     };
     const changeVolume = value => { setVolume(value); setMuted(value === 0); player.current?.setVolume?.(value); if (value > 0) player.current?.unMute?.(); else player.current?.mute?.(); };
     const toggleMute = () => { if (muted) { player.current?.unMute?.(); if (!volume) changeVolume(50); } else player.current?.mute?.(); setMuted(!muted); };
-    const toggle = () => { if (playing) { setPlaying(false); player.current?.pauseVideo?.(); } else { player.current?.playVideo?.(); } };
+    const toggle = () => {
+        if (!ready) return;
+        coverVideo();
+        if (playing) { setPlaying(false); player.current?.pauseVideo?.(); }
+        else { player.current?.playVideo?.(); }
+    };
+    const changeSpeed = value => {
+        if (!ready || !speeds.includes(value)) return;
+        coverVideo();
+        player.current?.setPlaybackRate?.(value);
+        revealVideo();
+    };
     const stamp = v => `${Math.floor(v / 60)}:${String(Math.floor(v % 60)).padStart(2, '0')}`;
     return <div className="platform-youtube-player" style={{position:'relative', width:'100%', background:'#000'}}>
         <style>{`
@@ -2837,10 +2879,10 @@ const CleanYouTubePlayer = ({ videoId, controller, onEnded, poster, posterFallba
 @media(max-width:640px){.platform-youtube-player button{min-height:32px}.platform-youtube-player input{min-height:24px}}
 `}</style>
         <div className="platform-youtube-stage">
-        <div ref={mount} aria-hidden="true" style={{position:'absolute', inset:0, width:'100%', height:'100%', zIndex:0, pointerEvents:'none', opacity:playing ? 1 : 0}} />
-        {!playing && <div style={{position:'absolute', inset:0, zIndex:25, display:'flex', alignItems:'center', justifyContent:'center', background:'#080b14', color:'#fff'}}>
+        <div ref={mount} aria-hidden="true" style={{position:'absolute', inset:0, width:'100%', height:'100%', zIndex:0, pointerEvents:'none', opacity:playing && !covered ? 1 : 0}} />
+        {(!playing || covered) && <div style={{position:'absolute', inset:0, zIndex:25, display:'flex', alignItems:'center', justifyContent:'center', background:'#080b14', color:'#fff'}}>
             <CoursePauseCover sources={[poster, ...posterFallbacks]} title={courseTitle} />
-            <span style={{position:'relative', padding:'8px 12px', background:'rgba(0,0,0,.7)', borderRadius:8}}>{!ready ? 'Carregando aula…' : 'Use o botão ▶ abaixo para reproduzir'}</span>
+            <span style={{position:'relative', padding:'8px 12px', background:'rgba(0,0,0,.7)', borderRadius:8}}>{!ready ? 'Carregando aula…' : playing ? 'Retomando vídeo…' : 'Use o botão ▶ abaixo para reproduzir'}</span>
         </div>}
         {/* Camada transparente: bloqueia interação, mas não apaga os pixels do YouTube. */}
         <div aria-hidden="true" className="platform-youtube-shield"
@@ -2852,13 +2894,19 @@ const CleanYouTubePlayer = ({ videoId, controller, onEnded, poster, posterFallba
             onDragStart={e => { e.preventDefault(); e.stopPropagation(); }} />
         </div>
         <div style={{position:'relative', minHeight:76, zIndex:30, background:'#080b14', padding:'8px 12px', boxSizing:'border-box'}} className="text-white">
-            <input aria-label="Progresso do vídeo" type="range" min="0" max={duration || 1} step="0.1" value={Math.min(time, duration || 1)} onChange={e => seek(Number(e.target.value))} style={{width:'100%', accentColor:'#6366f1'}} />
+            <input disabled={!ready} aria-label="Progresso do vídeo" type="range" min="0" max={duration || 1} step="0.1" value={Math.min(time, duration || 1)} onChange={e => seek(Number(e.target.value))} style={{width:'100%', accentColor:'#6366f1'}} />
             <div style={{display:'flex', alignItems:'center', gap:10, flexWrap:'wrap'}}>
                 <button disabled={!ready} onClick={toggle} aria-label={playing ? 'Pausar' : 'Reproduzir'}>{playing ? <Pause size={20}/> : <Play size={20}/>}</button>
                 <button disabled={!ready} onClick={() => seek(time - 10)} aria-label="Voltar 10 segundos" title="Voltar 10 segundos">↶ 10s</button>
                 {(!restrictSeeking || isCompleted) && <button disabled={!ready} onClick={() => seek(time + 10)} aria-label="Avançar 10 segundos" title="Avançar 10 segundos">10s ↷</button>}
                 <button disabled={!ready} onClick={toggleMute} aria-label={muted ? 'Ativar som' : 'Silenciar'}>{muted ? 'Sem som' : 'Som'}</button>
                 <input aria-label="Volume" type="range" min="0" max="100" value={muted ? 0 : volume} onChange={e => changeVolume(Number(e.target.value))} style={{width:64, accentColor:'#6366f1'}} />
+                <label style={{display:'flex', alignItems:'center', gap:6, fontSize:12}}>
+                    Velocidade
+                    <select aria-label="Velocidade de reprodução" disabled={!ready || speeds.length < 2} value={speed} onChange={e => changeSpeed(Number(e.target.value))} style={{background:'#080b14', color:'#fff', border:'1px solid #475569', borderRadius:6, padding:'4px 6px'}}>
+                        {Array.from(new Set([...speeds, speed])).sort((a,b) => a-b).map(rate => <option key={rate} value={rate}>{rate}×</option>)}
+                    </select>
+                </label>
                 <span style={{fontSize:11, marginLeft:'auto'}}>{stamp(time)} / {stamp(duration)}</span>
             </div>
         </div>
