@@ -738,6 +738,7 @@ const platformVideoId = value => {
 const platformYouTubePlayerVars = () => ({
     controls: 0, disablekb: 1, rel: 0, autoplay: 0, fs: 0,
     playsinline: 1, cc_load_policy: 0, iv_load_policy: 3,
+    vq: 'hd1080', // HACK DE FORÇA BRUTA: Solicita 1080p nativo na montagem
     ...(window.location.protocol === 'https:' || window.location.protocol === 'http:'
         ? { origin: window.location.origin } : {})
 });
@@ -2767,45 +2768,40 @@ const CoursePauseCover = ({ sources = [], title = 'Curso' }) => {
 };
 
 const CleanYouTubePlayer = ({ videoId, controller, onEnded, poster, posterFallbacks = [], courseTitle = 'Curso', lessonTitle = 'Aula', moduleTitle = '', isCompleted = false, restrictSeeking = false }) => {
-    // Controle Real de Qualidade (Via API Oficial do YouTube)
-    const [qualityPreviewOpen, setQualityPreviewOpen] = useState(false);
+   // Menu Clone Estilo Nativo & Controle de Qualidade
+   const [menuOpen, setMenuOpen] = useState(false);
+    const [menuView, setMenuView] = useState('main'); 
     const [qualityPreviewValue, setQualityPreviewValue] = useState('auto');
     const [availableQualities, setAvailableQualities] = useState([['auto', 'Automático', '']]);
-    const qualityPreviewRef = useRef(null);
+    const menuRef = useRef(null);
 
-    // Dicionário de conversão para as nomenclaturas internas do YouTube
     const ytQualityMap = {
-        'highres': ['2160p', '4K'],
-        'hd2160': ['2160p', '4K'],
-        'hd1440': ['1440p', 'HD'],
-        'hd1080': ['1080p', 'HD'],
-        'hd720': ['720p', 'HD'],
-        'large': ['480p', ''],
-        'medium': ['360p', ''],
-        'small': ['240p', ''],
-        'tiny': ['144p', ''],
-        'auto': ['Automático', '']
+        'highres': ['2160p', '4K'], 'hd2160': ['2160p', '4K'], 'hd1440': ['1440p', 'HD'],
+        'hd1080': ['1080p', 'HD'], 'hd720': ['720p', 'HD'], 'large': ['480p', ''],
+        'medium': ['360p', ''], 'small': ['240p', ''], 'tiny': ['144p', ''], 'auto': ['Automático', '']
     };
 
     const changeQuality = (ytValue) => {
         setQualityPreviewValue(ytValue);
-        setQualityPreviewOpen(false);
+        setMenuOpen(false);
+        setMenuView('main');
         coverVideo(); 
         revealVideo();
         
-        // Dispara o comando real de mudança de resolução para a API do YouTube
+        // Força a qualidade na API nativa do YouTube
         if (player.current && typeof player.current.setPlaybackQuality === 'function') {
             player.current.setPlaybackQuality(ytValue);
         }
     };
+
     useEffect(() => {
-        if (!qualityPreviewOpen) return;
-        const outside = e => { if (!qualityPreviewRef.current?.contains(e.target)) setQualityPreviewOpen(false); };
-        const escape = e => { if (e.key === 'Escape') { setQualityPreviewOpen(false); qualityPreviewRef.current?.querySelector('button')?.focus(); } };
+        if (!menuOpen) return;
+        const outside = e => { if (!menuRef.current?.contains(e.target)) { setMenuOpen(false); setMenuView('main'); } };
+        const escape = e => { if (e.key === 'Escape') { setMenuOpen(false); setMenuView('main'); menuRef.current?.querySelector('button')?.focus(); } };
         document.addEventListener('pointerdown', outside);
         document.addEventListener('keydown', escape);
         return () => { document.removeEventListener('pointerdown', outside); document.removeEventListener('keydown', escape); };
-    }, [qualityPreviewOpen]);
+    }, [menuOpen]);
     const completed = useRef(isCompleted); completed.current = isCompleted;
     const [volume, setVolume] = useState(100), [muted, setMuted] = useState(false);
     const mount = useRef(null), player = useRef(null), ended = useRef(onEnded);
@@ -3045,20 +3041,57 @@ const CleanYouTubePlayer = ({ videoId, controller, onEnded, poster, posterFallba
                 <select className="platform-player-speed" title="Velocidade" aria-label="Velocidade de reprodução" disabled={!ready || speeds.length < 2} value={speed} onChange={e => changeSpeed(Number(e.target.value))}>
                     {Array.from(new Set([...speeds, speed])).sort((a,b) => a-b).map(rate => <option key={rate} value={rate}>{rate}×</option>)}
                 </select>
-                <div className="platform-quality-preview" ref={qualityPreviewRef}>
-                    <button type="button" className="platform-youtube-quality-button" title="Ajustar Qualidade" aria-label="Abrir opções de qualidade" aria-haspopup="dialog" aria-expanded={qualityPreviewOpen} onClick={() => { setQualityPreviewOpen(value => !value); coverVideo(); revealVideo(); }}>⚙</button>
-                    {qualityPreviewOpen && <div className="platform-quality-preview-panel" role="dialog" aria-label="Opções de qualidade">
-                        <div className="platform-quality-preview-heading">⚙ Qualidade do vídeo</div>
-                        <div className="platform-quality-preview-options">
-                            {availableQualities.map(([value, label, badge]) => (
-                                <button key={value} type="button" className="platform-quality-preview-option" aria-pressed={qualityPreviewValue === value} onClick={() => changeQuality(value)}>
-                                    <span>{label}</span>{badge && <span className="platform-quality-preview-badge">{badge}</span>}
-                                    {qualityPreviewValue === value && <span className="platform-quality-preview-check" aria-hidden="true">✓</span>}
-                                </button>
-                            ))}
+                <div className="platform-quality-preview relative" ref={menuRef}>
+                    <button type="button" className="text-white hover:text-indigo-400 transition-all outline-none p-1.5" title="Configurações" aria-haspopup="true" aria-expanded={menuOpen} onClick={() => { setMenuOpen(value => !value); setMenuView('main'); coverVideo(); revealVideo(); }}>
+                        <Settings size={22} className={menuOpen ? 'rotate-90 transition-transform' : 'transition-transform'} />
+                    </button>
+                    
+                    {menuOpen && (
+                        <div className="absolute right-0 bottom-14 mb-1 w-72 bg-[#1a1a1a]/95 backdrop-blur-2xl border border-white/10 rounded-2xl shadow-[0_0_40px_rgba(0,0,0,0.8)] z-[70] flex flex-col py-2 animate-scale-in text-[13px] text-white font-medium" role="menu">
+                            
+                            {menuView === 'main' && (
+                                <>
+                                    <button className="flex items-center justify-between px-5 py-3.5 hover:bg-white/10 transition-colors w-full text-left opacity-60 cursor-not-allowed">
+                                        <div className="flex items-center gap-3"><MessageSquare size={18}/> Legendas/CC</div>
+                                        <span className="text-white/50 flex items-center gap-1 text-[11px]">Desativado <ArrowRight size={14}/></span>
+                                    </button>
+                                    <button className="flex items-center justify-between px-5 py-3.5 hover:bg-white/10 transition-colors w-full text-left opacity-60 cursor-not-allowed">
+                                        <div className="flex items-center gap-3"><Clock size={18}/> Timer de suspensão</div>
+                                        <span className="text-white/50 flex items-center gap-1 text-[11px]">Desativado <ArrowRight size={14}/></span>
+                                    </button>
+                                    <button className="flex items-center justify-between px-5 py-3.5 hover:bg-white/10 transition-colors w-full text-left opacity-60 cursor-not-allowed">
+                                        <div className="flex items-center gap-3"><Play size={18}/> Velocidade da reprodução</div>
+                                        <span className="text-white/50 flex items-center gap-1 text-[11px]">Normal <ArrowRight size={14}/></span>
+                                    </button>
+                                    <button onClick={() => setMenuView('quality')} className="flex items-center justify-between px-5 py-3.5 hover:bg-white/10 transition-colors w-full text-left">
+                                        <div className="flex items-center gap-3"><Settings size={18}/> Qualidade</div>
+                                        <span className="text-white flex items-center gap-1 text-[11px]">
+                                            {availableQualities.find(q => q[0] === qualityPreviewValue)?.[1] || 'Auto'} 
+                                            {availableQualities.find(q => q[0] === qualityPreviewValue)?.[2] && <sup className="text-white font-bold ml-0.5">{availableQualities.find(q => q[0] === qualityPreviewValue)?.[2]}</sup>}
+                                            <ArrowRight size={14} className="text-white/50 ml-1"/>
+                                        </span>
+                                    </button>
+                                </>
+                            )}
+
+                            {menuView === 'quality' && (
+                                <>
+                                    <button onClick={() => setMenuView('main')} className="flex items-center gap-3 px-5 py-4 border-b border-white/10 hover:bg-white/10 transition-colors w-full text-left mb-2">
+                                        <ArrowLeft size={18}/> <span className="font-bold">Qualidade</span>
+                                    </button>
+                                    <div className="max-h-[250px] overflow-y-auto custom-scrollbar pb-2">
+                                        {availableQualities.map(([value, label, badge]) => (
+                                            <button key={value} onClick={() => changeQuality(value)} className="flex items-center gap-4 px-5 py-3.5 hover:bg-white/10 transition-colors w-full text-left">
+                                                <div className="w-4 flex justify-center">{qualityPreviewValue === value && <Check size={18}/>}</div>
+                                                <span className="flex items-center gap-1 text-sm">{label} {badge && <sup className="text-[10px] text-white font-bold">{badge}</sup>}</span>
+                                            </button>
+                                        ))}
+                                    </div>
+                                </>
+                            )}
+
                         </div>
-                        <div className="platform-quality-preview-note" style={{ color: '#8b5cf6' }}>Qualidade processada pela API nativa do YouTube.</div>
-                    </div>}
+                    )}
                 </div>
             </div>
         </div>
