@@ -2759,6 +2759,16 @@ const CleanYouTubePlayer = ({ videoId, controller, onEnded, poster, posterFallba
     const [ready, setReady] = useState(false);
     const [retry, setRetry] = useState(0);
     const [playing, setPlaying] = useState(false), [time, setTime] = useState(0), [duration, setDuration] = useState(0), [error, setError] = useState('');
+    // Máscaras visuais locais: não alteram o iframe nem ampliam/recortam o vídeo.
+    const [softMask, setSoftMask] = useState(true);
+    const [introMask, setIntroMask] = useState(true);
+    useEffect(() => {
+        setIntroMask(true);
+        if (!playing) return;
+        // Heurística visual: a API não informa quando o título do YouTube desaparece.
+        const timeout = setTimeout(() => setIntroMask(false), 4500);
+        return () => clearTimeout(timeout);
+    }, [playing, videoId, retry]);
     useEffect(() => {
         let disposed = false, timer, readyTimer, attempts = 0;
         setReady(false); setPlaying(false); setError(''); setTime(0); setDuration(0);
@@ -2817,7 +2827,18 @@ const CleanYouTubePlayer = ({ videoId, controller, onEnded, poster, posterFallba
     const toggle = () => { if (playing) { setPlaying(false); player.current?.pauseVideo?.(); } else { player.current?.playVideo?.(); } };
     const stamp = v => `${Math.floor(v / 60)}:${String(Math.floor(v % 60)).padStart(2, '0')}`;
     return <div className="platform-youtube-player" style={{position:'relative', width:'100%', background:'#000'}}>
-        <style>{`.platform-youtube-stage{position:relative;width:100%;aspect-ratio:16/9;overflow:hidden;background:#000}.platform-youtube-top{position:absolute;top:0;left:0;right:0;height:64px;background:#000;z-index:20;pointer-events:none}.platform-youtube-bottom{position:absolute;bottom:0;left:0;right:0;height:55px;background:#000;z-index:20;pointer-events:none}@media(max-width:640px){.platform-youtube-top{height:48px}.platform-youtube-bottom{height:50px}.platform-youtube-player button{min-height:32px}.platform-youtube-player input{min-height:24px}}`}</style>
+        <style>{`
+.platform-youtube-stage{position:relative;width:100%;aspect-ratio:16/9;overflow:hidden;background:#000}
+.platform-youtube-soft-mask{position:absolute;z-index:20;pointer-events:none;background:rgba(8,11,20,.94)}
+@supports ((backdrop-filter:blur(18px)) or (-webkit-backdrop-filter:blur(18px))){
+.platform-youtube-soft-mask{background:rgba(8,11,20,.56);backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px)}
+}
+.platform-youtube-intro-mask{top:0;left:0;right:0;height:min(64px,24%);opacity:0;visibility:hidden;transition:opacity .25s ease,visibility .25s}
+.platform-youtube-intro-mask.is-visible{opacity:1;visibility:visible}
+.platform-youtube-corner-mask{right:0;bottom:0;width:min(116px,28%);height:min(42px,18%);border-top-left-radius:12px}
+@media(max-width:640px){.platform-youtube-player button{min-height:32px}.platform-youtube-player input{min-height:24px}}
+@media(prefers-reduced-motion:reduce){.platform-youtube-intro-mask{transition:none}}
+`}</style>
         <div className="platform-youtube-stage">
         <div ref={mount} style={{position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, width: '100%', height: '100%', zIndex: 0, pointerEvents: 'none', opacity: playing ? 1 : 0}} className="absolute w-full h-full pointer-events-none" />
         <button aria-label={playing ? 'Pausar vídeo' : 'Reproduzir vídeo'} onClick={toggle} style={{position:'absolute', inset:0, width:'100%', height:'100%', zIndex:10, border:0, background:'transparent', cursor:'pointer'}} className="absolute inset-0 z-10 bg-transparent" />
@@ -2827,8 +2848,10 @@ const CleanYouTubePlayer = ({ videoId, controller, onEnded, poster, posterFallba
             <CoursePauseCover sources={[poster, ...posterFallbacks]} title={courseTitle} />
             {!ready && <span style={{position:'relative', padding:'8px 12px', background:'rgba(0,0,0,.7)', borderRadius:8}}>Carregando aula…</span>}
         </button>}
-        <div className="platform-youtube-top" />
-        <div className="platform-youtube-bottom" />
+        {softMask && <>
+            <div aria-hidden="true" className={`platform-youtube-soft-mask platform-youtube-intro-mask ${introMask || !playing ? 'is-visible' : ''}`} />
+            <div aria-hidden="true" className="platform-youtube-soft-mask platform-youtube-corner-mask" />
+        </>}
         </div>
         <div style={{position:'relative', minHeight:76, zIndex:30, background:'#080b14', padding:'8px 12px', boxSizing:'border-box'}} className="text-white">
             <input aria-label="Progresso do vídeo" type="range" min="0" max={duration || 1} step="0.1" value={Math.min(time, duration || 1)} onChange={e => seek(Number(e.target.value))} style={{width:'100%', accentColor:'#6366f1'}} />
@@ -2838,6 +2861,7 @@ const CleanYouTubePlayer = ({ videoId, controller, onEnded, poster, posterFallba
                 {(!restrictSeeking || isCompleted) && <button disabled={!ready} onClick={() => seek(time + 10)} aria-label="Avançar 10 segundos" title="Avançar 10 segundos">10s ↷</button>}
                 <button disabled={!ready} onClick={toggleMute} aria-label={muted ? 'Ativar som' : 'Silenciar'}>{muted ? 'Sem som' : 'Som'}</button>
                 <input aria-label="Volume" type="range" min="0" max="100" value={muted ? 0 : volume} onChange={e => changeVolume(Number(e.target.value))} style={{width:64, accentColor:'#6366f1'}} />
+                <button type="button" onClick={() => setSoftMask(value => !value)} aria-pressed={!softMask} title={softMask ? 'Exibir o vídeo inteiro, sem máscaras visuais' : 'Ativar máscara discreta'} style={{fontSize:11, padding:'4px 8px', border:'1px solid #475569', borderRadius:6}}>{softMask ? 'Imagem completa' : 'Ativar máscara'}</button>
                 <span style={{fontSize:11, marginLeft:'auto'}}>{stamp(time)} / {stamp(duration)}</span>
             </div>
         </div>
