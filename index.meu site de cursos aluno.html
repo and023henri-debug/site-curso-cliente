@@ -738,7 +738,6 @@ const platformVideoId = value => {
 const platformYouTubePlayerVars = () => ({
     controls: 0, disablekb: 1, rel: 0, autoplay: 0, fs: 0,
     playsinline: 1, cc_load_policy: 0, iv_load_policy: 3,
-    vq: 'hd1080', // HACK DE FORÇA BRUTA: Solicita 1080p nativo na montagem
     ...(window.location.protocol === 'https:' || window.location.protocol === 'http:'
         ? { origin: window.location.origin } : {})
 });
@@ -2576,15 +2575,9 @@ const CustomVideoPlayer = ({ src, onEnded, poster, isCompleted, showNotification
     };
 
     const mudarQualidade = (novaQualidade) => {
+        if (isYT) return showNotification && showNotification("O YouTube ajusta a qualidade automaticamente para evitar travamentos.", "info");
         setQualidadeAtual(novaQualidade);
         setMostrarMenuQualidade(false);
-        
-        // Se for YouTube, executa o comando da API nativa
-        if (isYT && ytPlayerRef.current && typeof ytPlayerRef.current.setPlaybackQuality === 'function') {
-            ytPlayerRef.current.setPlaybackQuality(novaQualidade.toLowerCase());
-            return;
-        }
-
         const video = videoRef.current;
         if (video) {
             const tempoAtual = video.currentTime;
@@ -2768,40 +2761,6 @@ const CoursePauseCover = ({ sources = [], title = 'Curso' }) => {
 };
 
 const CleanYouTubePlayer = ({ videoId, controller, onEnded, poster, posterFallbacks = [], courseTitle = 'Curso', lessonTitle = 'Aula', moduleTitle = '', isCompleted = false, restrictSeeking = false }) => {
-   // Menu Clone Estilo Nativo & Controle de Qualidade
-   const [menuOpen, setMenuOpen] = useState(false);
-    const [menuView, setMenuView] = useState('main'); 
-    const [qualityPreviewValue, setQualityPreviewValue] = useState('auto');
-    const [availableQualities, setAvailableQualities] = useState([['auto', 'Automático', '']]);
-    const menuRef = useRef(null);
-
-    const ytQualityMap = {
-        'highres': ['2160p', '4K'], 'hd2160': ['2160p', '4K'], 'hd1440': ['1440p', 'HD'],
-        'hd1080': ['1080p', 'HD'], 'hd720': ['720p', 'HD'], 'large': ['480p', ''],
-        'medium': ['360p', ''], 'small': ['240p', ''], 'tiny': ['144p', ''], 'auto': ['Automático', '']
-    };
-
-    const changeQuality = (ytValue) => {
-        setQualityPreviewValue(ytValue);
-        setMenuOpen(false);
-        setMenuView('main');
-        coverVideo(); 
-        revealVideo();
-        
-        // Força a qualidade na API nativa do YouTube
-        if (player.current && typeof player.current.setPlaybackQuality === 'function') {
-            player.current.setPlaybackQuality(ytValue);
-        }
-    };
-
-    useEffect(() => {
-        if (!menuOpen) return;
-        const outside = e => { if (!menuRef.current?.contains(e.target)) { setMenuOpen(false); setMenuView('main'); } };
-        const escape = e => { if (e.key === 'Escape') { setMenuOpen(false); setMenuView('main'); menuRef.current?.querySelector('button')?.focus(); } };
-        document.addEventListener('pointerdown', outside);
-        document.addEventListener('keydown', escape);
-        return () => { document.removeEventListener('pointerdown', outside); document.removeEventListener('keydown', escape); };
-    }, [menuOpen]);
     const completed = useRef(isCompleted); completed.current = isCompleted;
     const [volume, setVolume] = useState(100), [muted, setMuted] = useState(false);
     const mount = useRef(null), player = useRef(null), ended = useRef(onEnded);
@@ -2813,6 +2772,22 @@ const CleanYouTubePlayer = ({ videoId, controller, onEnded, poster, posterFallba
     const [speed, setSpeed] = useState(1), [speeds, setSpeeds] = useState([1]);
     const revealTimer = useRef(null), topBar = useRef(null), bottomBar = useRef(null);
     const [screenState, setScreenState] = useState(-1);
+    const [qualityMode, setQualityMode] = useState(false);
+    const qualityModeRef = useRef(false);
+    const nativePosition = useRef({time:0, at:0});
+    // Mantém o mesmo iframe e a seleção nativa ao retornar para a plataforma.
+    const syncNativeAccess = enabled => {
+        const host = mount.current;
+        const frame = host?.querySelector('iframe');
+        if (!host) return;
+        if (enabled) host.removeAttribute('inert'); else host.setAttribute('inert', '');
+        if (frame) {
+            frame.tabIndex = enabled ? 0 : -1;
+            frame.style.pointerEvents = enabled ? 'auto' : 'none';
+            if (enabled) frame.removeAttribute('aria-hidden'); else frame.setAttribute('aria-hidden', 'true');
+        }
+    };
+    useEffect(() => { syncNativeAccess(qualityMode); }, [qualityMode, ready]);
     // Ajuste em milissegundos: a API não informa quando as informações desaparecem.
     // Gravação: elementos visíveis por ~3.20 s; versão gravada ocultava 0.80 s.
     // 4.00 s desde PLAYING + 0.10 s de margem para a atualização do navegador.
@@ -2833,6 +2808,7 @@ const CleanYouTubePlayer = ({ videoId, controller, onEnded, poster, posterFallba
     };
     useEffect(() => {
         let disposed = false, timer, readyTimer, attempts = 0;
+        qualityModeRef.current = false; setQualityMode(false); nativePosition.current = {time:0, at:0};
         coverVideo(); setScreenState(-1); setSpeed(1); setSpeeds([1]);
         setReady(false); setPlaying(false); setError(''); setTime(0); setDuration(0);
         const start = () => {
@@ -2852,59 +2828,22 @@ const CleanYouTubePlayer = ({ videoId, controller, onEnded, poster, posterFallba
             el.referrerPolicy = 'strict-origin-when-cross-origin';
             el.allow = 'autoplay; encrypted-media; fullscreen; picture-in-picture';
             el.allowFullscreen = true;
-            el.src = platformYouTubeEmbedUrl(videoId);
+            const nativeUrl = new URL(platformYouTubeEmbedUrl(videoId));
+            nativeUrl.searchParams.set('controls', '1');
+            el.src = nativeUrl.toString();
             mount.current.replaceChildren(el);
             readyTimer = setTimeout(() => { if (!disposed) setError('O YouTube não respondeu. Verifique a conexão e tente novamente.'); }, 25000);
             player.current = new window.YT.Player(el, { videoId, width: '100%', height: '100%',
-                playerVars: platformYouTubePlayerVars(),
+                playerVars: { ...platformYouTubePlayerVars(), controls: 1 },
                 events: {
                     onApiChange: e => disableYouTubeCaptions(e.target),
-                    onReady: e => { 
-                        if (disposed) return; 
-                        clearTimeout(readyTimer); 
-                        setError(''); 
-                        disableYouTubeCaptions(e.target); 
-                        controller.current = e.target; 
-                        setDuration(e.target.getDuration()); 
-                        setSpeeds(e.target.getAvailablePlaybackRates?.() || [1]); 
-                        setSpeed(e.target.getPlaybackRate?.() || 1); 
-                        
-                        // Busca dinamicamente quais resoluções este vídeo suporta
-                        if (typeof e.target.getAvailableQualityLevels === 'function') {
-                            const levels = e.target.getAvailableQualityLevels();
-                            if (levels && levels.length > 0) {
-                                const mappedLevels = levels.map(level => {
-                                    const info = ytQualityMap[level] || [level, ''];
-                                    return [level, info[0], info[1]];
-                                });
-                                setAvailableQualities(mappedLevels);
-
-                                // 👇 MÁGICA: Força a qualidade MAIS ALTA disponível como padrão
-                                // A lista 'levels' vem ordenada da maior resolução para a menor.
-                                const highestQuality = levels.find(l => l !== 'auto');
-                                if (highestQuality) {
-                                    e.target.setPlaybackQuality(highestQuality);
-                                    setQualityPreviewValue(highestQuality); // Atualiza a UI para mostrar a alta resolução selecionada
-                                }
-                            }
-                        }
-                        setReady(true); 
-                    },
+                    onReady: e => { if (disposed) return; clearTimeout(readyTimer); setError(''); disableYouTubeCaptions(e.target); controller.current = e.target; setDuration(e.target.getDuration()); setSpeeds(e.target.getAvailablePlaybackRates?.() || [1]); setSpeed(e.target.getPlaybackRate?.() || 1); setReady(true); },
                     onStateChange: e => {
                         if (disposed) return;
                         disableYouTubeCaptions(e.target);
                         setScreenState(e.data);
                         if (e.data === 1 && e.target.__transcriptionPaused) { coverVideo(); setPlaying(false); e.target.pauseVideo(); return; }
-                        if (e.data === 1) { 
-                            setPlaying(true); 
-                            revealVideo(); 
-
-                            // 👇 REFORÇO ANTI-QUEDA: YouTube às vezes reseta a qualidade quando dá play.
-                            // Aqui nós dizemos: "Não me importa, aplique a qualidade que está na nossa engrenagem!"
-                            if (typeof e.target.setPlaybackQuality === 'function') {
-                                e.target.setPlaybackQuality(qualityPreviewValue !== 'auto' ? qualityPreviewValue : 'highres');
-                            }
-                        }
+                        if (e.data === 1) { setPlaying(true); revealVideo(); }
                         else { coverVideo(); if (e.data !== 3) setPlaying(false); }
                         if (e.data === 0) ended.current?.();
                     },
@@ -2930,7 +2869,28 @@ const CleanYouTubePlayer = ({ videoId, controller, onEnded, poster, posterFallba
             const script = document.createElement('script'); script.src = 'https://www.youtube.com/iframe_api'; document.head.appendChild(script);
         }
         start();
-        const clock = setInterval(() => { if (player.current?.getCurrentTime) { setTime(player.current.getCurrentTime() || 0); setDuration(player.current.getDuration() || 0); const state = player.current.getPlayerState?.(); if (state === 2 || state === 0 || state === 5 || state === -1) { coverVideo(); setPlaying(false); } } }, 500);
+        const clock = setInterval(() => {
+            const target = player.current;
+            if (!target?.getCurrentTime) return;
+            let position = target.getCurrentTime() || 0;
+            const now = Date.now(), previous = nativePosition.current;
+            // Preserva a restrição de avanço das aulas ainda não concluídas.
+            if (qualityModeRef.current && restrictSeeking && !completed.current && previous.at) {
+                const naturalAdvance = Math.max(0, now - previous.at) / 1000 * (target.getPlaybackRate?.() || 1);
+                if (position > previous.time + naturalAdvance + 2) {
+                    position = previous.time;
+                    target.seekTo(position, true);
+                }
+            }
+            nativePosition.current = {time:position, at:now};
+            setTime(position); setDuration(target.getDuration() || 0);
+            if (qualityModeRef.current) {
+                setVolume(target.getVolume?.() ?? 100);
+                setMuted(target.isMuted?.() ?? false);
+            }
+            const state = target.getPlayerState?.();
+            if (state === 2 || state === 0 || state === 5 || state === -1) { coverVideo(); setPlaying(false); }
+        }, 500);
         return () => { disposed = true; clearTimeout(revealTimer.current); clearTimeout(timer); clearTimeout(readyTimer); clearInterval(clock); controller.current = null; player.current?.destroy?.(); player.current = null; };
     }, [videoId, retry]);
     const seek = value => {
@@ -2956,11 +2916,43 @@ const CleanYouTubePlayer = ({ videoId, controller, onEnded, poster, posterFallba
         player.current?.setPlaybackRate?.(value);
         revealVideo();
     };
+    const toggleQualityMode = () => {
+        if (!ready) return;
+        const enabled = !qualityModeRef.current;
+        qualityModeRef.current = enabled;
+        nativePosition.current = {time:player.current?.getCurrentTime?.() || 0, at:Date.now()};
+        setQualityMode(enabled);
+        syncNativeAccess(enabled);
+        if (enabled) clearTimeout(revealTimer.current);
+        else {
+            setVolume(player.current?.getVolume?.() ?? volume);
+            setMuted(player.current?.isMuted?.() ?? muted);
+            setSpeed(player.current?.getPlaybackRate?.() || 1);
+            coverVideo(); revealVideo();
+        }
+    };
     const stamp = v => `${Math.floor(v / 60)}:${String(Math.floor(v % 60)).padStart(2, '0')}`;
     return <div className="platform-youtube-player" style={{position:'relative', width:'100%', background:'#000'}}>
         <style>{`
 .platform-youtube-stage{position:relative;width:100%;aspect-ratio:16/9;overflow:hidden;background:#000;isolation:isolate}
 .platform-youtube-stage iframe{pointer-events:none!important;user-select:none}
+.platform-youtube-stage.is-quality-mode iframe{pointer-events:auto!important;transform:translateY(calc(-1 * var(--native-lift)))}
+.platform-youtube-stage.is-quality-mode{--native-menu-width:min(360px,calc(100% - 16px));--native-gear-right:176px;--native-gear-width:48px;--native-lift:80px;min-height:480px}
+/* Aberturas por posição: a interface interna do YouTube pode variar por aparelho. */
+.platform-youtube-stage.is-quality-mode .platform-youtube-shield{display:none}
+.platform-youtube-stage.is-quality-mode .platform-youtube-brand-bar{opacity:1!important;pointer-events:auto;z-index:34;box-shadow:none}
+.platform-youtube-stage.is-quality-mode .platform-youtube-brand-top{height:80px}
+.platform-youtube-stage.is-quality-mode .platform-youtube-brand-bottom{height:72px;clip-path:none;padding-right:24px}
+.platform-youtube-stage.is-quality-mode .platform-youtube-brand-bottom>.platform-youtube-brand-status{display:none}
+.platform-native-block{position:absolute;z-index:32;background:transparent;pointer-events:auto;touch-action:pan-y}
+.platform-native-block-left{left:0;top:80px;bottom:128px;width:calc(100% - var(--native-menu-width) - 8px)}
+.platform-native-block-right{right:0;top:80px;bottom:128px;width:8px}
+.platform-native-menu-outline{position:absolute;right:8px;top:80px;bottom:128px;width:var(--native-menu-width);border:1px solid #7962b8;border-radius:12px;box-sizing:border-box;pointer-events:none;z-index:33}
+.platform-native-gear-outline{position:absolute;right:var(--native-gear-right);bottom:80px;width:var(--native-gear-width);height:48px;border:1px solid #a78bfa;border-radius:8px;box-sizing:border-box;pointer-events:none;z-index:35}
+.platform-native-controls-cover{position:absolute;left:0;right:0;bottom:72px;height:56px;background:linear-gradient(110deg,#151325,#222044);z-index:34;pointer-events:auto;clip-path:polygon(0 0,calc(100% - var(--native-gear-right) - var(--native-gear-width)) 0,calc(100% - var(--native-gear-right) - var(--native-gear-width)) 48px,calc(100% - var(--native-gear-right)) 48px,calc(100% - var(--native-gear-right)) 0,100% 0,100% 100%,0 100%)}
+.platform-youtube-quality-notice{padding:12px 16px;background:#24203e;border-bottom:1px solid #6551a3;color:#ede9fe;font:13px/1.5 system-ui,sans-serif}
+.platform-youtube-quality-button{padding:6px 10px;border:1px solid #7560c0;border-radius:8px;background:#27203f;color:#f5f3ff;font:12px/1.5 system-ui,sans-serif;cursor:pointer}
+.platform-youtube-quality-button:disabled{opacity:.5;cursor:wait}
 .platform-youtube-brand-bar{position:absolute;left:0;right:0;z-index:28;background:linear-gradient(110deg,#151325 0%,#222044 52%,#121624 100%);color:#fff;box-sizing:border-box;pointer-events:none;display:flex;align-items:center;padding:12px 24px;overflow:hidden;box-shadow:0 6px 20px #05051166}
 .platform-youtube-brand-top{top:0;height:80px;border-bottom:1px solid #52417d;gap:12px}
 .platform-youtube-brand-top::before{content:'';position:absolute;left:0;top:0;bottom:0;width:4px;background:linear-gradient(#a78bfa,#6366f1)}
@@ -2977,34 +2969,11 @@ const CleanYouTubePlayer = ({ videoId, controller, onEnded, poster, posterFallba
 
 .platform-youtube-shield{position:absolute;inset:0;z-index:30;background:transparent;pointer-events:auto;cursor:default;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;touch-action:pan-y}
 @media(max-width:640px){.platform-youtube-player button{min-height:32px}.platform-youtube-player input{min-height:24px}}
-.platform-youtube-player{border:1px solid #292833;border-radius:16px;overflow:hidden;font-family:system-ui,sans-serif}
-.platform-player-controls{position:relative;z-index:30;padding:10px 16px 12px;background:linear-gradient(#0d0d15,#09090f);color:#eee}
-.platform-player-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:7px}
-.platform-player-controls button{display:inline-flex;align-items:center;justify-content:center;min-width:34px;height:36px;border:1px solid transparent;border-radius:9px;background:transparent;color:#eee;cursor:pointer}
-.platform-player-controls button:hover{background:#242038;border-color:#423967}
-.platform-player-controls button:focus-visible,.platform-player-controls select:focus-visible{outline:2px solid #a78bfa;outline-offset:2px}
-.platform-player-controls button:disabled{opacity:.4;cursor:default}
-.platform-player-clock{font-size:11px;font-variant-numeric:tabular-nums;color:#c6c4d3;margin-right:auto;white-space:nowrap}
-.platform-player-controls input[type=range]{accent-color:#7454ff;cursor:pointer}
-.platform-player-controls .platform-youtube-quality-button{background:#201b32;border-color:#4c3e78;font-size:22px;min-width:42px}
-.platform-player-controls .platform-youtube-quality-button[aria-pressed=true]{background:#4f35cc;border-color:#9584f7}
-.platform-player-volume{width:60px}
-.platform-player-speed{color:#ddd;background:#15131f;border:1px solid #353047;border-radius:7px;padding:6px 3px;font-size:11px}
-@media(max-width:640px){.platform-player-controls{padding:8px}.platform-player-row{gap:4px}.platform-player-volume{width:42px}}
-
-.platform-quality-preview{position:relative;margin-left:4px}
-.platform-quality-preview-panel{position:absolute;right:0;bottom:calc(100% + 12px);width:220px;max-width:calc(100vw - 32px);z-index:45;background:#14131d;border:1px solid #3b344e;border-radius:13px;box-shadow:0 12px 38px #000a;overflow:hidden;color:#eee;text-align:left}
-.platform-quality-preview-heading{font:600 12px/1.5 system-ui;padding:12px 14px;border-bottom:1px solid #302a40}
-.platform-quality-preview-options{max-height:min(310px,40vh);overflow:auto;padding:5px}
-.platform-player-controls .platform-quality-preview-option{width:100%;height:32px;justify-content:flex-start;gap:8px;padding:0 12px;font:12px/1.5 system-ui;border-radius:6px}
-.platform-player-controls .platform-quality-preview-option[aria-pressed=true]{background:#322746;color:#fff;border-color:#695098}
-.platform-quality-preview-badge{font-size:9px;line-height:16px;background:#6445df;color:white;padding:0 4px;border-radius:3px}
-.platform-quality-preview-check{margin-left:auto;color:#c4b5fd}
-.platform-quality-preview-note{padding:8px 12px;background:#1c1828;border-top:1px solid #302a40;font:10px/1.5 system-ui;color:#bdb6ce}
 `}</style>
-        <div className="platform-youtube-stage">
-        <div ref={mount} aria-hidden="true" style={{position:'absolute', inset:0, width:'100%', height:'100%', zIndex:0, pointerEvents:'none', opacity:ready && screenState !== -1 && screenState !== 5 && screenState !== 0 ? 1 : 0}} />
-        {(!ready || screenState === -1 || screenState === 5 || screenState === 0) && <div style={{position:'absolute', inset:0, zIndex:25, display:'flex', alignItems:'center', justifyContent:'center', background:'#080b14', color:'#fff'}}>
+        {qualityMode && <div className="platform-youtube-quality-notice" role="status">Clique na engrenagem nativa na abertura destacada acima da barra inferior, depois em <strong>Qualidade</strong>. Escolha a resolução, feche o menu pela engrenagem e clique em <strong>Concluir</strong>. Se necessário, use o play abaixo e mova o cursor sobre a abertura para exibir os controles.</div>}
+        <div className={`platform-youtube-stage ${qualityMode ? 'is-quality-mode' : ''}`}>
+        <div ref={mount} aria-hidden={qualityMode ? undefined : true} style={{position:'absolute', inset:0, width:'100%', height:'100%', zIndex:0, pointerEvents:qualityMode ? 'auto' : 'none', opacity:qualityMode || ready && screenState !== -1 && screenState !== 5 && screenState !== 0 ? 1 : 0}} />
+        {!qualityMode && (!ready || screenState === -1 || screenState === 5 || screenState === 0) && <div style={{position:'absolute', inset:0, zIndex:25, display:'flex', alignItems:'center', justifyContent:'center', background:'#080b14', color:'#fff'}}>
             <CoursePauseCover sources={[poster, ...posterFallbacks]} title={courseTitle} />
             <span style={{position:'relative', padding:'8px 12px', background:'rgba(0,0,0,.7)', borderRadius:8}}>{!ready ? 'Carregando aula…' : screenState === 0 ? 'Aula encerrada' : 'Use o botão ▶ abaixo para reproduzir'}</span>
         </div>}
@@ -3018,6 +2987,13 @@ const CleanYouTubePlayer = ({ videoId, controller, onEnded, poster, posterFallba
             <span className="platform-youtube-brand-badge"><span className="platform-youtube-brand-dot" /><span className="platform-youtube-brand-copy platform-youtube-brand-status">{courseTitle || 'Curso'}</span></span>
             <span className="platform-youtube-brand-status">{screenState === 0 ? 'Aula encerrada' : !ready ? 'Carregando' : playing ? `Reproduzindo · ${speed}×` : 'Pausado'} · {stamp(time)}</span>
         </div>
+        {qualityMode && <>
+            <div aria-hidden="true" className="platform-native-block platform-native-block-left" />
+            <div aria-hidden="true" className="platform-native-block platform-native-block-right" />
+            <div aria-hidden="true" className="platform-native-menu-outline" />
+            <div aria-hidden="true" className="platform-native-gear-outline" />
+            <div aria-hidden="true" className="platform-native-controls-cover" />
+        </>}
         {/* Camada transparente: bloqueia interação, mas não apaga os pixels do YouTube. */}
         <div aria-hidden="true" className="platform-youtube-shield"
             onPointerDown={e => { e.preventDefault(); e.stopPropagation(); }}
@@ -3027,72 +3003,22 @@ const CleanYouTubePlayer = ({ videoId, controller, onEnded, poster, posterFallba
             onAuxClick={e => { e.preventDefault(); e.stopPropagation(); }}
             onDragStart={e => { e.preventDefault(); e.stopPropagation(); }} />
         </div>
-        <div className="platform-player-controls">
-            <input disabled={!ready} aria-label="Progresso do vídeo" type="range" min="0" max={duration || 1} step="0.1" value={Math.min(time, duration || 1)} onChange={e => seek(Number(e.target.value))} style={{width:'100%', display:'block', height:6}} />
-            <div className="platform-player-row">
-                <button type="button" disabled={!ready} onClick={toggle} aria-label={playing ? 'Pausar' : 'Reproduzir'}>{playing ? <Pause size={20}/> : <Play size={20}/>}</button>
-                <span className="platform-player-clock">{stamp(time)} / {stamp(duration)}</span>
-                <button type="button" disabled={!ready} onClick={() => seek(time - 10)} aria-label="Voltar 10 segundos" title="Voltar 10 segundos" style={{fontSize:12}}>↶10</button>
-                {(!restrictSeeking || isCompleted) && <button type="button" disabled={!ready} onClick={() => seek(time + 10)} aria-label="Avançar 10 segundos" title="Avançar 10 segundos" style={{fontSize:12}}>10↷</button>}
-                <button type="button" disabled={!ready} onClick={toggleMute} aria-label={muted ? 'Ativar som' : 'Silenciar'} title={muted ? 'Ativar som' : 'Silenciar'}>
-                    <svg aria-hidden="true" width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M11 5 6 9H3v6h3l5 4z"/>{muted ? <path d="m16 9 5 6m0-6-5 6"/> : <><path d="M15 8a6 6 0 0 1 0 8"/><path d="M18 5a10 10 0 0 1 0 14"/></>}</svg>
-                </button>
-                <input className="platform-player-volume" disabled={!ready} aria-label="Volume" type="range" min="0" max="100" value={muted ? 0 : volume} onChange={e => changeVolume(Number(e.target.value))} />
-                <select className="platform-player-speed" title="Velocidade" aria-label="Velocidade de reprodução" disabled={!ready || speeds.length < 2} value={speed} onChange={e => changeSpeed(Number(e.target.value))}>
-                    {Array.from(new Set([...speeds, speed])).sort((a,b) => a-b).map(rate => <option key={rate} value={rate}>{rate}×</option>)}
-                </select>
-                <div className="platform-quality-preview relative" ref={menuRef}>
-                    <button type="button" className="text-white hover:text-indigo-400 transition-all outline-none p-1.5" title="Configurações" aria-haspopup="true" aria-expanded={menuOpen} onClick={() => { setMenuOpen(value => !value); setMenuView('main'); coverVideo(); revealVideo(); }}>
-                        <Settings size={22} className={menuOpen ? 'rotate-90 transition-transform' : 'transition-transform'} />
-                    </button>
-                    
-                    {menuOpen && (
-                        <div className="absolute right-0 bottom-14 mb-1 w-72 bg-[#1a1a1a]/95 backdrop-blur-2xl border border-white/10 rounded-2xl shadow-[0_0_40px_rgba(0,0,0,0.8)] z-[70] flex flex-col py-2 animate-scale-in text-[13px] text-white font-medium" role="menu">
-                            
-                            {menuView === 'main' && (
-                                <>
-                                    <button className="flex items-center justify-between px-5 py-3.5 hover:bg-white/10 transition-colors w-full text-left opacity-60 cursor-not-allowed">
-                                        <div className="flex items-center gap-3"><MessageSquare size={18}/> Legendas/CC</div>
-                                        <span className="text-white/50 flex items-center gap-1 text-[11px]">Desativado <ArrowRight size={14}/></span>
-                                    </button>
-                                    <button className="flex items-center justify-between px-5 py-3.5 hover:bg-white/10 transition-colors w-full text-left opacity-60 cursor-not-allowed">
-                                        <div className="flex items-center gap-3"><Clock size={18}/> Timer de suspensão</div>
-                                        <span className="text-white/50 flex items-center gap-1 text-[11px]">Desativado <ArrowRight size={14}/></span>
-                                    </button>
-                                    <button className="flex items-center justify-between px-5 py-3.5 hover:bg-white/10 transition-colors w-full text-left opacity-60 cursor-not-allowed">
-                                        <div className="flex items-center gap-3"><Play size={18}/> Velocidade da reprodução</div>
-                                        <span className="text-white/50 flex items-center gap-1 text-[11px]">Normal <ArrowRight size={14}/></span>
-                                    </button>
-                                    <button onClick={() => setMenuView('quality')} className="flex items-center justify-between px-5 py-3.5 hover:bg-white/10 transition-colors w-full text-left">
-                                        <div className="flex items-center gap-3"><Settings size={18}/> Qualidade</div>
-                                        <span className="text-white flex items-center gap-1 text-[11px]">
-                                            {availableQualities.find(q => q[0] === qualityPreviewValue)?.[1] || 'Auto'} 
-                                            {availableQualities.find(q => q[0] === qualityPreviewValue)?.[2] && <sup className="text-white font-bold ml-0.5">{availableQualities.find(q => q[0] === qualityPreviewValue)?.[2]}</sup>}
-                                            <ArrowRight size={14} className="text-white/50 ml-1"/>
-                                        </span>
-                                    </button>
-                                </>
-                            )}
-
-                            {menuView === 'quality' && (
-                                <>
-                                    <button onClick={() => setMenuView('main')} className="flex items-center gap-3 px-5 py-4 border-b border-white/10 hover:bg-white/10 transition-colors w-full text-left mb-2">
-                                        <ArrowLeft size={18}/> <span className="font-bold">Qualidade</span>
-                                    </button>
-                                    <div className="max-h-[250px] overflow-y-auto custom-scrollbar pb-2">
-                                        {availableQualities.map(([value, label, badge]) => (
-                                            <button key={value} onClick={() => changeQuality(value)} className="flex items-center gap-4 px-5 py-3.5 hover:bg-white/10 transition-colors w-full text-left">
-                                                <div className="w-4 flex justify-center">{qualityPreviewValue === value && <Check size={18}/>}</div>
-                                                <span className="flex items-center gap-1 text-sm">{label} {badge && <sup className="text-[10px] text-white font-bold">{badge}</sup>}</span>
-                                            </button>
-                                        ))}
-                                    </div>
-                                </>
-                            )}
-
-                        </div>
-                    )}
-                </div>
+        <div style={{position:'relative', minHeight:76, zIndex:30, background:'#080b14', padding:'8px 12px', boxSizing:'border-box'}} className="text-white">
+            <input disabled={!ready} aria-label="Progresso do vídeo" type="range" min="0" max={duration || 1} step="0.1" value={Math.min(time, duration || 1)} onChange={e => seek(Number(e.target.value))} style={{width:'100%', accentColor:'#6366f1'}} />
+            <div style={{display:'flex', alignItems:'center', gap:10, flexWrap:'wrap'}}>
+                <button disabled={!ready} onClick={toggle} aria-label={playing ? 'Pausar' : 'Reproduzir'}>{playing ? <Pause size={20}/> : <Play size={20}/>}</button>
+                <button disabled={!ready} onClick={() => seek(time - 10)} aria-label="Voltar 10 segundos" title="Voltar 10 segundos">↶ 10s</button>
+                {(!restrictSeeking || isCompleted) && <button disabled={!ready} onClick={() => seek(time + 10)} aria-label="Avançar 10 segundos" title="Avançar 10 segundos">10s ↷</button>}
+                <button disabled={!ready} onClick={toggleMute} aria-label={muted ? 'Ativar som' : 'Silenciar'}>{muted ? 'Sem som' : 'Som'}</button>
+                <input aria-label="Volume" type="range" min="0" max="100" value={muted ? 0 : volume} onChange={e => changeVolume(Number(e.target.value))} style={{width:64, accentColor:'#6366f1'}} />
+                <label style={{display:'flex', alignItems:'center', gap:6, fontSize:12}}>
+                    Velocidade
+                    <select aria-label="Velocidade de reprodução" disabled={!ready || speeds.length < 2} value={speed} onChange={e => changeSpeed(Number(e.target.value))} style={{background:'#080b14', color:'#fff', border:'1px solid #475569', borderRadius:6, padding:'4px 6px'}}>
+                        {Array.from(new Set([...speeds, speed])).sort((a,b) => a-b).map(rate => <option key={rate} value={rate}>{rate}×</option>)}
+                    </select>
+                </label>
+                <button type="button" className="platform-youtube-quality-button" disabled={!ready} onClick={toggleQualityMode} aria-pressed={qualityMode} aria-label={qualityMode ? 'Concluir ajuste de qualidade' : 'Ajustar qualidade'}>{qualityMode ? '✓ Concluir' : '⚙ Qualidade'}</button>
+                <span style={{fontSize:11, marginLeft:'auto'}}>{stamp(time)} / {stamp(duration)}</span>
             </div>
         </div>
         {error && <div role="alert" className="absolute inset-0 z-40 bg-black flex flex-col gap-4 items-center justify-center p-8 text-white text-center"><p>{error}</p><button type="button" onClick={() => setRetry(n => n + 1)} className="px-4 py-2 rounded bg-indigo-600 text-white">Tentar novamente</button></div>}
