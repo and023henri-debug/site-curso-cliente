@@ -2760,7 +2760,7 @@ const CoursePauseCover = ({ sources = [], title = 'Curso' }) => {
     return src ? <img key={src} src={src} alt="Capa do curso" style={{position:'absolute', inset:0, width:'100%', height:'100%', objectFit:'contain', background:'#080b14'}} onError={() => setFailed(prev => [...prev, src])} /> : <div style={{position:'absolute', inset:0, display:'flex', alignItems:'flex-end', justifyContent:'center', padding:20, background:'linear-gradient(135deg,#161c2c,#05070c)', color:'#cbd5e1'}}><span>{title} · Capa indisponível</span></div>;
 };
 
-const CleanYouTubePlayer = ({ videoId, controller, onEnded, poster, posterFallbacks = [], courseTitle = 'Curso', isCompleted = false, restrictSeeking = false }) => {
+const CleanYouTubePlayer = ({ videoId, controller, onEnded, poster, posterFallbacks = [], courseTitle = 'Curso', lessonTitle = 'Aula', moduleTitle = '', isCompleted = false, restrictSeeking = false }) => {
     const completed = useRef(isCompleted); completed.current = isCompleted;
     const [volume, setVolume] = useState(100), [muted, setMuted] = useState(false);
     const mount = useRef(null), player = useRef(null), ended = useRef(onEnded);
@@ -2770,24 +2770,29 @@ const CleanYouTubePlayer = ({ videoId, controller, onEnded, poster, posterFallba
     const [playing, setPlaying] = useState(false), [time, setTime] = useState(0), [duration, setDuration] = useState(0), [error, setError] = useState('');
     const [covered, setCovered] = useState(true);
     const [speed, setSpeed] = useState(1), [speeds, setSpeeds] = useState([1]);
-    const revealTimer = useRef(null);
-    // Oculta antes de enviar comandos; não depende do tempo de resposta do iframe.
+    const revealTimer = useRef(null), topBar = useRef(null), bottomBar = useRef(null);
+    const [screenState, setScreenState] = useState(-1);
+    // Ajuste em milissegundos: a API não informa quando as informações desaparecem.
+    // Gravação: elementos visíveis por ~3.20 s; versão gravada ocultava 0.80 s.
+    // 4.00 s desde PLAYING + 0.10 s de margem para a atualização do navegador.
+    const MASK_DURATION_MS = 4100;
+    // Mostra as barras antes dos comandos, preservando o enquadramento do vídeo.
     const coverVideo = () => {
         clearTimeout(revealTimer.current);
-        if (mount.current) mount.current.style.opacity = '0';
+        [topBar.current, bottomBar.current].forEach(bar => { if (bar) bar.style.opacity = '1'; });
         setCovered(true);
     };
     const revealVideo = () => {
         clearTimeout(revealTimer.current);
         revealTimer.current = setTimeout(() => {
             if (player.current?.getPlayerState?.() !== 1 || player.current?.__transcriptionPaused) return;
-            if (mount.current) mount.current.style.opacity = '1';
+            [topBar.current, bottomBar.current].forEach(bar => { if (bar) bar.style.opacity = '0'; });
             setCovered(false);
-        }, 800); // Transição visual; não é detecção das sobreposições internas do YouTube.
+        }, MASK_DURATION_MS);
     };
     useEffect(() => {
         let disposed = false, timer, readyTimer, attempts = 0;
-        coverVideo(); setSpeed(1); setSpeeds([1]);
+        coverVideo(); setScreenState(-1); setSpeed(1); setSpeeds([1]);
         setReady(false); setPlaying(false); setError(''); setTime(0); setDuration(0);
         const start = () => {
             if (disposed) return;
@@ -2817,12 +2822,13 @@ const CleanYouTubePlayer = ({ videoId, controller, onEnded, poster, posterFallba
                     onStateChange: e => {
                         if (disposed) return;
                         disableYouTubeCaptions(e.target);
+                        setScreenState(e.data);
                         if (e.data === 1 && e.target.__transcriptionPaused) { coverVideo(); setPlaying(false); e.target.pauseVideo(); return; }
                         if (e.data === 1) { setPlaying(true); revealVideo(); }
                         else { coverVideo(); if (e.data !== 3) setPlaying(false); }
                         if (e.data === 0) ended.current?.();
                     },
-                    onPlaybackRateChange: e => { if (!disposed) setSpeed(e.data); },
+                    onPlaybackRateChange: e => { if (!disposed) { setSpeed(e.data); coverVideo(); revealVideo(); } },
                     onAutoplayBlocked: () => { if (!disposed) { coverVideo(); setPlaying(false); } },
                     onError: e => {
                         if (disposed) return;
@@ -2856,8 +2862,8 @@ const CleanYouTubePlayer = ({ videoId, controller, onEnded, poster, posterFallba
         if (wasPlaying) revealVideo();
         else player.current?.pauseVideo?.();
     };
-    const changeVolume = value => { setVolume(value); setMuted(value === 0); player.current?.setVolume?.(value); if (value > 0) player.current?.unMute?.(); else player.current?.mute?.(); };
-    const toggleMute = () => { if (muted) { player.current?.unMute?.(); if (!volume) changeVolume(50); } else player.current?.mute?.(); setMuted(!muted); };
+    const changeVolume = value => { coverVideo(); revealVideo(); setVolume(value); setMuted(value === 0); player.current?.setVolume?.(value); if (value > 0) player.current?.unMute?.(); else player.current?.mute?.(); };
+    const toggleMute = () => { coverVideo(); revealVideo(); if (muted) { player.current?.unMute?.(); if (!volume) changeVolume(50); } else player.current?.mute?.(); setMuted(!muted); };
     const toggle = () => {
         if (!ready) return;
         coverVideo();
@@ -2875,15 +2881,39 @@ const CleanYouTubePlayer = ({ videoId, controller, onEnded, poster, posterFallba
         <style>{`
 .platform-youtube-stage{position:relative;width:100%;aspect-ratio:16/9;overflow:hidden;background:#000;isolation:isolate}
 .platform-youtube-stage iframe{pointer-events:none!important;user-select:none}
+.platform-youtube-brand-bar{position:absolute;left:0;right:0;z-index:28;background:linear-gradient(110deg,#151325 0%,#222044 52%,#121624 100%);color:#fff;box-sizing:border-box;pointer-events:none;display:flex;align-items:center;padding:12px 24px;overflow:hidden;box-shadow:0 6px 20px #05051166}
+.platform-youtube-brand-top{top:0;height:80px;border-bottom:1px solid #52417d;gap:12px}
+.platform-youtube-brand-top::before{content:'';position:absolute;left:0;top:0;bottom:0;width:4px;background:linear-gradient(#a78bfa,#6366f1)}
+.platform-youtube-brand-top::after{content:'';position:absolute;bottom:0;left:20%;right:0;height:1px;background:linear-gradient(90deg,#222044,#9b87ed,#222044)}
+.platform-youtube-brand-heading{min-width:0;max-width:calc(100% - 130px);margin-left:auto;text-align:right}
+.platform-youtube-brand-badge{display:inline-flex;align-items:center;gap:8px;min-width:0}
+.platform-youtube-brand-dot{width:6px;height:6px;border-radius:50%;background:#a78bfa;box-shadow:0 0 12px #8b5cf688;flex-shrink:0}
+.platform-youtube-brand-bottom{bottom:0;height:72px;border-top:1px solid #40335f;justify-content:space-between;gap:16px;background:linear-gradient(100deg,#181528,#22203b 60%,#141724);box-shadow:0 -6px 20px #05051155}
+.platform-youtube-brand-copy{min-width:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+.platform-youtube-brand-module{font:600 11px/1.5 system-ui,sans-serif;color:#a5b4fc;letter-spacing:.08em;text-transform:uppercase}
+.platform-youtube-brand-lesson{font:600 16px/1.6 system-ui,sans-serif;color:#fff}
+.platform-youtube-brand-status{font:500 12px/1.5 system-ui,sans-serif;color:#cbd5e1;white-space:nowrap}
+@media(max-width:640px){.platform-youtube-brand-bar{padding:8px 12px}.platform-youtube-brand-top{height:64px}.platform-youtube-brand-bottom{height:60px}.platform-youtube-brand-lesson{font-size:13px}.platform-youtube-brand-module{font-size:10px}.platform-youtube-brand-status{font-size:10px}}
+
 .platform-youtube-shield{position:absolute;inset:0;z-index:30;background:transparent;pointer-events:auto;cursor:default;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;touch-action:pan-y}
 @media(max-width:640px){.platform-youtube-player button{min-height:32px}.platform-youtube-player input{min-height:24px}}
 `}</style>
         <div className="platform-youtube-stage">
-        <div ref={mount} aria-hidden="true" style={{position:'absolute', inset:0, width:'100%', height:'100%', zIndex:0, pointerEvents:'none', opacity:playing && !covered ? 1 : 0}} />
-        {(!playing || covered) && <div style={{position:'absolute', inset:0, zIndex:25, display:'flex', alignItems:'center', justifyContent:'center', background:'#080b14', color:'#fff'}}>
+        <div ref={mount} aria-hidden="true" style={{position:'absolute', inset:0, width:'100%', height:'100%', zIndex:0, pointerEvents:'none', opacity:ready && screenState !== -1 && screenState !== 5 && screenState !== 0 ? 1 : 0}} />
+        {(!ready || screenState === -1 || screenState === 5 || screenState === 0) && <div style={{position:'absolute', inset:0, zIndex:25, display:'flex', alignItems:'center', justifyContent:'center', background:'#080b14', color:'#fff'}}>
             <CoursePauseCover sources={[poster, ...posterFallbacks]} title={courseTitle} />
-            <span style={{position:'relative', padding:'8px 12px', background:'rgba(0,0,0,.7)', borderRadius:8}}>{!ready ? 'Carregando aula…' : playing ? 'Retomando vídeo…' : 'Use o botão ▶ abaixo para reproduzir'}</span>
+            <span style={{position:'relative', padding:'8px 12px', background:'rgba(0,0,0,.7)', borderRadius:8}}>{!ready ? 'Carregando aula…' : screenState === 0 ? 'Aula encerrada' : 'Use o botão ▶ abaixo para reproduzir'}</span>
         </div>}
+        <div ref={topBar} className="platform-youtube-brand-bar platform-youtube-brand-top" style={{opacity:covered ? 1 : 0}} aria-hidden={!covered}>
+            <div className="platform-youtube-brand-heading">
+                <div className="platform-youtube-brand-copy platform-youtube-brand-module">{moduleTitle || courseTitle || 'Área de aulas'}</div>
+                <div className="platform-youtube-brand-copy platform-youtube-brand-lesson">{lessonTitle || 'Aula'}</div>
+            </div>
+        </div>
+        <div ref={bottomBar} className="platform-youtube-brand-bar platform-youtube-brand-bottom" style={{opacity:covered ? 1 : 0}} aria-hidden={!covered}>
+            <span className="platform-youtube-brand-badge"><span className="platform-youtube-brand-dot" /><span className="platform-youtube-brand-copy platform-youtube-brand-status">{courseTitle || 'Curso'}</span></span>
+            <span className="platform-youtube-brand-status">{screenState === 0 ? 'Aula encerrada' : !ready ? 'Carregando' : playing ? `Reproduzindo · ${speed}×` : 'Pausado'} · {stamp(time)}</span>
+        </div>
         {/* Camada transparente: bloqueia interação, mas não apaga os pixels do YouTube. */}
         <div aria-hidden="true" className="platform-youtube-shield"
             onPointerDown={e => { e.preventDefault(); e.stopPropagation(); }}
@@ -3704,7 +3734,7 @@ const YouTubeTabTranscription = ({ controller, stopRef, modelRef, onText, onActi
                             {/* 👇 LÓGICA DO VÍDEO RESTAURADA COM MÁSCARA CINEMATOGRÁFICA 👇 */}
         {currentLesson.tipo === 'video' ? (
             embedUrl?.includes("youtube.com") ? (
-                <CleanYouTubePlayer key={embedUrl} videoId={platformVideoId(embedUrl)} poster={currentCourseCover || course.cover || course.thumbnailUrl} posterFallbacks={[fixUrl(currentCourseCover || ''), course.cover, fixUrl(course.thumbnailUrl || ''), course.thumbnailUrl, fixUrl(currentModule?.cover || '')]} courseTitle={course.title || course.titulo} isCompleted={!!isCurrentCompleted} restrictSeeking={true} controller={youtubeController} onEnded={async () => { await stopTabTranscription.current?.(); markLessonAsCompleted(true); }} />
+                <CleanYouTubePlayer key={embedUrl} videoId={platformVideoId(embedUrl)} poster={currentCourseCover || course.cover || course.thumbnailUrl} posterFallbacks={[fixUrl(currentCourseCover || ''), course.cover, fixUrl(course.thumbnailUrl || ''), course.thumbnailUrl, fixUrl(currentModule?.cover || '')]} courseTitle={course.title || course.titulo} lessonTitle={currentLesson?.titulo || currentLesson?.title || 'Aula'} moduleTitle={currentModule?.titulo || currentModule?.title || 'Módulo'} isCompleted={!!isCurrentCompleted} restrictSeeking={true} controller={youtubeController} onEnded={async () => { await stopTabTranscription.current?.(); markLessonAsCompleted(true); }} />
             ) : embedUrl ? (
                 <div className="relative w-full h-full bg-black overflow-hidden group pointer-events-auto">
                     
