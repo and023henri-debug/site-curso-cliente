@@ -733,6 +733,18 @@ const platformVideoId = value => {
         return /^[A-Za-z0-9_-]{11}$/.test(id || '') ? id : null;
     } catch (_) { return null; }
 };
+// Oculta os controles nativos; mantém os controles próprios da plataforma.
+// A identificação e as sobreposições do YouTube ainda podem aparecer.
+const platformYouTubePlayerVars = () => ({
+    controls: 0, disablekb: 1, rel: 0, autoplay: 0, fs: 0,
+    playsinline: 1, cc_load_policy: 0, iv_load_policy: 3,
+    ...(window.location.protocol === 'https:' || window.location.protocol === 'http:'
+        ? { origin: window.location.origin } : {})
+});
+const platformYouTubeEmbedUrl = videoId => {
+    const params = new URLSearchParams({ ...platformYouTubePlayerVars(), enablejsapi: 1 });
+    return 'https://www.youtube.com/embed/' + videoId + '?' + params.toString();
+};
 const platformHttpsUrl = value => { try { const u = new URL(value); return u.protocol === 'https:' ? u.href : ''; } catch (_) { return ''; } };
 const platformScriptLoads = {};
 const loadPlatformScript = (src, ready) => {
@@ -2433,9 +2445,8 @@ const CustomVideoPlayer = ({ src, onEnded, poster, isCompleted, showNotification
     const videoUrl = typeof src === 'string' ? src : fontes[qualidadeAtual];
 
     // Detecção se é YouTube
-    const isYT = videoUrl && (videoUrl.includes('youtube.com') || videoUrl.includes('youtu.be'));
-    const ytIdMatch = isYT ? videoUrl.match(/(?:youtu\.be\/|youtube(?:-nocookie)?\.com\/(?:embed\/|v\/|watch\?v=|watch\?.+&v=|shorts\/|live\/))([\w-]{11})/i) : null;
-    const ytId = ytIdMatch ? ytIdMatch[1] : null;
+    const ytId = platformVideoId(videoUrl);
+    const isYT = !!ytId;
 
     // 2. ESTADOS DO PLAYER
     const videoRef = React.useRef(null);
@@ -2467,9 +2478,7 @@ const CustomVideoPlayer = ({ src, onEnded, poster, isCompleted, showNotification
             } else {
                 ytPlayerRef.current = new window.YT.Player(`yt-player-mask`, {
                     videoId: ytId,
-                    playerVars: { 
-                        controls: 0, disablekb: 1, modestbranding: 1, rel: 0, showinfo: 0, autoplay: 0, iv_load_policy: 3, fs: 0, playsinline: 1, cc_load_policy: 0
-                    },
+                    playerVars: platformYouTubePlayerVars(),
                     events: {
                         onApiChange: e => disableYouTubeCaptions(e.target),
                         onReady: (e) => { 
@@ -2779,11 +2788,11 @@ const CleanYouTubePlayer = ({ videoId, controller, onEnded, poster, posterFallba
             el.referrerPolicy = 'strict-origin-when-cross-origin';
             el.allow = 'autoplay; encrypted-media; fullscreen; picture-in-picture';
             el.allowFullscreen = true;
-            el.src = 'https://www.youtube.com/embed/' + videoId + '?enablejsapi=1&playsinline=1&controls=0&disablekb=1&rel=0&origin=' + encodeURIComponent(window.location.origin);
+            el.src = platformYouTubeEmbedUrl(videoId);
             mount.current.replaceChildren(el);
             readyTimer = setTimeout(() => { if (!disposed) setError('O YouTube não respondeu. Verifique a conexão e tente novamente.'); }, 25000);
             player.current = new window.YT.Player(el, { videoId, width: '100%', height: '100%',
-                playerVars: { controls: 0, disablekb: 1, rel: 0, playsinline: 1, cc_load_policy: 0, iv_load_policy: 3, origin: window.location.origin },
+                playerVars: platformYouTubePlayerVars(),
                 events: {
                     onApiChange: e => disableYouTubeCaptions(e.target),
                     onReady: e => { if (disposed) return; clearTimeout(readyTimer); setError(''); disableYouTubeCaptions(e.target); controller.current = e.target; setDuration(e.target.getDuration()); setReady(true); },
@@ -3465,7 +3474,7 @@ const YouTubeTabTranscription = ({ controller, stopRef, modelRef, onText, onActi
             // Only the lesson media field determines the video, never links in its description.
             const source = String(lessonObj.conteudo || '').trim();
             const id = platformVideoId(source);
-            if (id) return 'https://www.youtube.com/embed/' + id;
+            if (id) return platformYouTubeEmbedUrl(id);
             try {
                 const u = new URL(source);
                 if (['vimeo.com', 'www.vimeo.com', 'player.vimeo.com'].includes(u.hostname)) {
@@ -3489,6 +3498,7 @@ const YouTubeTabTranscription = ({ controller, stopRef, modelRef, onText, onActi
                 const iframe = document.getElementById('video-player-iframe');
                 if (iframe && window.YT && window.YT.Player) {
                     ytPlayer = new window.YT.Player(iframe, {
+                        playerVars: platformYouTubePlayerVars(),
                         events: {
                             'onReady': (event) => {
                                 // Ataque 1: Assim que carrega
