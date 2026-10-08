@@ -2759,16 +2759,6 @@ const CleanYouTubePlayer = ({ videoId, controller, onEnded, poster, posterFallba
     const [ready, setReady] = useState(false);
     const [retry, setRetry] = useState(0);
     const [playing, setPlaying] = useState(false), [time, setTime] = useState(0), [duration, setDuration] = useState(0), [error, setError] = useState('');
-    // Máscaras visuais locais: não alteram o iframe nem ampliam/recortam o vídeo.
-    const [softMask, setSoftMask] = useState(true);
-    const [introMask, setIntroMask] = useState(true);
-    useEffect(() => {
-        setIntroMask(true);
-        if (!playing) return;
-        // Heurística visual: a API não informa quando o título do YouTube desaparece.
-        const timeout = setTimeout(() => setIntroMask(false), 4500);
-        return () => clearTimeout(timeout);
-    }, [playing, videoId, retry]);
     useEffect(() => {
         let disposed = false, timer, readyTimer, attempts = 0;
         setReady(false); setPlaying(false); setError(''); setTime(0); setDuration(0);
@@ -2782,10 +2772,14 @@ const CleanYouTubePlayer = ({ videoId, controller, onEnded, poster, posterFallba
             const el = document.createElement('iframe');
             el.title = courseTitle || 'Vídeo da aula';
             el.width = '100%'; el.height = '100%'; el.style.border = '0';
+            el.tabIndex = -1;
+            el.style.pointerEvents = 'none';
+            el.setAttribute('aria-hidden', 'true');
+            mount.current.setAttribute('inert', '');
             el.referrerPolicy = 'strict-origin-when-cross-origin';
             el.allow = 'autoplay; encrypted-media; fullscreen; picture-in-picture';
             el.allowFullscreen = true;
-            el.src = 'https://www.youtube.com/embed/' + videoId + '?enablejsapi=1&playsinline=1&controls=0&rel=0&origin=' + encodeURIComponent(window.location.origin);
+            el.src = 'https://www.youtube.com/embed/' + videoId + '?enablejsapi=1&playsinline=1&controls=0&disablekb=1&rel=0&origin=' + encodeURIComponent(window.location.origin);
             mount.current.replaceChildren(el);
             readyTimer = setTimeout(() => { if (!disposed) setError('O YouTube não respondeu. Verifique a conexão e tente novamente.'); }, 25000);
             player.current = new window.YT.Player(el, { videoId, width: '100%', height: '100%',
@@ -2828,30 +2822,25 @@ const CleanYouTubePlayer = ({ videoId, controller, onEnded, poster, posterFallba
     const stamp = v => `${Math.floor(v / 60)}:${String(Math.floor(v % 60)).padStart(2, '0')}`;
     return <div className="platform-youtube-player" style={{position:'relative', width:'100%', background:'#000'}}>
         <style>{`
-.platform-youtube-stage{position:relative;width:100%;aspect-ratio:16/9;overflow:hidden;background:#000}
-.platform-youtube-soft-mask{position:absolute;z-index:20;pointer-events:none;background:rgba(8,11,20,.94)}
-@supports ((backdrop-filter:blur(18px)) or (-webkit-backdrop-filter:blur(18px))){
-.platform-youtube-soft-mask{background:rgba(8,11,20,.56);backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px)}
-}
-.platform-youtube-intro-mask{top:0;left:0;right:0;height:min(64px,24%);opacity:0;visibility:hidden;transition:opacity .25s ease,visibility .25s}
-.platform-youtube-intro-mask.is-visible{opacity:1;visibility:visible}
-.platform-youtube-corner-mask{right:0;bottom:0;width:min(116px,28%);height:min(42px,18%);border-top-left-radius:12px}
+.platform-youtube-stage{position:relative;width:100%;aspect-ratio:16/9;overflow:hidden;background:#000;isolation:isolate}
+.platform-youtube-stage iframe{pointer-events:none!important;user-select:none}
+.platform-youtube-shield{position:absolute;inset:0;z-index:30;background:transparent;pointer-events:auto;cursor:default;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;touch-action:pan-y}
 @media(max-width:640px){.platform-youtube-player button{min-height:32px}.platform-youtube-player input{min-height:24px}}
-@media(prefers-reduced-motion:reduce){.platform-youtube-intro-mask{transition:none}}
 `}</style>
         <div className="platform-youtube-stage">
-        <div ref={mount} style={{position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, width: '100%', height: '100%', zIndex: 0, pointerEvents: 'none', opacity: playing ? 1 : 0}} className="absolute w-full h-full pointer-events-none" />
-        <button aria-label={playing ? 'Pausar vídeo' : 'Reproduzir vídeo'} onClick={toggle} style={{position:'absolute', inset:0, width:'100%', height:'100%', zIndex:10, border:0, background:'transparent', cursor:'pointer'}} className="absolute inset-0 z-10 bg-transparent" />
-        {!playing && <button type="button" aria-label="Reproduzir aula" disabled={!ready} onClick={toggle}
-            style={{position:'absolute', inset:0, zIndex:25, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', gap:16, width:'100%', height:'100%', border:0, background:'#080b14', color:'#fff', cursor:ready ? 'pointer' : 'wait'}}
-            className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-4 bg-[#080b14] text-white disabled:cursor-wait">
+        <div ref={mount} aria-hidden="true" style={{position:'absolute', inset:0, width:'100%', height:'100%', zIndex:0, pointerEvents:'none', opacity:playing ? 1 : 0}} />
+        {!playing && <div style={{position:'absolute', inset:0, zIndex:25, display:'flex', alignItems:'center', justifyContent:'center', background:'#080b14', color:'#fff'}}>
             <CoursePauseCover sources={[poster, ...posterFallbacks]} title={courseTitle} />
-            {!ready && <span style={{position:'relative', padding:'8px 12px', background:'rgba(0,0,0,.7)', borderRadius:8}}>Carregando aula…</span>}
-        </button>}
-        {softMask && <>
-            <div aria-hidden="true" className={`platform-youtube-soft-mask platform-youtube-intro-mask ${introMask || !playing ? 'is-visible' : ''}`} />
-            <div aria-hidden="true" className="platform-youtube-soft-mask platform-youtube-corner-mask" />
-        </>}
+            <span style={{position:'relative', padding:'8px 12px', background:'rgba(0,0,0,.7)', borderRadius:8}}>{!ready ? 'Carregando aula…' : 'Use o botão ▶ abaixo para reproduzir'}</span>
+        </div>}
+        {/* Camada transparente: bloqueia interação, mas não apaga os pixels do YouTube. */}
+        <div aria-hidden="true" className="platform-youtube-shield"
+            onPointerDown={e => { e.preventDefault(); e.stopPropagation(); }}
+            onClick={e => { e.preventDefault(); e.stopPropagation(); }}
+            onDoubleClick={e => { e.preventDefault(); e.stopPropagation(); }}
+            onContextMenu={e => { e.preventDefault(); e.stopPropagation(); }}
+            onAuxClick={e => { e.preventDefault(); e.stopPropagation(); }}
+            onDragStart={e => { e.preventDefault(); e.stopPropagation(); }} />
         </div>
         <div style={{position:'relative', minHeight:76, zIndex:30, background:'#080b14', padding:'8px 12px', boxSizing:'border-box'}} className="text-white">
             <input aria-label="Progresso do vídeo" type="range" min="0" max={duration || 1} step="0.1" value={Math.min(time, duration || 1)} onChange={e => seek(Number(e.target.value))} style={{width:'100%', accentColor:'#6366f1'}} />
@@ -2861,7 +2850,6 @@ const CleanYouTubePlayer = ({ videoId, controller, onEnded, poster, posterFallba
                 {(!restrictSeeking || isCompleted) && <button disabled={!ready} onClick={() => seek(time + 10)} aria-label="Avançar 10 segundos" title="Avançar 10 segundos">10s ↷</button>}
                 <button disabled={!ready} onClick={toggleMute} aria-label={muted ? 'Ativar som' : 'Silenciar'}>{muted ? 'Sem som' : 'Som'}</button>
                 <input aria-label="Volume" type="range" min="0" max="100" value={muted ? 0 : volume} onChange={e => changeVolume(Number(e.target.value))} style={{width:64, accentColor:'#6366f1'}} />
-                <button type="button" onClick={() => setSoftMask(value => !value)} aria-pressed={!softMask} title={softMask ? 'Exibir o vídeo inteiro, sem máscaras visuais' : 'Ativar máscara discreta'} style={{fontSize:11, padding:'4px 8px', border:'1px solid #475569', borderRadius:6}}>{softMask ? 'Imagem completa' : 'Ativar máscara'}</button>
                 <span style={{fontSize:11, marginLeft:'auto'}}>{stamp(time)} / {stamp(duration)}</span>
             </div>
         </div>
