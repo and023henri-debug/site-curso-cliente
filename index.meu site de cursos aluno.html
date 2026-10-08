@@ -2873,7 +2873,7 @@ const CleanYouTubePlayer = ({ videoId, controller, onEnded, poster, posterFallba
                         setSpeeds(e.target.getAvailablePlaybackRates?.() || [1]); 
                         setSpeed(e.target.getPlaybackRate?.() || 1); 
                         
-                        // Busca dinamicamente quais resoluções este vídeo em específico suporta
+                        // Busca dinamicamente quais resoluções este vídeo suporta
                         if (typeof e.target.getAvailableQualityLevels === 'function') {
                             const levels = e.target.getAvailableQualityLevels();
                             if (levels && levels.length > 0) {
@@ -2881,9 +2881,15 @@ const CleanYouTubePlayer = ({ videoId, controller, onEnded, poster, posterFallba
                                     const info = ytQualityMap[level] || [level, ''];
                                     return [level, info[0], info[1]];
                                 });
-                                // Garante que a opção Automático sempre exista
-                                if (!levels.includes('auto')) mappedLevels.push(['auto', 'Automático', '']);
                                 setAvailableQualities(mappedLevels);
+
+                                // 👇 MÁGICA: Força a qualidade MAIS ALTA disponível como padrão
+                                // A lista 'levels' vem ordenada da maior resolução para a menor.
+                                const highestQuality = levels.find(l => l !== 'auto');
+                                if (highestQuality) {
+                                    e.target.setPlaybackQuality(highestQuality);
+                                    setQualityPreviewValue(highestQuality); // Atualiza a UI para mostrar a alta resolução selecionada
+                                }
                             }
                         }
                         setReady(true); 
@@ -2893,7 +2899,16 @@ const CleanYouTubePlayer = ({ videoId, controller, onEnded, poster, posterFallba
                         disableYouTubeCaptions(e.target);
                         setScreenState(e.data);
                         if (e.data === 1 && e.target.__transcriptionPaused) { coverVideo(); setPlaying(false); e.target.pauseVideo(); return; }
-                        if (e.data === 1) { setPlaying(true); revealVideo(); }
+                        if (e.data === 1) { 
+                            setPlaying(true); 
+                            revealVideo(); 
+
+                            // 👇 REFORÇO ANTI-QUEDA: YouTube às vezes reseta a qualidade quando dá play.
+                            // Aqui nós dizemos: "Não me importa, aplique a qualidade que está na nossa engrenagem!"
+                            if (typeof e.target.setPlaybackQuality === 'function') {
+                                e.target.setPlaybackQuality(qualityPreviewValue !== 'auto' ? qualityPreviewValue : 'highres');
+                            }
+                        }
                         else { coverVideo(); if (e.data !== 3) setPlaying(false); }
                         if (e.data === 0) ended.current?.();
                     },
