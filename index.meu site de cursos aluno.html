@@ -66,16 +66,18 @@ window.addEventListener('DOMContentLoaded', () => {
             state = { ...state, count: state.count + 1 }; write(key, state);
             try {
                 const result = await action();
-                if (kind === 'password') write(key, {count:0, until:0});
+                if (kind === 'password' || kind === 'google') write(key, {count:0, until:0});
                 return result;
             } catch (error) {
                 if (error.code === 'auth/too-many-requests') write(key, {count:LIMIT, until:Date.now() + WINDOW});
-                if (error.code === 'auth/network-request-failed' || error.code === 'auth/popup-closed-by-user') write(key, {...state, count:Math.max(0, state.count - 1)});
+                if (['auth/network-request-failed', 'auth/popup-closed-by-user', 'auth/popup-blocked', 'auth/cancelled-popup-request'].includes(error.code)) write(key, {...state, count:Math.max(0, state.count - 1)});
                 if (read(key)?.count >= LIMIT) throw blocked(read(key).until);
                 throw error;
             }
         };
-        try { return navigator.locks?.request ? await navigator.locks.request(key, { mode:'exclusive' }, run) : await run(); }
+        // O popup precisa iniciar no mesmo gesto do usuário (Safari/Chrome mobile).
+        // Mantém contagem e bloqueio local; não aguarda Web Locks para o Google.
+        try { return kind === 'google' ? await run() : navigator.locks?.request ? await navigator.locks.request(key, { mode:'exclusive' }, run) : await run(); }
         finally { pending.delete(key); }
     };
 })();
@@ -83,7 +85,7 @@ window.addEventListener('DOMContentLoaded', () => {
 <!-- LIMITADOR LOCAL DE ACESSO — FIM -->
 
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <title>Sua Plataforma | Área do Aluno</title>
 
   <link rel="preconnect" href="https://meu-backend-ia.vercel.app">
@@ -128,6 +130,7 @@ window.addEventListener('DOMContentLoaded', () => {
       "imports": {
         "react": "https://cdn.jsdelivr.net/npm/react@18.2.0/+esm",
         "react-dom/client": "https://cdn.jsdelivr.net/npm/react-dom@18.2.0/+esm",
+        "react-dom": "https://cdn.jsdelivr.net/npm/react-dom@18.2.0/+esm",
         "lucide-react": "https://cdn.jsdelivr.net/npm/lucide-react@0.263.1/+esm",
         "recharts": "https://cdn.jsdelivr.net/npm/recharts@2.12.0/+esm",
         "firebase/app": "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js",
@@ -372,7 +375,7 @@ window.addEventListener('DOMContentLoaded', () => {
       };
 
 
-window.applyPwaManifest = function(settings) {
+window.applyPwaManifest = async function(settings) {
         if (!settings) return;
 
         // Prioriza as configurações específicas de PWA definidas no Admin
@@ -382,6 +385,37 @@ window.applyPwaManifest = function(settings) {
         const bgColor = settings.colorBgDark || "#0a0a0a";
         const iconUrl = settings.pwaIconUrl || settings.siteLogoUrl || settings.logoUrl || "https://api.dicebear.com/7.x/bottts/svg?seed=default";
 
+        const signature = JSON.stringify([appName, shortName, themeColor, bgColor, iconUrl]);
+        if (window.platformPwaSignature === signature) return;
+        window.platformPwaSignature = signature;
+        try { localStorage.setItem('platform-pwa-settings-v2', JSON.stringify({ pwaName:appName, pwaShortName:shortName, pwaThemeColor:themeColor, colorBgDark:bgColor, pwaIconUrl:iconUrl })); } catch (_) {}
+        const pageUrl = new URL(window.location.pathname, window.location.origin).href;
+        const scopeUrl = new URL('./', pageUrl).href;
+        let image = null;
+        try {
+            image = await new Promise((resolve, reject) => {
+                const img = new Image(); img.crossOrigin = 'anonymous';
+                const timeout = setTimeout(() => reject(new Error('icon timeout')), 5000);
+                img.onload = () => { clearTimeout(timeout); resolve(img); };
+                img.onerror = () => { clearTimeout(timeout); reject(new Error('icon unavailable')); };
+                img.src = new URL(iconUrl, window.location.href).href;
+            });
+        } catch (_) {}
+        const makeIcon = size => {
+            const canvas = document.createElement('canvas'); canvas.width = canvas.height = size;
+            const ctx = canvas.getContext('2d');
+            const drawFallback = () => {
+                ctx.fillStyle = themeColor; ctx.fillRect(0,0,size,size);
+                ctx.fillStyle = '#ffffff'; ctx.font = `bold ${Math.round(size * .4)}px sans-serif`;
+                ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(appName.trim().charAt(0).toUpperCase() || 'A',size/2,size/2);
+            };
+            drawFallback();
+            if (image) { const scale = size * .8 / Math.max(image.naturalWidth,image.naturalHeight); const w=image.naturalWidth*scale,h=image.naturalHeight*scale; ctx.drawImage(image,(size-w)/2,(size-h)/2,w,h); }
+            try { return canvas.toDataURL('image/png'); }
+            catch (_) { canvas.width = size; drawFallback(); return canvas.toDataURL('image/png'); }
+        };
+        if (window.platformPwaSignature !== signature) return;
+        const icon192 = makeIcon(192), icon512 = makeIcon(512);
         // 1. Detecta o tipo da imagem para o Android não bloquear a logo
         let imgType = "image/png";
         const lowerUrl = iconUrl.toLowerCase();
@@ -393,23 +427,17 @@ window.applyPwaManifest = function(settings) {
         const manifestData = {
           name: appName,
           short_name: shortName,
-          start_url: window.location.pathname || "/",
+          id: pageUrl,
+          start_url: pageUrl,
+          scope: scopeUrl,
+          lang: 'pt-BR',
+          prefer_related_applications: false,
           display: "standalone",
           background_color: bgColor,
           theme_color: themeColor,
           icons: [
-            {
-              src: iconUrl,
-              sizes: "192x192",
-              type: imgType,
-              purpose: "any maskable"
-            },
-            {
-              src: iconUrl,
-              sizes: "512x512",
-              type: imgType,
-              purpose: "any maskable"
-            }
+            { src: icon192, sizes: '192x192', type: 'image/png', purpose: 'any' },
+            { src: icon512, sizes: '512x512', type: 'image/png', purpose: 'any maskable' }
           ]
         };
 
@@ -424,7 +452,12 @@ window.applyPwaManifest = function(settings) {
           manifestLink.rel = 'manifest';
           document.head.appendChild(manifestLink);
         }
+        const oldManifestUrl = manifestLink.href || '';
         manifestLink.href = manifestUrl;
+        if (oldManifestUrl.startsWith('blob:')) setTimeout(() => URL.revokeObjectURL(oldManifestUrl), 60000);
+        let appleIcon = document.querySelector('link[rel="apple-touch-icon"]');
+        if (!appleIcon) { appleIcon = document.createElement('link'); appleIcon.rel = 'apple-touch-icon'; document.head.appendChild(appleIcon); }
+        appleIcon.href = icon192;
 
         let themeColorMeta = document.querySelector('meta[name="theme-color"]');
         if(!themeColorMeta){
@@ -451,8 +484,9 @@ window.applyPwaManifest = function(settings) {
         }
         appleCapable.content = 'yes';
 
-        console.log("Manifesto App Android/iOS atualizado com as configurações do Admin.");
+        window.dispatchEvent(new Event('platform-pwa-state'));
       };
+      try { const cached = JSON.parse(localStorage.getItem('platform-pwa-settings-v2')); if (cached) window.applyPwaManifest(cached); } catch (_) {}
 
 
       // 2. Define o Tema Padrão (Fallback de Segurança)
@@ -533,15 +567,15 @@ window.applyPwaManifest = function(settings) {
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <script>
-window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();window.deferredPrompt=e;if(window.AemTriggerInstallBtn)window.AemTriggerInstallBtn();});
-const isIos = () => (/iphone|ipad|ipod/).test(window.navigator.userAgent.toLowerCase());
-const isStandalone = () => ('standalone' in window.navigator) && window.navigator.standalone;
-if(isIos() && !isStandalone()){
-    const ib=document.createElement('div');
-    ib.innerHTML='Para instalar como App: toque em <b>Partilhar</b> e depois <b>Adicionar ao Ecrã Principal</b><button style="position:absolute;right:10px;top:50%;transform:translateY(-50%);background:none;border:none;color:#a1a1aa;font-size:16px;" onclick="this.parentElement.remove()">✕</button>';
-    ib.style.cssText='position:fixed;bottom:0;left:0;width:100%;background:#1c1e2b;color:#fff;padding:15px 30px 15px 15px;font-family:sans-serif;font-size:12px;text-align:center;z-index:99999;border-top:1px solid #2b2d3a;box-shadow:0 -5px 15px rgba(0,0,0,0.2);';
-    setTimeout(()=>document.body.appendChild(ib),2000);
-}
+window.platformAppInstalled = () => window.matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+window.addEventListener('beforeinstallprompt', event => {
+    event.preventDefault(); window.deferredPrompt = event;
+    window.dispatchEvent(new Event('platform-pwa-state'));
+});
+window.addEventListener('appinstalled', () => {
+    window.deferredPrompt = null; window.platformPwaInstalledThisSession = true;
+    window.dispatchEvent(new Event('platform-pwa-state'));
+});
 </script>
 
 
@@ -549,6 +583,70 @@ if(isIos() && !isStandalone()){
 
 
 
+
+<style id="platform-mobile-experience">
+html{-webkit-text-size-adjust:100%;scroll-padding-top:12px}
+.platform-student-shell,.platform-student-body{height:100dvh}
+.platform-course-screen{height:100dvh;bottom:auto;padding-top:env(safe-area-inset-top);padding-bottom:env(safe-area-inset-bottom)}
+.platform-student-content{overscroll-behavior-y:contain;padding-bottom:env(safe-area-inset-bottom)}
+.platform-course-scroll{overscroll-behavior:contain;scroll-padding-block:12px}
+.platform-student-sidebar{padding-top:env(safe-area-inset-top);padding-bottom:env(safe-area-inset-bottom)}
+.platform-course-mobile-nav{align-items:center;justify-content:space-around;gap:6px;padding:4px 12px;background:#11101c;border-bottom:1px solid #292536;flex-shrink:0}
+.platform-course-mobile-nav button{display:flex;align-items:center;justify-content:center;gap:6px;flex:1;min-height:44px;border-radius:10px;color:#ddd6fe;font-size:13px;font-weight:600}
+.platform-course-mobile-nav button:active{background:#302647}
+@media(max-width:1023px){
+ .platform-course-mobile-nav{display:flex}
+ .platform-course-video-column,.platform-course-curriculum{flex-shrink:0}
+ .platform-course-curriculum{height:min(600px,75dvh);min-height:320px;margin-bottom:16px}
+ .platform-student-sidebar{max-width:calc(100vw - 48px)}
+ .platform-student-shell button,.platform-course-screen button,.platform-auth-screen button{touch-action:manipulation}
+ .platform-student-content img{max-width:100%}
+ .platform-student-content p,.platform-course-screen p{overflow-wrap:anywhere}
+}
+@media(max-width:640px){
+ .platform-auth-screen{min-height:100dvh;padding:24px 12px;padding-top:max(24px,env(safe-area-inset-top));padding-bottom:max(24px,env(safe-area-inset-bottom));overflow-y:auto}
+ .platform-auth-screen input,.platform-auth-screen select,.platform-student-shell input:not([type=range]),.platform-student-shell select,.platform-student-shell textarea,.platform-course-screen textarea,.platform-course-screen input:not([type=range]){font-size:16px!important}
+ .platform-auth-screen button,.platform-student-sidebar button,.platform-course-screen button{min-height:44px}
+ .platform-student-body>header{padding-left:max(12px,env(safe-area-inset-left));padding-right:max(12px,env(safe-area-inset-right))}
+ .platform-course-screen>header{height:60px;padding-left:12px;padding-right:12px}
+ .platform-course-screen>header>div{min-width:0;gap:10px}
+ .platform-course-screen>header button{flex-shrink:0;padding:8px 10px}
+ .platform-course-screen>header h1{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+ .platform-course-tabs{scrollbar-width:thin;scroll-snap-type:x proximity}
+ .platform-course-tabs button{flex-shrink:0;scroll-snap-align:start;font-size:12px;letter-spacing:.04em}
+ .platform-youtube-player:not(.platform-player-fullscreen) .platform-youtube-stage{min-height:200px}
+ .platform-player-controls{padding:8px 10px}
+ .platform-player-row{position:relative;gap:6px;min-width:0}
+ .platform-player-row button{min-width:40px;min-height:44px}
+ .platform-player-clock{font-size:11px;flex:1;min-width:80px}
+ .platform-player-volume{width:52px;min-height:36px}
+ .platform-player-speed{min-height:44px;font-size:14px;max-width:68px}
+ .platform-quality-preview{position:static}
+ .platform-quality-preview [role=menu]{right:0;bottom:calc(100% + 8px);width:min(288px,calc(100vw - 40px));max-height:min(220px,45dvh);overflow-y:auto;overscroll-behavior:contain}
+ .platform-quality-auto-note{font-size:11px;padding:8px 10px}
+ .platform-youtube-brand-status{max-width:55%;overflow:hidden;text-overflow:ellipsis}
+ .platform-player-fullscreen .platform-player-controls{padding-bottom:max(8px,env(safe-area-inset-bottom))}
+ .platform-student-shell .fixed.inset-0[class*="items-center"][class*="justify-center"]>div[class*="max-w-"],.platform-course-screen .fixed.inset-0[class*="items-center"][class*="justify-center"]>div[class*="max-w-"],.platform-student-shell [role=dialog],.platform-course-screen [role=dialog]{max-width:calc(100vw - 24px);max-height:calc(100dvh - 24px);overflow-y:auto}
+ .platform-student-shell .fixed[class*="right-4"][class*="top-20"]{max-width:calc(100vw - 32px)}
+}
+@media(prefers-reduced-motion:reduce){.platform-course-screen,.platform-auth-screen,.platform-student-shell{scroll-behavior:auto}.platform-course-screen .animate-fade-in,.platform-student-shell .animate-fade-in{animation:none!important}}
+</style>
+
+<style id="platform-floating-player">
+.platform-player-dock,.platform-player-host{width:100%;min-width:0}
+.platform-course-screen.platform-course-detached{visibility:hidden;pointer-events:none;height:0;overflow:visible;padding:0;animation:none;transform:none}
+.platform-player-floating{position:fixed;right:12px;bottom:max(12px,env(safe-area-inset-bottom));width:min(380px,calc(100vw - 24px));max-height:85dvh;overflow:auto;z-index:99990;visibility:visible;pointer-events:auto;box-shadow:0 12px 50px #000b;border-radius:14px}
+.platform-player-floating .platform-youtube-stage{min-height:200px}
+.platform-player-floating .platform-quality-auto-note{display:none}
+.platform-detached-toolbar{display:flex;gap:8px;align-items:center;justify-content:space-between;padding:8px 10px;background:#201c36;color:white;touch-action:none;cursor:move;font:12px/1.4 system-ui}
+.platform-detached-toolbar span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.platform-detached-toolbar button{flex-shrink:0;border:1px solid #736294;border-radius:8px;padding:6px 9px;min-height:36px;background:#302647;color:white;cursor:pointer}
+.platform-player-external{visibility:visible;pointer-events:auto;height:100dvh}
+.platform-player-external .platform-youtube-player{height:100%;display:flex;flex-direction:column;border-radius:0!important}
+.platform-player-external .platform-youtube-stage{flex:1;aspect-ratio:auto;min-height:160px}
+.platform-player-external .platform-player-controls,.platform-player-external .platform-detached-toolbar{flex-shrink:0}
+.platform-player-external .platform-quality-auto-note{display:none}
+</style>
 </head>
 <body class="bg-slate-900 text-slate-100 transition-colors duration-300 selection:bg-blue-200 selection:text-blue-900">
   <div id="root"></div>
@@ -613,6 +711,7 @@ if(isIos() && !isStandalone()){
 <script type="text/babel" data-type="module" data-compact="true" data-generator-opts='{"compact":true}'>
     import React, { useState, useEffect, useRef } from 'react';
     import { createRoot } from 'react-dom/client';
+    import { createPortal } from 'react-dom';
  import { 
       User, LogOut, Play, ChevronDown, Pause, BookOpen, Award, MessageSquare,
       BarChart2, Search, Bell, Menu, X, CheckCircle, 
@@ -628,7 +727,7 @@ if(isIos() && !isStandalone()){
       Home, Sparkles, CalendarDays, ListTodo, Zap /* <-- NOVOS AQUI */
     } from 'lucide-react';
     import { initializeApp } from 'firebase/app';
-    import { getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, onAuthStateChanged, updateProfile, GoogleAuthProvider, signInWithPopup } from 'firebase/auth';
+    import { getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, onAuthStateChanged, updateProfile, GoogleAuthProvider, signInWithPopup, signInWithRedirect, getRedirectResult } from 'firebase/auth';
     import { getDocFromServer, getFirestore, doc, getDoc, getDocs, setDoc, collection, addDoc, query, orderBy, onSnapshot, serverTimestamp, updateDoc, arrayUnion, arrayRemove, deleteDoc, where, limit } from 'firebase/firestore';
     import { jsPDF } from "jspdf";
     import { pipeline, env } from 'transformers';
@@ -658,6 +757,41 @@ if(isIos() && !isStandalone()){
     } catch (e) { 
        console.error("Erro Firebase:", e);
     }
+
+    // Google: popup direto; redirect somente com helper de autenticação na mesma origem.
+    const platformGoogleInAppBrowser = () => /FBAN|FBAV|Instagram|Line\/|; wv\)|\bwv\b/i.test(navigator.userAgent);
+    const platformCanGoogleRedirect = () => !!auth && window.location.protocol === 'https:' && window.location.hostname === auth.config.authDomain;
+    const platformGoogleError = error => {
+        const code = error?.code || 'unknown';
+        if (code.startsWith('platform/')) return error.message;
+        const messages = {
+            'auth/popup-blocked': 'O navegador bloqueou a janela do Google. Permita pop-ups para este site e toque novamente em Continuar com Google. Se estiver dentro de um aplicativo, abra este endereço no Chrome ou Safari.',
+            'auth/popup-closed-by-user': 'A janela do Google foi fechada antes de concluir. Toque novamente em Continuar com Google para tentar de novo.',
+            'auth/cancelled-popup-request': 'Já existe uma janela de login aberta. Conclua o acesso nela ou tente novamente.',
+            'auth/unauthorized-domain': 'Este endereço ainda não está autorizado para login Google. Envie este aviso ao suporte da plataforma.',
+            'auth/operation-not-allowed': 'O login com Google precisa ser habilitado pelo administrador da plataforma.',
+            'auth/network-request-failed': 'Não foi possível conectar ao Google. Confira sua internet e tente novamente.',
+            'auth/web-storage-unsupported': 'O navegador está bloqueando o armazenamento necessário ao login. Abra o site em uma aba normal do Chrome ou Safari.',
+            'auth/operation-not-supported-in-this-environment': 'Abra o endereço HTTPS da plataforma no Chrome ou Safari para entrar com Google.',
+            'auth/account-exists-with-different-credential': 'Este e-mail já usa outra forma de acesso. Entre com e-mail e senha.',
+            'auth/too-many-requests': 'Muitas tentativas de acesso. Aguarde alguns minutos antes de tentar novamente.'
+        };
+        return (messages[code] || 'Não foi possível concluir o acesso com Google. Tente no Chrome ou Safari e, se continuar, envie o código abaixo ao suporte.') + ' Código: ' + code;
+    };
+    const platformEnsureGoogleProfile = async user => {
+        if (!db || !user) return;
+        const ref = doc(db, 'users', user.uid);
+        const snap = await getDoc(ref);
+        if (!snap.exists()) await setDoc(ref, {
+            name: user.displayName || '', email: user.email || '', role: 'student',
+            createdAt: serverTimestamp(), photoBase64: user.photoURL || '', profileComplete: false
+        });
+    };
+    // Executa uma vez por carregamento; o observador de autenticação cuida da navegação.
+    const platformGoogleRedirectResult = auth ? getRedirectResult(auth).then(async result => {
+        if (result?.user) await platformEnsureGoogleProfile(result.user);
+        return { result, error: null };
+    }).catch(error => ({ result: null, error })) : Promise.resolve({ result: null, error: null });
 
     // --- UI COMPONENTS CORPORATIVOS (PREMIUM & MINIMALISTAS) ---
 
@@ -2767,13 +2901,27 @@ const CoursePauseCover = ({ sources = [], title = 'Curso' }) => {
     return src ? <img key={src} src={src} alt="Capa do curso" style={{position:'absolute', inset:0, width:'100%', height:'100%', objectFit:'contain', background:'#080b14'}} onError={() => setFailed(prev => [...prev, src])} /> : <div style={{position:'absolute', inset:0, display:'flex', alignItems:'flex-end', justifyContent:'center', padding:20, background:'linear-gradient(135deg,#161c2c,#05070c)', color:'#cbd5e1'}}><span>{title} · Capa indisponível</span></div>;
 };
 
-const CleanYouTubePlayer = ({ videoId, controller, onEnded, poster, posterFallbacks = [], courseTitle = 'Curso', lessonTitle = 'Aula', moduleTitle = '', isCompleted = false, restrictSeeking = false }) => {
+const CleanYouTubePlayer = ({ videoId, controller, onEnded, poster, posterFallbacks = [], courseTitle = 'Curso', lessonTitle = 'Aula', moduleTitle = '', isCompleted = false, restrictSeeking = false, onDetachChange }) => {
    // Menu Clone Estilo Nativo & Controle de Qualidade
    const [menuOpen, setMenuOpen] = useState(false);
     const [menuView, setMenuView] = useState('main'); 
     const [qualityPreviewValue, setQualityPreviewValue] = useState('auto');
     const [availableQualities, setAvailableQualities] = useState([['auto', 'Automático', '']]);
     const menuRef = useRef(null);
+    const [playerHost] = useState(() => document.createElement('div'));
+    const playerDock = useRef(null), detachedWindow = useRef(null), restorePlayback = useRef(null);
+    const detachCallback = useRef(onDetachChange); detachCallback.current = onDetachChange;
+    const [detachedMode, setDetachedMode] = useState('');
+    const detachModeRef = useRef(''), detachBusy = useRef(false), dragState = useRef(null);
+    useEffect(() => {
+        playerHost.className = 'platform-player-host';
+        playerDock.current?.appendChild(playerHost);
+        return () => {
+            detachBusy.current = true;
+            if (detachedWindow.current && !detachedWindow.current.closed) detachedWindow.current.close();
+            playerHost.remove();
+        };
+    }, [playerHost]);
     const fullscreenRoot = useRef(null), fullscreenButton = useRef(null);
     const fullscreenActive = useRef(false), lastPointerActivity = useRef(0);
     const [isFullscreen, setIsFullscreen] = useState(false);
@@ -2802,10 +2950,11 @@ const CleanYouTubePlayer = ({ videoId, controller, onEnded, poster, posterFallba
         if (!menuOpen) return;
         const outside = e => { if (!menuRef.current?.contains(e.target)) { setMenuOpen(false); setMenuView('main'); } };
         const escape = e => { if (e.key === 'Escape') { setMenuOpen(false); setMenuView('main'); menuRef.current?.querySelector('button')?.focus(); } };
-        document.addEventListener('pointerdown', outside);
-        document.addEventListener('keydown', escape);
-        return () => { document.removeEventListener('pointerdown', outside); document.removeEventListener('keydown', escape); };
-    }, [menuOpen]);
+        const menuDocument = playerHost.ownerDocument;
+        menuDocument.addEventListener('pointerdown', outside);
+        menuDocument.addEventListener('keydown', escape);
+        return () => { menuDocument.removeEventListener('pointerdown', outside); menuDocument.removeEventListener('keydown', escape); };
+    }, [menuOpen, detachedMode]);
     const completed = useRef(isCompleted); completed.current = isCompleted;
     const [volume, setVolume] = useState(100), [muted, setMuted] = useState(false);
     const mount = useRef(null), player = useRef(null), ended = useRef(onEnded);
@@ -2835,6 +2984,83 @@ const CleanYouTubePlayer = ({ videoId, controller, onEnded, poster, posterFallba
             setCovered(false);
         }, MASK_DURATION_MS);
     };
+    const saveDetachedPlayback = () => {
+        const p = player.current;
+        restorePlayback.current = { time:p?.getCurrentTime?.() || 0, playing:p?.getPlayerState?.() === 1, volume:p?.getVolume?.() ?? volume, muted:p?.isMuted?.() ?? muted, speed:p?.getPlaybackRate?.() || 1 };
+    };
+    const restoreDock = () => {
+        if (!detachModeRef.current) return;
+        const external = detachModeRef.current !== 'inline';
+        if (external) saveDetachedPlayback();
+        detachModeRef.current = '';
+        playerHost.className = 'platform-player-host'; playerHost.style.cssText = '';
+        playerDock.current?.appendChild(playerHost);
+        const win = detachedWindow.current; detachedWindow.current = null;
+        if (win && !win.closed) win.close();
+        setDetachedMode(''); detachCallback.current?.(false);
+        if (external) setRetry(value => value + 1);
+        coverVideo(); revealVideo();
+    };
+    const detachPlayer = async () => {
+        if (detachModeRef.current) { restoreDock(); return; }
+        if (detachBusy.current || !ready) return;
+        if (isFullscreen) { setFullscreenMessage('Saia da tela cheia antes de deslocar a aula.'); return; }
+        if (player.current?.__transcriptionPaused) { setFullscreenMessage('Finalize a transcrição antes de deslocar a aula.'); return; }
+        detachBusy.current = true; setMenuOpen(false); setFullscreenMessage('');
+        try {
+            let win = null, mode = 'inline';
+            if (window.documentPictureInPicture?.requestWindow) {
+                win = await window.documentPictureInPicture.requestWindow({width:640,height:480}); mode = 'pip';
+            } else if (!/Android|iPhone|iPad|iPod/.test(navigator.userAgent) && !(navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)) {
+                win = window.open('', '', 'popup=yes,width=720,height=540,resizable=yes,scrollbars=yes');
+                if (!win) throw new Error('Permita abrir janelas para deslocar a aula para outro monitor.');
+                mode = 'window';
+            }
+            saveDetachedPlayback();
+            if (win) {
+                detachedWindow.current = win;
+                win.document.title = lessonTitle || 'Aula';
+                win.document.documentElement.lang = 'pt-BR';
+                win.document.documentElement.className = document.documentElement.className;
+                win.document.documentElement.style.cssText = document.documentElement.style.cssText;
+                for (const sheet of document.styleSheets) {
+                    try { const style=win.document.createElement('style'); style.textContent=[...sheet.cssRules].map(rule=>rule.cssText).join('\n'); win.document.head.appendChild(style); }
+                    catch (_) { if (sheet.href) { const link=win.document.createElement('link'); link.rel='stylesheet'; link.href=sheet.href; win.document.head.appendChild(link); } }
+                }
+                const base = win.document.createElement('style'); base.textContent='html,body{margin:0!important;padding:0!important;background:#080b14;color:white;min-height:100%;overflow:auto} .platform-player-host{width:100%}'; win.document.head.appendChild(base);
+                playerHost.className = 'platform-player-host platform-player-external';
+                win.document.body.appendChild(playerHost);
+                win.addEventListener('pagehide', () => { if (!detachBusy.current) restoreDock(); }, {once:true});
+                // Adotar um iframe em outro documento pode recarregá-lo: recria a API e restaura o ponto.
+                setRetry(value => value + 1);
+            } else {
+                restorePlayback.current = null;
+                playerHost.className = 'platform-player-host platform-player-floating';
+            }
+            detachModeRef.current = mode; setDetachedMode(mode);
+            detachCallback.current?.(true);
+            coverVideo();
+        } catch (error) { setFullscreenMessage(error.message || 'Não foi possível deslocar a aula neste navegador.'); }
+        finally { detachBusy.current = false; }
+    };
+    const beginPlayerDrag = e => {
+        if (detachModeRef.current !== 'inline' || e.target.closest('button')) return;
+        const box = playerHost.getBoundingClientRect();
+        dragState.current = {x:e.clientX,y:e.clientY,left:box.left,top:box.top};
+        e.currentTarget.setPointerCapture(e.pointerId);
+    };
+    const movePlayerDrag = e => {
+        if (!dragState.current) return;
+        const d=dragState.current,box=playerHost.getBoundingClientRect();
+        playerHost.style.right='auto'; playerHost.style.bottom='auto';
+        playerHost.style.left=Math.max(0,Math.min(window.innerWidth-box.width,d.left+e.clientX-d.x))+'px';
+        playerHost.style.top=Math.max(0,Math.min(window.innerHeight-48,d.top+e.clientY-d.y))+'px';
+    };
+    useEffect(() => {
+        if (detachedMode !== 'inline') return;
+        const reset = () => { playerHost.style.cssText = ''; };
+        window.addEventListener('resize',reset); return () => window.removeEventListener('resize',reset);
+    }, [detachedMode]);
     // Expande o conjunto da plataforma, incluindo máscaras e controles.
     const refreshPlayerMasks = () => { coverVideo(); revealVideo(); };
     const handlePlayerPointerMove = () => {
@@ -2886,16 +3112,18 @@ const CleanYouTubePlayer = ({ videoId, controller, onEnded, poster, posterFallba
     }, []);
     useEffect(() => {
         let disposed = false, timer, readyTimer, attempts = 0;
+        const playerDocument = mount.current?.ownerDocument || document;
+        const playerWindow = playerDocument.defaultView || window;
         coverVideo(); setScreenState(-1); setSpeed(1); setSpeeds([1]);
         setReady(false); setPlaying(false); setError(''); setTime(0); setDuration(0);
         const start = () => {
             if (disposed) return;
-            if (!window.YT?.Player) {
+            if (!playerWindow.YT?.Player) {
                 if (++attempts > 100) { setError('Não foi possível carregar o player. Reabra a aula.'); return; }
                 timer = setTimeout(start, 200); return;
             }
             if (!mount.current || !platformVideoId(videoId)) { setError('O link desta aula é inválido. Informe o administrador.'); return; }
-            const el = document.createElement('iframe');
+            const el = playerDocument.createElement('iframe');
             el.title = courseTitle || 'Vídeo da aula';
             el.width = '100%'; el.height = '100%'; el.style.border = '0';
             el.tabIndex = -1;
@@ -2908,7 +3136,7 @@ const CleanYouTubePlayer = ({ videoId, controller, onEnded, poster, posterFallba
             el.src = platformYouTubeEmbedUrl(videoId);
             mount.current.replaceChildren(el);
             readyTimer = setTimeout(() => { if (!disposed) setError('O YouTube não respondeu. Verifique a conexão e tente novamente.'); }, 25000);
-            player.current = new window.YT.Player(el, { videoId, width: '100%', height: '100%',
+            player.current = new playerWindow.YT.Player(el, { videoId, width: '100%', height: '100%',
                 playerVars: platformYouTubePlayerVars(),
                 events: {
                     onApiChange: e => disableYouTubeCaptions(e.target),
@@ -2940,6 +3168,16 @@ const CleanYouTubePlayer = ({ videoId, controller, onEnded, poster, posterFallba
                                     setQualityPreviewValue(highestQuality); // Atualiza a UI para mostrar a alta resolução selecionada
                                 }
                             }
+                        }
+                        const resume = restorePlayback.current;
+                        if (resume) {
+                            restorePlayback.current = null;
+                            e.target.setVolume(resume.volume); if (resume.muted) e.target.mute(); else e.target.unMute();
+                            setVolume(resume.volume); setMuted(resume.muted);
+                            e.target.cueVideoById({videoId, startSeconds:resume.time});
+                            if (e.target.getAvailablePlaybackRates?.().includes(resume.speed)) e.target.setPlaybackRate(resume.speed);
+                            setTime(resume.time);
+                            if (resume.playing) e.target.playVideo();
                         }
                         setReady(true); 
                     },
@@ -2979,8 +3217,8 @@ const CleanYouTubePlayer = ({ videoId, controller, onEnded, poster, posterFallba
                 }
             });
         };
-        if (!window.YT?.Player && !document.querySelector('script[src="https://www.youtube.com/iframe_api"]')) {
-            const script = document.createElement('script'); script.src = 'https://www.youtube.com/iframe_api'; document.head.appendChild(script);
+        if (!playerWindow.YT?.Player && !playerDocument.querySelector('script[src="https://www.youtube.com/iframe_api"]')) {
+            const script = playerDocument.createElement('script'); script.src = 'https://www.youtube.com/iframe_api'; playerDocument.head.appendChild(script);
         }
         start();
         const clock = setInterval(() => { if (player.current?.getCurrentTime) { setTime(player.current.getCurrentTime() || 0); setDuration(player.current.getDuration() || 0); const state = player.current.getPlayerState?.(); if (state === 2 || state === 0 || state === 5 || state === -1) { coverVideo(); setPlaying(false); } } }, 500);
@@ -3010,11 +3248,15 @@ const CleanYouTubePlayer = ({ videoId, controller, onEnded, poster, posterFallba
         revealVideo();
     };
     const stamp = v => `${Math.floor(v / 60)}:${String(Math.floor(v % 60)).padStart(2, '0')}`;
-    return <div ref={fullscreenRoot} className={`platform-youtube-player${isFullscreen ? ' platform-player-fullscreen' : ''}`}
+    return <div ref={playerDock} className="platform-player-dock">{createPortal(<div ref={fullscreenRoot} className={`platform-youtube-player${isFullscreen ? ' platform-player-fullscreen' : ''}`}
         onPointerMove={handlePlayerPointerMove}
         onPointerDownCapture={() => { if (fullscreenActive.current) refreshPlayerMasks(); }}
         onKeyDownCapture={() => { if (fullscreenActive.current) refreshPlayerMasks(); }}
         style={{position:'relative', width:'100%', background:'#000'}}>
+        {detachedMode && <div className="platform-detached-toolbar" onPointerDown={beginPlayerDrag} onPointerMove={movePlayerDrag} onPointerUp={() => {dragState.current=null;}} onPointerCancel={() => {dragState.current=null;}}>
+            <span>{lessonTitle || 'Aula'}{detachedMode === 'inline' ? ' · arraste para mover' : ''}</span>
+            <button type="button" onClick={restoreDock} aria-label="Voltar à aula">Voltar à aula</button>
+        </div>}
         <style>{`
 .platform-youtube-stage{position:relative;width:100%;aspect-ratio:16/9;overflow:hidden;background:#000;isolation:isolate}
 .platform-youtube-stage iframe{pointer-events:none!important;user-select:none}
@@ -3161,7 +3403,8 @@ const CleanYouTubePlayer = ({ videoId, controller, onEnded, poster, posterFallba
                         </div>
                     )}
                 </div>
-                <button ref={fullscreenButton} type="button" onClick={togglePlatformFullscreen} aria-label={isFullscreen ? 'Sair da tela cheia' : 'Assistir em tela cheia'} title={isFullscreen ? 'Sair da tela cheia (Esc)' : 'Tela cheia'} aria-pressed={isFullscreen}>
+                <button type="button" disabled={!ready} onClick={detachPlayer} title={detachedMode ? 'Voltar à aula' : 'Deslocar aula'} aria-label={detachedMode ? 'Voltar à aula' : 'Deslocar aula'} aria-pressed={!!detachedMode}><Minimize2 size={20}/></button>
+                <button ref={fullscreenButton} type="button" disabled={!!detachedMode} onClick={togglePlatformFullscreen} aria-label={isFullscreen ? 'Sair da tela cheia' : 'Assistir em tela cheia'} title={isFullscreen ? 'Sair da tela cheia (Esc)' : 'Tela cheia'} aria-pressed={isFullscreen}>
                     {isFullscreen ? <Minimize size={20}/> : <Maximize size={20}/>}
                 </button>
             </div>
@@ -3169,7 +3412,7 @@ const CleanYouTubePlayer = ({ videoId, controller, onEnded, poster, posterFallba
         <div className="platform-quality-auto-note"><AlertCircle size={16}/><span><strong>Qualidade automática.</strong> A imagem se adapta à sua conexão e às condições de reprodução do seu dispositivo e navegador. Se a internet oscilar, a resolução pode diminuir para ajudar a manter a aula fluida e voltar a melhorar quando as condições permitirem.</span></div>
         {fullscreenMessage && <div className="platform-fullscreen-message" role="status">{fullscreenMessage}</div>}
         {error && <div role="alert" className="absolute inset-0 z-40 bg-black flex flex-col gap-4 items-center justify-center p-8 text-white text-center"><p>{error}</p><button type="button" onClick={() => setRetry(n => n + 1)} className="px-4 py-2 rounded bg-indigo-600 text-white">Tentar novamente</button></div>}
-    </div>;
+    </div>, playerHost)}</div>;
 };
 
 // A captura exige identidade da própria aba; nunca usa áudio do microfone/sistema.
@@ -3268,6 +3511,17 @@ const YouTubeTabTranscription = ({ controller, stopRef, modelRef, onText, onActi
         const releaseMessage = releaseAccess.unlockAt ? `Disponível em ${new Date(releaseAccess.unlockAt).toLocaleString("pt-BR")}.` : "A liberação deste conteúdo está sendo atualizada.";
         const [activeModuleIndex, setActiveModuleIndex] = useState(0);
         const [activeLessonIndex, setActiveLessonIndex] = useState(0);
+        const mobileCourseRoot = useRef(null);
+        const [courseDetached, setCourseDetached] = useState(false);
+        const handleDetachChange = active => {
+            setCourseDetached(active);
+            window.dispatchEvent(new CustomEvent('platform-course-detached', {detail:{active,course}}));
+        };
+        useEffect(() => {
+            if (!window.matchMedia('(max-width: 1023px)').matches) return;
+            const frame = requestAnimationFrame(() => mobileCourseRoot.current?.querySelector('.platform-course-scroll')?.scrollTo({ top: 0, behavior: 'auto' }));
+            return () => cancelAnimationFrame(frame);
+        }, [activeModuleIndex, activeLessonIndex]);
         
         const [activeTab, setActiveTab] = useState('visao_geral');
         const [transcriptionText, setTranscriptionText] = useState('');
@@ -3887,7 +4141,7 @@ const YouTubeTabTranscription = ({ controller, stopRef, modelRef, onText, onActi
         const isCurrentCompleted = completedMap[`${activeModuleIndex}-${activeLessonIndex}`];
         const embedUrl = getEmbedUrl(currentLesson);
         return (
-            <div className="fixed inset-0 z-[100] bg-[#050505] flex flex-col font-sans text-white overflow-hidden animate-fade-in">
+            <div ref={mobileCourseRoot} className={`platform-course-screen ${courseDetached ? 'platform-course-detached' : ''} fixed inset-0 z-[100] bg-[#050505] flex flex-col font-sans text-white overflow-hidden animate-fade-in`}>
                 
                 {/* --- MODAL DE CELEBRAÇÃO (PARABÉNS) --- */}
                 {showCelebration && (
@@ -3944,10 +4198,14 @@ const YouTubeTabTranscription = ({ controller, stopRef, modelRef, onText, onActi
                     </div>
                 </header>
                 {/* --- FIM DO HEADER DO PLAYER CORRIGIDO --- */}
-
-                <div className="flex-1 flex flex-col lg:flex-row overflow-y-auto lg:overflow-hidden relative p-0 sm:p-4 md:p-6 lg:p-8 gap-0 sm:gap-6 max-w-[1600px] mx-auto w-full">
+                <nav className="platform-course-mobile-nav lg:hidden" aria-label="Navegação da aula">
+                    <button type="button" onClick={e => e.currentTarget.closest('.platform-course-screen')?.querySelector('.platform-course-video-column')?.scrollIntoView({behavior:'smooth',block:'start'})}><Play size={16}/> Vídeo</button>
+                    <button type="button" onClick={e => e.currentTarget.closest('.platform-course-screen')?.querySelector('.platform-course-tabs')?.scrollIntoView({behavior:'smooth',block:'start'})}><FileText size={16}/> Conteúdo</button>
+                    <button type="button" onClick={e => e.currentTarget.closest('.platform-course-screen')?.querySelector('.platform-course-curriculum')?.scrollIntoView({behavior:'smooth',block:'start'})}><BookOpen size={16}/> Aulas</button>
+                </nav>
+                <div className="platform-course-scroll flex-1 min-h-0 flex flex-col lg:flex-row overflow-y-auto lg:overflow-hidden relative p-0 sm:p-4 md:p-6 lg:p-8 gap-0 sm:gap-6 max-w-[1600px] mx-auto w-full">
                     
-                    <div className={`flex flex-col h-auto lg:h-full overflow-visible lg:overflow-y-auto custom-scrollbar transition-all duration-500 bg-[#0f0f0f] border-b sm:border border-[#222] rounded-none sm:rounded-2xl shadow-2xl shrink-0 ${isCinemaMode ? 'w-full' : 'w-full lg:w-[70%] xl:w-[75%]'}`}>
+                    <div className={`platform-course-video-column min-w-0 flex flex-col h-auto lg:h-full overflow-visible lg:overflow-y-auto custom-scrollbar transition-all duration-500 bg-[#0f0f0f] border-b sm:border border-[#222] rounded-none sm:rounded-2xl shadow-2xl shrink-0 ${isCinemaMode ? 'w-full' : 'w-full lg:w-[70%] xl:w-[75%]'}`}>
                         
                         <div className={`w-full bg-black ${embedUrl?.includes("youtube.com") ? "" : "aspect-video"} relative group border-b border-[#222] sm:rounded-t-2xl overflow-hidden shrink-0`}>
                             <button 
@@ -3962,7 +4220,7 @@ const YouTubeTabTranscription = ({ controller, stopRef, modelRef, onText, onActi
                             {/* 👇 LÓGICA DO VÍDEO RESTAURADA COM MÁSCARA CINEMATOGRÁFICA 👇 */}
         {currentLesson.tipo === 'video' ? (
             embedUrl?.includes("youtube.com") ? (
-                <CleanYouTubePlayer key={embedUrl} videoId={platformVideoId(embedUrl)} poster={currentCourseCover || course.cover || course.thumbnailUrl} posterFallbacks={[fixUrl(currentCourseCover || ''), course.cover, fixUrl(course.thumbnailUrl || ''), course.thumbnailUrl, fixUrl(currentModule?.cover || '')]} courseTitle={course.title || course.titulo} lessonTitle={currentLesson?.titulo || currentLesson?.title || 'Aula'} moduleTitle={currentModule?.titulo || currentModule?.title || 'Módulo'} isCompleted={!!isCurrentCompleted} restrictSeeking={true} controller={youtubeController} onEnded={async () => { await stopTabTranscription.current?.(); markLessonAsCompleted(true); }} />
+                <CleanYouTubePlayer key={embedUrl} videoId={platformVideoId(embedUrl)} poster={currentCourseCover || course.cover || course.thumbnailUrl} posterFallbacks={[fixUrl(currentCourseCover || ''), course.cover, fixUrl(course.thumbnailUrl || ''), course.thumbnailUrl, fixUrl(currentModule?.cover || '')]} courseTitle={course.title || course.titulo} lessonTitle={currentLesson?.titulo || currentLesson?.title || 'Aula'} moduleTitle={currentModule?.titulo || currentModule?.title || 'Módulo'} isCompleted={!!isCurrentCompleted} restrictSeeking={true} onDetachChange={handleDetachChange} controller={youtubeController} onEnded={async () => { await stopTabTranscription.current?.(); markLessonAsCompleted(true); }} />
             ) : embedUrl ? (
                 <div className="relative w-full h-full bg-black overflow-hidden group pointer-events-auto">
                     
@@ -4115,7 +4373,7 @@ const YouTubeTabTranscription = ({ controller, stopRef, modelRef, onText, onActi
                                 </div>
                             </div>
 
-                            <div className="flex gap-4 sm:gap-6 border-b border-[#222] mb-6 sm:mb-8 overflow-x-auto whitespace-nowrap hide-scrollbar pb-1">
+                            <div className="platform-course-tabs flex gap-4 sm:gap-6 border-b border-[#222] mb-6 sm:mb-8 overflow-x-auto whitespace-nowrap hide-scrollbar pb-1">
                                 <button onClick={() => setActiveTab('visao_geral')} className={`pb-3 sm:pb-4 text-sm font-bold uppercase tracking-widest transition-colors border-b-2 ${activeTab === 'visao_geral' ? 'border-indigo-500 text-white' : 'border-transparent text-white/40 hover:text-white/80'}`}>Visão Geral</button>
                                 <button onClick={() => setActiveTab('materiais')} className={`pb-3 sm:pb-4 text-sm font-bold uppercase tracking-widest transition-colors border-b-2 ${activeTab === 'materiais' ? 'border-indigo-500 text-white' : 'border-transparent text-white/40 hover:text-white/80'}`}>Materiais ({(currentLesson.materiais || []).length})</button>
                                 <button onClick={() => setActiveTab('anotacoes')} className={`pb-3 sm:pb-4 text-sm font-bold uppercase tracking-widest transition-colors border-b-2 ${activeTab === 'anotacoes' ? 'border-indigo-500 text-white' : 'border-transparent text-white/40 hover:text-white/80'}`}>Minhas Anotações</button>
@@ -4648,7 +4906,7 @@ const YouTubeTabTranscription = ({ controller, stopRef, modelRef, onText, onActi
                         </div>
                     </div>
 
-                    <div className={`flex flex-col border-t sm:border border-[#222] sm:rounded-2xl shadow-2xl bg-[#0f0f0f] transition-all duration-500 relative z-20 h-[500px] sm:h-[600px] lg:h-full lg:overflow-hidden mt-4 lg:mt-0 ${isCinemaMode ? 'hidden lg:flex lg:w-0 lg:opacity-0 lg:translate-x-full' : 'w-full lg:w-[30%] xl:w-[25%] opacity-100 translate-x-0'}`}>
+                    <div className={`platform-course-curriculum min-w-0 flex flex-col border-t sm:border border-[#222] sm:rounded-2xl shadow-2xl bg-[#0f0f0f] transition-all duration-500 relative z-20 h-[500px] sm:h-[600px] lg:h-full lg:overflow-hidden mt-4 lg:mt-0 ${isCinemaMode ? 'hidden lg:flex lg:w-0 lg:opacity-0 lg:translate-x-full' : 'w-full lg:w-[30%] xl:w-[25%] opacity-100 translate-x-0'}`}>
                         
                         <div className="p-4 sm:p-6 border-b border-[#222] bg-[#0a0a0a] shrink-0">
                             <h3 className="font-black text-sm uppercase tracking-widest text-white/50 mb-4">Grade Curricular</h3>
@@ -5787,7 +6045,7 @@ const CertificatesSection = ({ user, courses, userProgress, certificates, custom
         };
 
         return (
-            <div className={`flex items-center gap-3 py-3 px-4 min-w-[280px] md:min-w-[320px] rounded-[18px] bg-[#f8f9fa] dark:bg-[#202c33] shadow-sm border border-gray-200 dark:border-white/5`} onClick={(e) => e.stopPropagation()}>
+            <div className={`flex items-center gap-3 py-3 px-4 w-full min-w-0 md:min-w-[320px] rounded-[18px] bg-[#f8f9fa] dark:bg-[#202c33] shadow-sm border border-gray-200 dark:border-white/5`} onClick={(e) => e.stopPropagation()}>
                 <audio ref={audioRef} src={src} preload="metadata" />
                 
                 {/* BOTÃO PLAY CIRCULAR DESIGN IMAGEM */}
@@ -6471,7 +6729,7 @@ const SupportSection = ({ user, settings }) => {
                                                 {msg.fileUrl && (
                                                     <div className="mb-1">
                                                         {(msg.fileType === 'audio' || (msg.fileType === 'video' && msg.fileUrl.toLowerCase().includes('voice'))) ? (
-                                                            <div className="p-1 min-w-[260px] md:min-w-[300px]">
+                                                            <div className="p-1 w-full min-w-0 md:min-w-[300px]">
                                                                 <MiniAudioPlayer 
                                                                     src={msg.fileUrl} 
                                                                     isMe={isMe} 
@@ -7174,26 +7432,47 @@ const SupportSection = ({ user, settings }) => {
         }
       };
 
-      const handleGoogleLogin = async () => {
-        if (!auth) return setError("Erro de conexão.");
-        setLoading(true); setError('');
+      const [googleRetryRedirect, setGoogleRetryRedirect] = useState(false);
+      const [googleHelp, setGoogleHelp] = useState('');
+      const googleBusy = useRef(false);
+      useEffect(() => {
+          let active = true;
+          platformGoogleRedirectResult.then(({ error }) => { if (active && error) setError(platformGoogleError(error)); });
+          return () => { active = false; };
+      }, []);
+      const handleGoogleLogin = async (redirect = false) => {
+        if (loading || googleBusy.current) return;
+        if (!auth) return setError('Não foi possível conectar. Confira sua internet.');
+        if (platformGoogleInAppBrowser()) {
+            setError('O Google pode bloquear o login dentro de aplicativos. Use o menu do aplicativo para abrir esta página no Chrome ou Safari, ou copie o endereço abaixo.');
+            setGoogleHelp(window.location.href);
+            return;
+        }
+        googleBusy.current = true;
+        setLoading(true); setError(''); setGoogleRetryRedirect(false);
         const provider = new GoogleAuthProvider();
+        provider.setCustomParameters({ prompt: 'select_account' });
+        auth.languageCode = 'pt-BR';
         try {
-          const result = await window.platformAuthAttempt('google', () => signInWithPopup(auth, provider));
-          if (db) {
-              const docSnap = await getDoc(doc(db, "users", result.user.uid));
-              if (!docSnap.exists()) {
-                  await setDoc(doc(db, "users", result.user.uid), { 
-                      name: result.user.displayName, email: result.user.email, role: 'student', 
-                      createdAt: serverTimestamp(), photoBase64: result.user.photoURL, profileComplete: false 
-                  });
-              }
+          // Sem await antes deste comando: preserva a ativação do toque.
+          if (redirect && platformCanGoogleRedirect()) {
+              await window.platformAuthAttempt('google', () => signInWithRedirect(auth, provider));
+          } else {
+              const result = await window.platformAuthAttempt('google', () => signInWithPopup(auth, provider));
+              await platformEnsureGoogleProfile(result.user);
           }
-        } catch (err) { setError(err.code?.startsWith("platform/") ? err.message : "Erro ao entrar com Google."); setLoading(false); }
+        } catch (err) {
+            setError(platformGoogleError(err));
+            setGoogleRetryRedirect(platformCanGoogleRedirect() && ['auth/popup-blocked', 'auth/popup-closed-by-user'].includes(err.code));
+        } finally { googleBusy.current = false; setLoading(false); }
+      };
+      const copyGoogleLoginUrl = async () => {
+          try { await navigator.clipboard.writeText(window.location.href); setGoogleHelp('Endereço copiado! Cole na barra de endereços do Chrome ou Safari.'); }
+          catch (_) { setGoogleHelp(window.location.href); }
       };
 
       return (
-        <div className={`min-h-screen flex items-center justify-center p-4 bg-siteBg-light dark:bg-siteBg-dark relative overflow-hidden font-sans transition-colors duration-300 ${isLoaded ? 'is-loaded' : ''}`}>
+        <div className={`platform-auth-screen min-h-screen flex items-center justify-center p-4 bg-siteBg-light dark:bg-siteBg-dark relative overflow-hidden font-sans transition-colors duration-300 ${isLoaded ? 'is-loaded' : ''}`}>
           
           {bgImage ? (
               <div className="absolute inset-0 z-0 login-bg-anim">
@@ -7232,10 +7511,12 @@ const SupportSection = ({ user, settings }) => {
                     </div>
                 )}
 
+                {googleHelp && <div className="mb-4 p-3 rounded-xl bg-indigo-500/10 text-sm break-words" role="status"><p>{googleHelp}</p><button type="button" onClick={copyGoogleLoginUrl} className="mt-2 px-3 py-2 border rounded-lg">Copiar endereço para abrir no navegador</button></div>}
+                {googleRetryRedirect && <button type="button" disabled={loading} onClick={() => handleGoogleLogin(true)} className="w-full mb-4 p-3 rounded-xl bg-indigo-600 text-white">Continuar com Google nesta aba</button>}
                 {isLogin && (
                     <div className="mb-5 stagger-item delay-2">
-                        <Button onClick={handleGoogleLogin} variant="secondary" className="w-full h-10 text-xs flex items-center justify-center gap-2 border border-slate-200 dark:border-slate-700">
-                            <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" className="w-4 h-4" alt="Google" /> Continuar com Google
+                        <Button onClick={() => handleGoogleLogin(false)} disabled={loading} variant="secondary" className="w-full h-10 text-xs flex items-center justify-center gap-2 border border-slate-200 dark:border-slate-700">
+                            <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" className="w-4 h-4" alt="Google" /> {loading ? 'Conectando…' : 'Continuar com Google'}
                         </Button>
                         <div className="relative flex py-4 items-center">
                             <div className="flex-grow border-t border-slate-200 dark:border-slate-800"></div>
@@ -9141,7 +9422,7 @@ const CommunityTab = ({ user, showNotification }) => {
         const msgType = msg.type || msg.fileType || 'text';
         const msgSource = msg.content || msg.fileUrl || msg.text || '';
 
-        if (msgType === 'audio' || (msgType === 'video' && msgSource.toLowerCase().includes('voice'))) return <div className="min-w-[260px]"><MiniAudioPlayer src={msgSource} isMe={isMe} avatarUrl={isMe ? user.photoURL : (selectedChatUser?.photoBase64 || null)} /></div>;
+        if (msgType === 'audio' || (msgType === 'video' && msgSource.toLowerCase().includes('voice'))) return <div className="w-full min-w-0 sm:min-w-[260px]"><MiniAudioPlayer src={msgSource} isMe={isMe} avatarUrl={isMe ? user.photoURL : (selectedChatUser?.photoBase64 || null)} /></div>;
         if (msgType === 'image') return <img src={msgSource} className="rounded-lg max-w-full h-auto max-h-64 object-cover cursor-pointer mb-1 mt-1 border border-black/10" onClick={(e) => { e.stopPropagation(); setChatSelectedMedia({url: msgSource, type: 'image'}); }}/>;
         if (msgType === 'video') return (
             <div className="relative cursor-pointer group mb-1 mt-1" onClick={(e) => { e.stopPropagation(); setChatSelectedMedia({url: msgSource, type: 'video'}); }}>
@@ -10776,24 +11057,70 @@ const MindMapSection = ({ user, courses, purchasedIds, setView }) => {
     // =================================================================================
     const StudentDashboard = ({ user, onLogout, settings, certificates = [], promotions = [] }) => { // <-- ADICIONADO PROMOTIONS
         const [isSidebarOpen, setIsSidebarOpen] = useState(false);
-        const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
-        const [installBtnVisible, setInstallBtnVisible] = useState(!!window.deferredPrompt);
-
+        const mobileSidebarRef = useRef(null), mobileMenuButtonRef = useRef(null);
         useEffect(() => {
-            window.AemTriggerInstallBtn = () => setInstallBtnVisible(true);
-            return () => { delete window.AemTriggerInstallBtn; };
+            const query = window.matchMedia('(max-width: 1023px)');
+            const update = () => {
+                if (mobileSidebarRef.current) mobileSidebarRef.current.inert = query.matches && !isSidebarOpen;
+                if (!query.matches) setIsSidebarOpen(false);
+            };
+            update(); query.addEventListener('change', update);
+            const key = e => {
+                if (!isSidebarOpen || !query.matches) return;
+                if (e.key === 'Escape') { setIsSidebarOpen(false); mobileMenuButtonRef.current?.focus(); }
+                if (e.key === 'Tab') {
+                    const nodes = [...(mobileSidebarRef.current?.querySelectorAll('button:not([disabled]),a[href],input,select,[tabindex="0"]') || [])].filter(n => n.getClientRects().length);
+                    const first = nodes[0], last = nodes[nodes.length - 1];
+                    if (!first) return;
+                    if (e.shiftKey && (document.activeElement === first || !mobileSidebarRef.current.contains(document.activeElement))) { e.preventDefault(); last.focus(); }
+                    else if (!e.shiftKey && (document.activeElement === last || !mobileSidebarRef.current.contains(document.activeElement))) { e.preventDefault(); first.focus(); }
+                }
+            };
+            document.addEventListener('keydown', key);
+            if (isSidebarOpen && query.matches) mobileSidebarRef.current?.querySelector('button')?.focus();
+            return () => { query.removeEventListener('change', update); document.removeEventListener('keydown', key); };
+        }, [isSidebarOpen]);
+        const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+        const [installState, setInstallState] = useState(() => window.platformAppInstalled?.() ? 'installed' : window.deferredPrompt ? 'ready' : 'waiting');
+        const [installMessage, setInstallMessage] = useState('');
+        const installBusy = useRef(false);
+        useEffect(() => {
+            const update = () => setInstallState(window.platformPwaInstalledThisSession || window.platformAppInstalled?.() ? 'installed' : window.deferredPrompt ? 'ready' : 'waiting');
+            const displayMode = window.matchMedia('(display-mode: standalone)');
+            window.addEventListener('platform-pwa-state', update); displayMode.addEventListener('change', update); update();
+            return () => { window.removeEventListener('platform-pwa-state', update); displayMode.removeEventListener('change', update); };
         }, []);
-
         const handleInstallApp = async () => {
+            if (installBusy.current || installState === 'installed') return;
+            setInstallMessage('');
             const promptEvent = window.deferredPrompt;
-            if (!promptEvent) return;
-            promptEvent.prompt();
-            const { outcome } = await promptEvent.userChoice;
-            if (outcome === 'accepted') setInstallBtnVisible(false);
+            if (!promptEvent) {
+                const apple = /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+                setInstallMessage(apple ? 'O iPhone/iPad não permite abrir a instalação por um botão do site.' : !window.isSecureContext ? 'A instalação precisa do endereço HTTPS da plataforma.' : 'O navegador ainda não disponibilizou a instalação. O app pode já estar instalado ou este navegador não oferecer a solicitação direta.');
+                return;
+            }
+            installBusy.current = true;
             window.deferredPrompt = null;
+            setInstallState('prompting');
+            try {
+                await promptEvent.prompt();
+                const choice = await promptEvent.userChoice;
+                setInstallMessage(choice.outcome === 'accepted' ? 'Solicitação aceita. O navegador está concluindo a instalação.' : 'Instalação cancelada. Você pode continuar usando a plataforma normalmente.');
+            } catch (_) { setInstallMessage('Não foi possível abrir a instalação agora. Tente novamente quando o navegador disponibilizar.'); }
+            finally { installBusy.current = false; window.dispatchEvent(new Event('platform-pwa-state')); }
         };
        const [view, setView] = useState('home');
        const [selectedCourse, setSelectedCourse] = useState(null);
+       const [detachedCourse, setDetachedCourse] = useState(null);
+       useEffect(() => {
+           const change = event => {
+               if (event.detail.active) { setDetachedCourse(event.detail.course); setView('my_courses'); }
+               else { setSelectedCourse(event.detail.course); setDetachedCourse(null); setView('course_player'); }
+           };
+           window.addEventListener('platform-course-detached',change);
+           return () => window.removeEventListener('platform-course-detached',change);
+       }, []);
+       useEffect(() => { if (view === 'course_player' && detachedCourse && selectedCourse?.id !== detachedCourse.id) setDetachedCourse(null); }, [view, selectedCourse, detachedCourse]);
        const [checkoutCourse, setCheckoutCourse] = useState(null); 
        const [notification, setNotification] = useState(null);
        
@@ -11590,7 +11917,7 @@ const MindMapSection = ({ user, courses, purchasedIds, setView }) => {
        
 
         return (
-            <div className="flex h-screen overflow-hidden text-white font-sans spiritual-bg relative">
+            <div className="platform-student-shell flex h-screen overflow-hidden text-white font-sans spiritual-bg relative">
                 
                 {/* Modais Globais Mantidos */}
                 {confirmDialog.isOpen && (
@@ -11631,7 +11958,7 @@ const MindMapSection = ({ user, courses, purchasedIds, setView }) => {
                {/* ========================================== */}
                 {/* NOVO MENU LATERAL (SIDEBAR CORRIGIDA)        */}
                 {/* ========================================== */}
-                <aside className={`fixed inset-y-0 left-0 z-50 glass-panel border-r border-white/10 flex flex-col transition-all duration-300 lg:relative lg:translate-x-0 ${isSidebarOpen ? 'translate-x-0 w-64' : '-translate-x-full w-64'} ${isSidebarCollapsed ? 'lg:w-20' : 'lg:w-64'}`}>
+                <aside id="platform-student-sidebar" ref={mobileSidebarRef} aria-label="Navegação do aluno" className={`platform-student-sidebar fixed inset-y-0 left-0 z-50 glass-panel border-r border-white/10 flex flex-col transition-all duration-300 lg:relative lg:translate-x-0 ${isSidebarOpen ? 'translate-x-0 w-64' : '-translate-x-full w-64'} ${isSidebarCollapsed ? 'lg:w-20' : 'lg:w-64'}`}>
                     
                     {/* Logo Sidebar */}
                     <div className={`h-[80px] flex items-center border-b border-white/10 shrink-0 cursor-pointer transition-all ${isSidebarCollapsed ? 'lg:justify-center lg:px-0 px-6' : 'px-6'}`} onClick={() => { setView('catalog'); setIsSidebarOpen(false); }}>
@@ -11647,7 +11974,7 @@ const MindMapSection = ({ user, courses, purchasedIds, setView }) => {
                                 {settings?.siteName || "Portal"}
                             </span>
                         </div>
-                        <button onClick={(e) => { e.stopPropagation(); setIsSidebarOpen(false); }} className="lg:hidden absolute right-3 text-white/50 hover:text-white shrink-0 bg-black/20 p-1.5 rounded-md border border-white/10">
+                        <button aria-label="Fechar menu" onClick={(e) => { e.stopPropagation(); setIsSidebarOpen(false); }} className="lg:hidden absolute right-3 text-white/50 hover:text-white shrink-0 bg-black/20 p-1.5 rounded-md border border-white/10">
                             <X size={20} />
                         </button>
                     </div>
@@ -11709,30 +12036,30 @@ const MindMapSection = ({ user, courses, purchasedIds, setView }) => {
 
                     {/* Footer Sidebar (Logout) */}
                     <div className="p-4 border-t border-white/10 shrink-0">
+                        <button type="button" onClick={handleInstallApp} disabled={installState === 'installed' || installState === 'prompting'} title={installState === 'installed' ? 'Aplicativo instalado' : 'Instalar aplicativo'} className={`w-full mb-2 py-3 rounded-xl bg-indigo-600/10 text-indigo-400 hover:bg-indigo-600/20 transition-colors flex items-center text-sm font-bold border border-indigo-500/20 disabled:opacity-60 ${isSidebarCollapsed ? 'lg:justify-center lg:px-0 px-4 gap-2' : 'justify-center gap-2 px-4'}`}>
+                            <Download size={18} className="shrink-0"/>
+                            <span className={isSidebarCollapsed ? 'lg:hidden block' : 'block'}>{installState === 'installed' ? 'Aplicativo instalado' : installState === 'prompting' ? 'Instalando…' : 'Instalar aplicativo'}</span>
+                        </button>
+                        {installMessage && <p role="status" className="text-xs text-indigo-200 mb-3 leading-relaxed">{installMessage}</p>}
                         <button onClick={onLogout} title={isSidebarCollapsed ? "Sair" : ""} className={`w-full py-3 rounded-xl bg-red-500/10 text-red-400 hover:bg-red-500/20 hover:text-red-300 transition-colors flex items-center text-sm font-bold border border-red-500/20 ${isSidebarCollapsed ? 'lg:justify-center lg:px-0 px-4 gap-2' : 'justify-center gap-2 px-4'}`}>
                             <LogOut size={18} className="shrink-0" /> 
                             <span className={`animate-fade-in ${isSidebarCollapsed ? 'lg:hidden block' : 'block'}`}>Sair da Conta</span>
                         </button>
 
-                        {installBtnVisible && (
-                            <button onClick={handleInstallApp} className={`w-full mt-2 py-3 rounded-xl bg-indigo-600/10 text-indigo-400 hover:bg-indigo-600/20 hover:text-indigo-300 transition-colors flex items-center text-sm font-bold border border-indigo-500/20 ${isSidebarCollapsed ? 'lg:justify-center lg:px-0 px-4 gap-2' : 'justify-center gap-2 px-4'}`}>
-                                <Download size={18} className="shrink-0" /> 
-                                <span className={`animate-fade-in ${isSidebarCollapsed ? 'lg:hidden block' : 'block'}`}>Instalar App</span>
-                            </button>
-                        )}
+
                     </div>
                 </aside>
 
                 {/* ========================================== */}
                 {/* ÁREA PRINCIPAL DA DIREITA                  */}
                 {/* ========================================== */}
-                <div className="flex-1 flex flex-col h-screen overflow-hidden relative bg-transparent">
+                <div className="platform-student-body flex-1 min-w-0 flex flex-col h-screen overflow-hidden relative bg-transparent">
                     
                     {/* HEADER SUPERIOR (Mobile + Pontos/Sino + Botão de Recolher PC) */}
                     <header className="h-[65px] md:h-[80px] glass-panel border-b border-white/10 flex items-center justify-between px-4 md:px-8 shrink-0 z-30 shadow-md transition-all duration-300">
                         <div className="flex items-center gap-3">
                             {/* Botão Mobile */}
-                            <button onClick={() => setIsSidebarOpen(true)} className="lg:hidden p-2 text-white/70 hover:text-white bg-white/5 rounded-lg border border-white/10 transition-colors">
+                            <button ref={mobileMenuButtonRef} aria-label="Abrir menu" aria-controls="platform-student-sidebar" aria-expanded={isSidebarOpen} onClick={() => setIsSidebarOpen(true)} className="lg:hidden p-2 text-white/70 hover:text-white bg-white/5 rounded-lg border border-white/10 transition-colors">
                                 <Menu size={20} />
                             </button>
 
@@ -11758,7 +12085,7 @@ const MindMapSection = ({ user, courses, purchasedIds, setView }) => {
                     </header>
 
                     {/* CONTEÚDO DAS ABAS */}
-                    <main className="flex-1 w-full overflow-y-auto custom-scrollbar relative block">
+                    <main className="platform-student-content flex-1 min-h-0 min-w-0 w-full overflow-y-auto custom-scrollbar relative block">
                         <div key={view} className={`animate-fade-in w-full min-h-full pb-10 ${
                             view === 'catalog' ? '' : 
                             view === 'course_details' ? '' :
@@ -11795,10 +12122,15 @@ const MindMapSection = ({ user, courses, purchasedIds, setView }) => {
                                     onStartCourse={() => handleStartCourse(selectedCourse)} 
                                 />
                             )}
-                            {view === 'course_player' && selectedCourse && (
-                                <CourseAccessGate 
+
+                        </div>
+                    </main>
+                </div>
+
+                            {(view === 'course_player' && selectedCourse || detachedCourse) && (
+                                <CourseAccessGate key={(view === 'course_player' ? selectedCourse : detachedCourse)?.id} 
                                     user={updatedUser} 
-                                    course={selectedCourse} 
+                                    course={view === 'course_player' ? selectedCourse : detachedCourse} 
                                     onBackToModules={() => setView('course_details')} 
                                     onFinishCourse={() => {
                                         if (purchasedIds.includes(selectedCourse.id)) {
@@ -11811,10 +12143,6 @@ const MindMapSection = ({ user, courses, purchasedIds, setView }) => {
                                     showNotification={showNotification} 
                                 />
                             )}
-                        </div>
-                    </main>
-                </div>
-
                 <PopupManager user={updatedUser} myCourses={myCoursesList} />
             </div>
         );
@@ -12280,7 +12608,7 @@ const MindMapSection = ({ user, courses, purchasedIds, setView }) => {
                               appleIcon.rel = 'apple-touch-icon';
                               document.head.appendChild(appleIcon);
                           }
-                          appleIcon.href = siteLogo;
+                          appleIcon.href = data.pwaIconUrl || siteLogo;
                       }
 
                       setTimeout(() => {
