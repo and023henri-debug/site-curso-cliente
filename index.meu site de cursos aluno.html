@@ -727,7 +727,7 @@ html{-webkit-text-size-adjust:100%;scroll-padding-top:12px}
       Home, Sparkles, CalendarDays, ListTodo, Zap /* <-- NOVOS AQUI */
     } from 'lucide-react';
     import { initializeApp } from 'firebase/app';
-import { getFunctions, httpsCallable } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-functions.js';
+import { runTransaction as inactivityTransaction, query as inactivityQuery, orderBy as inactivityOrderBy, documentId as inactivityDocumentId, limit as inactivityLimit, startAfter as inactivityStartAfter } from 'firebase/firestore';
     import { getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, onAuthStateChanged, updateProfile, GoogleAuthProvider, signInWithPopup, signInWithRedirect, getRedirectResult } from 'firebase/auth';
     import { getDocFromServer, getFirestore, doc, getDoc, getDocs, setDoc, collection, addDoc, query, orderBy, onSnapshot, serverTimestamp, updateDoc, arrayUnion, arrayRemove, deleteDoc, where, limit } from 'firebase/firestore';
     import { jsPDF } from "jspdf";
@@ -782,10 +782,12 @@ import { getFunctions, httpsCallable } from 'https://www.gstatic.com/firebasejs/
     const platformEnsureGoogleProfile = async user => {
         if (!db || !user) return;
         const ref = doc(db, 'users', user.uid);
-        const snap = await getDoc(ref);
-        if (!snap.exists()) await setDoc(ref, {
-            name: user.displayName || '', email: user.email || '', role: 'student',
-            createdAt: serverTimestamp(), photoBase64: user.photoURL || '', profileComplete: false
+        await inactivityTransaction(db, async tx => {
+            const snap = await tx.get(ref);
+            if (!snap.exists()) tx.set(ref, {
+                name: user.displayName || '', email: user.email || '', role: 'student',
+                createdAt: serverTimestamp(), photoBase64: user.photoURL || '', profileComplete: false
+            });
         });
     };
     // Executa uma vez por carregamento; o observador de autenticação cuida da navegação.
@@ -7449,12 +7451,10 @@ const SupportSection = ({ user, settings }) => {
              await updateProfile(cred.user, { displayName: formData.name });
              
              if (db) {
-                 await setDoc(doc(db, "users", cred.user.uid), { 
-                     name: formData.name, 
-                     email: cred.user.email, 
-                     role: 'student', 
-                     createdAt: serverTimestamp(), 
-                     profileComplete: false 
+                 await inactivityTransaction(db, async tx => {
+                     const ref=doc(db, 'users', cred.user.uid), existing=await tx.get(ref);
+                     tx.set(ref, {name:formData.name, email:cred.user.email, role:'student',
+                         createdAt:existing.data()?.createdAt || serverTimestamp(), profileComplete:false}, {merge:true});
                  });
              }
           }
@@ -12251,7 +12251,122 @@ const platformHasVisibleLesson = () => {
     try { const win=window.__platformDetachedLessonWindow; return !!win && !win.closed && win.document.visibilityState === 'visible'; }
     catch (_) { return false; }
 };
-const inactivityStudentCall = async (name,data={}) => (await httpsCallable(getFunctions(app,'southamerica-east1'),name,{timeout:20000})(data)).data;
+// Plano Spark: operações diretas, autorizadas pelas regras e pelo horário do Firestore.
+const inactivityMs = value => value?.toMillis ? value.toMillis() : (typeof value==='number'?value:null);
+const inactivityDefaults = {enabled:false,value:3,unit:'months',enabledSince:null,revision:0};
+function inactivityDeadline(base,p) {
+    const fixed={minutes:60000,hours:3600000,days:86400000,weeks:604800000};
+    if(fixed[p.unit])return base+Number(p.value)*fixed[p.unit];
+    const d=new Date(base), day=d.getUTCDate();d.setUTCDate(1);
+    d.setUTCMonth(d.getUTCMonth()+Number(p.value)*(p.unit==='years'?12:1));
+    const end=new Date(d);end.setUTCMonth(end.getUTCMonth()+1);end.setUTCDate(0);
+    d.setUTCDate(Math.min(day,end.getUTCDate()));return d.getTime();
+}
+function inactivityView(uid,profile,state,request,policy,now=Date.now(),derive=false) {
+    const p={...inactivityDefaults,...policy};
+    const last=inactivityMs(state?.lastAccessAt), released=inactivityMs(state?.releasedAt);
+    const tracked=inactivityMs(state?.trackedAt)||inactivityMs(profile.createdAt)||now;
+    const baseline=Math.max(last||0,released||0,last?0:Math.max(inactivityMs(profile.createdAt)||0,inactivityMs(p.enabledSince)||0));
+    const expiresAt=p.enabled?inactivityDeadline(baseline,p):null;
+    const r=request?{...request,requestedAt:inactivityMs(request.requestedAt),reviewedAt:inactivityMs(request.reviewedAt)}:null;
+    return {uid,name:profile.name||profile.nome||profile.displayName||'Aluno',email:profile.email||'',lastAccessAt:last,
+        trackedAt:tracked,releasedAt:released,blockedAt:inactivityMs(state?.blockedAt),blockedDeadline:expiresAt,expiresAt,
+        inactivityBlocked:!!state?.inactivityBlocked||(derive&&!!p.enabled&&now>=expiresAt),manualBlocked:!!profile.blocked,
+        request:r,policy:{...p,enabledSince:inactivityMs(p.enabledSince)},serverNow:now};
+}
+async function inactivityRead(uid) {
+    const [u,s,r,p]=await Promise.all([
+        getDocFromServer(doc(db,'users',uid)),getDocFromServer(doc(db,'inactivityAccess',uid)),
+        getDocFromServer(doc(db,'inactivityRequests',uid)),getDocFromServer(doc(db,'inactivityConfig','policy'))
+    ]);
+    return {profile:u.data()||{},state:s.data()||{},request:r.data()||null,policy:p.data()||inactivityDefaults};
+}
+async function inactivityTouch(uid) {
+    await inactivityTransaction(db,async tx=>{
+        const ref=doc(db,'inactivityAccess',uid),userRef=doc(db,'users',uid);
+        const [s,u]=await Promise.all([tx.get(ref),tx.get(userRef)]);
+        if(!u.exists())tx.set(userRef,{name:auth.currentUser.displayName||'',email:auth.currentUser.email||'',role:'student',createdAt:serverTimestamp(),profileComplete:false});
+        if(s.exists())tx.update(ref,{lastAccessAt:serverTimestamp()});
+        else tx.set(ref,{trackedAt:serverTimestamp(),lastAccessAt:serverTimestamp(),releasedAt:null,blockedAt:null,inactivityBlocked:false});
+    });
+}
+async function inactivityMarkExpired(uid) {
+    await inactivityTransaction(db,async tx=>{
+        const ref=doc(db,'inactivityAccess',uid),s=await tx.get(ref);
+        if(s.exists())tx.update(ref,{inactivityBlocked:true,blockedAt:serverTimestamp()});
+        else tx.set(ref,{trackedAt:serverTimestamp(),lastAccessAt:null,releasedAt:null,blockedAt:serverTimestamp(),inactivityBlocked:true});
+    });
+}
+async function inactivityFreeCall(name,data={}) {
+    const uid=auth.currentUser?.uid;
+    if(!uid)throw new Error('Entre na sua conta novamente.');
+    if(name==='inactivityAccess') {
+        let snapshot=await inactivityRead(uid);
+        if(data.mode==='heartbeat'&&!snapshot.state.inactivityBlocked&&!snapshot.profile.blocked) {
+            try {await inactivityTouch(uid);}
+            catch(e) {
+                if(e.code!=='permission-denied')throw e;
+                // Uma tentativa vencida não renova o último acesso: o servidor recusa a gravação.
+                // Só é permitido registrar bloqueio quando o prazo realmente venceu no servidor.
+                snapshot=await inactivityRead(uid);
+                if(!snapshot.profile.blocked&&!snapshot.state.inactivityBlocked)await inactivityMarkExpired(uid);
+            }
+            snapshot=await inactivityRead(uid);
+        }
+        const {profile,state,request,policy}=snapshot;
+        return inactivityView(uid,profile,state,request,policy,inactivityMs(state.lastAccessAt)||Date.now());
+    }
+    if(name==='inactivityRequestUnlock') {
+        const ref=doc(db,'inactivityRequests',uid);
+        await inactivityTransaction(db,async tx=>{
+            const old=await tx.get(ref);
+            if(old.data()?.status==='pending')return;
+            tx.set(ref,{status:'pending',requestedAt:serverTimestamp(),message:String(data.message||'').trim().slice(0,1000),reviewedAt:null,reviewedBy:null});
+        });
+        const s=await inactivityRead(uid);return inactivityView(uid,s.profile,s.state,s.request,s.policy);
+    }
+    if(name==='inactivityAdminList') {
+        let q=inactivityQuery(collection(db,'users'),inactivityOrderBy(inactivityDocumentId()),inactivityLimit(100));
+        if(data.cursor)q=inactivityQuery(q,inactivityStartAfter(data.cursor));
+        const [page,p]=await Promise.all([getDocs(q),getDocFromServer(doc(db,'inactivityConfig','policy'))]);
+        const rows=await Promise.all(page.docs.filter(d=>d.id!=='XSVAXUUaUogC9F5hl5VKxPUfx343'&&d.data().role!=='admin').map(async d=>{
+            const [s,r]=await Promise.all([getDocFromServer(doc(db,'inactivityAccess',d.id)),getDocFromServer(doc(db,'inactivityRequests',d.id))]);
+            return inactivityView(d.id,d.data(),s.data(),r.data(),p.data(),Date.now(),true);
+        }));
+        return {rows,policy:{...inactivityDefaults,...p.data(),enabledSince:inactivityMs(p.data()?.enabledSince)},serverNow:Date.now(),cursor:page.size===100?page.docs[99].id:null};
+    }
+    if(name==='inactivitySavePolicy') {
+        const value=Number(data.value),units=['minutes','hours','days','weeks','months','years'];
+        if(!Number.isInteger(value)||value<1||value>10000||(data.unit==='years'&&value>1000)||!units.includes(data.unit))throw new Error('Informe um prazo inteiro válido (até 1000 anos ou 10000 nas outras unidades).');
+        const ref=doc(db,'inactivityConfig','policy');
+        await inactivityTransaction(db,async tx=>{
+            const snap=await tx.get(ref),old={...inactivityDefaults,...snap.data()};
+            if(old.revision!==data.revision)throw new Error('Outro administrador alterou a regra. Descarte suas alterações e atualize.');
+            tx.set(ref,{enabled:!!data.enabled,value,unit:data.unit,revision:old.revision+1,
+                enabledSince:data.enabled&&!old.enabled?serverTimestamp():old.enabledSince,
+                updatedAt:serverTimestamp(),updatedBy:uid});
+            tx.set(doc(collection(db,'inactivityAudit')),{action:'policy',actor:uid,at:serverTimestamp(),value,unit:data.unit,enabled:!!data.enabled});
+        });
+        const result=await getDocFromServer(ref);return {policy:{...result.data(),enabledSince:inactivityMs(result.data().enabledSince)}};
+    }
+    if(name==='inactivityReviewUnlock') {
+        if(!['approve','reject'].includes(data.decision))throw new Error('Decisão inválida.');
+        const ref=doc(db,'inactivityRequests',data.uid),stateRef=doc(db,'inactivityAccess',data.uid);
+        await inactivityTransaction(db,async tx=>{
+            const [r,s]=await Promise.all([tx.get(ref),tx.get(stateRef)]);
+            if(r.data()?.status!=='pending'||inactivityMs(r.data().requestedAt)!==data.requestedAt)throw new Error('Solicitação já analisada ou alterada. Atualize a lista.');
+            tx.update(ref,{status:data.decision==='approve'?'approved':'rejected',reviewedAt:serverTimestamp(),reviewedBy:uid});
+            if(data.decision==='approve') {
+                if(!s.exists())throw new Error('Registro de acesso indisponível.');
+                tx.update(stateRef,{inactivityBlocked:false,releasedAt:serverTimestamp(),blockedAt:null});
+            }
+            tx.set(doc(collection(db,'inactivityAudit')),{action:data.decision,uid:data.uid,actor:uid,at:serverTimestamp()});
+        });return {ok:true};
+    }
+    throw new Error('Operação desconhecida.');
+}
+
+const inactivityStudentCall = inactivityFreeCall;
 function InactivityGate({user,children}) {
     const [access,setAccess]=React.useState(null), [error,setError]=React.useState('');
     const [checking,setChecking]=React.useState(true), [sending,setSending]=React.useState(false);
