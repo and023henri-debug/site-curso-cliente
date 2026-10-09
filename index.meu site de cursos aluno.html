@@ -2774,6 +2774,10 @@ const CleanYouTubePlayer = ({ videoId, controller, onEnded, poster, posterFallba
     const [qualityPreviewValue, setQualityPreviewValue] = useState('auto');
     const [availableQualities, setAvailableQualities] = useState([['auto', 'Automático', '']]);
     const menuRef = useRef(null);
+    const fullscreenRoot = useRef(null), fullscreenButton = useRef(null);
+    const fullscreenActive = useRef(false), lastPointerActivity = useRef(0);
+    const [isFullscreen, setIsFullscreen] = useState(false);
+    const [fullscreenMessage, setFullscreenMessage] = useState('');
 
     const ytQualityMap = {
         'highres': ['2160p', '4K'], 'hd2160': ['2160p', '4K'], 'hd1440': ['1440p', 'HD'],
@@ -2831,6 +2835,55 @@ const CleanYouTubePlayer = ({ videoId, controller, onEnded, poster, posterFallba
             setCovered(false);
         }, MASK_DURATION_MS);
     };
+    // Expande o conjunto da plataforma, incluindo máscaras e controles.
+    const refreshPlayerMasks = () => { coverVideo(); revealVideo(); };
+    const handlePlayerPointerMove = () => {
+        if (!fullscreenActive.current) return;
+        const now = performance.now();
+        if (now - lastPointerActivity.current < 150) return;
+        lastPointerActivity.current = now;
+        refreshPlayerMasks();
+    };
+    const togglePlatformFullscreen = async () => {
+        const root = fullscreenRoot.current;
+        if (!root) return;
+        setFullscreenMessage('');
+        setMenuOpen(false);
+        refreshPlayerMasks();
+        try {
+            const active = document.fullscreenElement || document.webkitFullscreenElement;
+            if (active === root) {
+                const exit = document.exitFullscreen || document.webkitExitFullscreen;
+                if (exit) await exit.call(document);
+            } else {
+                const enter = root.requestFullscreen || root.webkitRequestFullscreen;
+                if (!enter) {
+                    setFullscreenMessage('Este navegador não oferece tela cheia com os controles da plataforma. Experimente um navegador atualizado no computador.');
+                    return;
+                }
+                await enter.call(root);
+            }
+        } catch (_) {
+            setFullscreenMessage('Não foi possível abrir a tela cheia. Tente novamente ou confira as permissões do navegador.');
+        }
+    };
+    useEffect(() => {
+        const syncFullscreen = () => {
+            const active = (document.fullscreenElement || document.webkitFullscreenElement) === fullscreenRoot.current;
+            if (active === fullscreenActive.current) return;
+            fullscreenActive.current = active;
+            setIsFullscreen(active);
+            setMenuOpen(false);
+            refreshPlayerMasks();
+            if (!active) fullscreenButton.current?.focus({ preventScroll: true });
+        };
+        document.addEventListener('fullscreenchange', syncFullscreen);
+        document.addEventListener('webkitfullscreenchange', syncFullscreen);
+        return () => {
+            document.removeEventListener('fullscreenchange', syncFullscreen);
+            document.removeEventListener('webkitfullscreenchange', syncFullscreen);
+        };
+    }, []);
     useEffect(() => {
         let disposed = false, timer, readyTimer, attempts = 0;
         coverVideo(); setScreenState(-1); setSpeed(1); setSpeeds([1]);
@@ -2957,7 +3010,11 @@ const CleanYouTubePlayer = ({ videoId, controller, onEnded, poster, posterFallba
         revealVideo();
     };
     const stamp = v => `${Math.floor(v / 60)}:${String(Math.floor(v % 60)).padStart(2, '0')}`;
-    return <div className="platform-youtube-player" style={{position:'relative', width:'100%', background:'#000'}}>
+    return <div ref={fullscreenRoot} className={`platform-youtube-player${isFullscreen ? ' platform-player-fullscreen' : ''}`}
+        onPointerMove={handlePlayerPointerMove}
+        onPointerDownCapture={() => { if (fullscreenActive.current) refreshPlayerMasks(); }}
+        onKeyDownCapture={() => { if (fullscreenActive.current) refreshPlayerMasks(); }}
+        style={{position:'relative', width:'100%', background:'#000'}}>
         <style>{`
 .platform-youtube-stage{position:relative;width:100%;aspect-ratio:16/9;overflow:hidden;background:#000;isolation:isolate}
 .platform-youtube-stage iframe{pointer-events:none!important;user-select:none}
@@ -3001,6 +3058,17 @@ const CleanYouTubePlayer = ({ videoId, controller, onEnded, poster, posterFallba
 .platform-quality-preview-badge{font-size:9px;line-height:16px;background:#6445df;color:white;padding:0 4px;border-radius:3px}
 .platform-quality-preview-check{margin-left:auto;color:#c4b5fd}
 .platform-quality-preview-note{padding:8px 12px;background:#1c1828;border-top:1px solid #302a40;font:10px/1.5 system-ui;color:#bdb6ce}
+
+.platform-quality-auto-note{display:flex;gap:8px;align-items:flex-start;padding:10px 16px;background:#141222;border-top:1px solid #302a43;color:#bfc5da;font:12px/1.55 system-ui}
+.platform-quality-auto-note svg{flex-shrink:0;margin-top:2px;color:#a78bfa}
+.platform-quality-auto-note strong{color:#ddd6fe}
+.platform-fullscreen-message{padding:8px 16px;color:#fcd34d;background:#201b20;font:12px/1.5 system-ui}
+.platform-youtube-player.platform-player-fullscreen{width:100%!important;height:100%!important;max-width:none!important;max-height:none!important;display:flex;flex-direction:column;border:0;border-radius:0;overflow:hidden;background:#000}
+.platform-player-fullscreen .platform-youtube-stage{flex:1 1 0;min-height:0;aspect-ratio:auto;width:100%}
+.platform-player-fullscreen .platform-player-controls,.platform-player-fullscreen .platform-quality-auto-note,.platform-player-fullscreen .platform-fullscreen-message{flex:0 0 auto}
+.platform-player-fullscreen .platform-quality-auto-note{font-size:11px;padding:6px 16px}
+.platform-youtube-player::backdrop{background:#000}
+@media(max-height:480px){.platform-player-fullscreen .platform-quality-auto-note{display:none}.platform-player-fullscreen .platform-player-controls{padding:5px 12px}.platform-player-fullscreen .platform-youtube-brand-top{height:64px}.platform-player-fullscreen .platform-youtube-brand-bottom{height:60px}}
 `}</style>
         <div className="platform-youtube-stage">
         <div ref={mount} aria-hidden="true" style={{position:'absolute', inset:0, width:'100%', height:'100%', zIndex:0, pointerEvents:'none', opacity:ready && screenState !== -1 && screenState !== 5 && screenState !== 0 ? 1 : 0}} />
@@ -3093,8 +3161,13 @@ const CleanYouTubePlayer = ({ videoId, controller, onEnded, poster, posterFallba
                         </div>
                     )}
                 </div>
+                <button ref={fullscreenButton} type="button" onClick={togglePlatformFullscreen} aria-label={isFullscreen ? 'Sair da tela cheia' : 'Assistir em tela cheia'} title={isFullscreen ? 'Sair da tela cheia (Esc)' : 'Tela cheia'} aria-pressed={isFullscreen}>
+                    {isFullscreen ? <Minimize size={20}/> : <Maximize size={20}/>}
+                </button>
             </div>
         </div>
+        <div className="platform-quality-auto-note"><AlertCircle size={16}/><span><strong>Qualidade automática.</strong> A imagem se adapta à sua conexão e às condições de reprodução do seu dispositivo e navegador. Se a internet oscilar, a resolução pode diminuir para ajudar a manter a aula fluida e voltar a melhorar quando as condições permitirem.</span></div>
+        {fullscreenMessage && <div className="platform-fullscreen-message" role="status">{fullscreenMessage}</div>}
         {error && <div role="alert" className="absolute inset-0 z-40 bg-black flex flex-col gap-4 items-center justify-center p-8 text-white text-center"><p>{error}</p><button type="button" onClick={() => setRetry(n => n + 1)} className="px-4 py-2 rounded bg-indigo-600 text-white">Tentar novamente</button></div>}
     </div>;
 };
