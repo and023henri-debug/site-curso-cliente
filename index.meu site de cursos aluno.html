@@ -727,6 +727,7 @@ html{-webkit-text-size-adjust:100%;scroll-padding-top:12px}
       Home, Sparkles, CalendarDays, ListTodo, Zap /* <-- NOVOS AQUI */
     } from 'lucide-react';
     import { initializeApp } from 'firebase/app';
+import { getFunctions, httpsCallable } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-functions.js';
     import { getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, onAuthStateChanged, updateProfile, GoogleAuthProvider, signInWithPopup, signInWithRedirect, getRedirectResult } from 'firebase/auth';
     import { getDocFromServer, getFirestore, doc, getDoc, getDocs, setDoc, collection, addDoc, query, orderBy, onSnapshot, serverTimestamp, updateDoc, arrayUnion, arrayRemove, deleteDoc, where, limit } from 'firebase/firestore';
     import { jsPDF } from "jspdf";
@@ -2919,6 +2920,8 @@ const CleanYouTubePlayer = ({ videoId, controller, onEnded, poster, posterFallba
         return () => {
             detachBusy.current = true;
             if (detachedWindow.current && !detachedWindow.current.closed) detachedWindow.current.close();
+            window.__platformDetachedLessonWindow = null;
+            window.dispatchEvent(new Event('platform:lesson-window'));
             playerHost.remove();
         };
     }, [playerHost]);
@@ -2986,7 +2989,9 @@ const CleanYouTubePlayer = ({ videoId, controller, onEnded, poster, posterFallba
     };
     const saveDetachedPlayback = () => {
         const p = player.current;
-        restorePlayback.current = { time:p?.getCurrentTime?.() || 0, playing:p?.getPlayerState?.() === 1, volume:p?.getVolume?.() ?? volume, muted:p?.isMuted?.() ?? muted, speed:p?.getPlaybackRate?.() || 1 };
+        // Não apaga o ponto salvo se a nova janela ainda está carregando ou falhou.
+        if (!p?.getDuration?.()) return;
+        restorePlayback.current = { time:p.getCurrentTime?.() || 0, playing:p.getPlayerState?.() === 1, volume:p.getVolume?.() ?? volume, muted:p.isMuted?.() ?? muted, speed:p.getPlaybackRate?.() || 1 };
     };
     const restoreDock = () => {
         if (!detachModeRef.current) return;
@@ -2996,6 +3001,8 @@ const CleanYouTubePlayer = ({ videoId, controller, onEnded, poster, posterFallba
         playerHost.className = 'platform-player-host'; playerHost.style.cssText = '';
         playerDock.current?.appendChild(playerHost);
         const win = detachedWindow.current; detachedWindow.current = null;
+        window.__platformDetachedLessonWindow = null;
+        window.dispatchEvent(new Event('platform:lesson-window'));
         if (win && !win.closed) win.close();
         setDetachedMode(''); detachCallback.current?.(false);
         if (external) setRetry(value => value + 1);
@@ -3019,6 +3026,8 @@ const CleanYouTubePlayer = ({ videoId, controller, onEnded, poster, posterFallba
             saveDetachedPlayback();
             if (win) {
                 detachedWindow.current = win;
+                window.__platformDetachedLessonWindow = win;
+                window.dispatchEvent(new Event('platform:lesson-window'));
                 win.document.title = lessonTitle || 'Aula';
                 win.document.documentElement.lang = 'pt-BR';
                 win.document.documentElement.className = document.documentElement.className;
@@ -3112,14 +3121,43 @@ const CleanYouTubePlayer = ({ videoId, controller, onEnded, poster, posterFallba
     }, []);
     useEffect(() => {
         let disposed = false, timer, readyTimer, attempts = 0;
-        const playerDocument = mount.current?.ownerDocument || document;
-        const playerWindow = playerDocument.defaultView || window;
+        const hostDocument = mount.current?.ownerDocument || document;
+        let playerDocument = hostDocument;
+        let playerWindow = playerDocument.defaultView || window;
+        let videoMount = mount.current;
+        let bridge = null;
+        // O PiP é about:blank. O vídeo precisa carregar em um documento real do site,
+        // não diretamente naquele documento sem endereço/Referer.
+        if (hostDocument !== document && mount.current) {
+            bridge = hostDocument.createElement('iframe');
+            bridge.title = 'Reprodução da aula';
+            bridge.setAttribute('data-platform-lesson-bridge', 'true');
+            bridge.allow = 'autoplay; encrypted-media; fullscreen; picture-in-picture';
+            bridge.allowFullscreen = true;
+            bridge.referrerPolicy = 'strict-origin-when-cross-origin';
+            bridge.style.cssText = 'width:100%;height:100%;border:0;display:block;background:#080b14';
+            bridge.src = new URL('./aula-janela.html', window.location.href).href;
+            mount.current.replaceChildren(bridge);
+        }
         coverVideo(); setScreenState(-1); setSpeed(1); setSpeeds([1]);
         setReady(false); setPlaying(false); setError(''); setTime(0); setDuration(0);
         const start = () => {
             if (disposed) return;
+            if (bridge) {
+                try {
+                    if (!bridge.contentWindow?.__platformLessonBridgeReady) {
+                        if (++attempts > 125) { setError('Não foi possível abrir a aula nesta janela. Volte à página da aula e tente novamente.'); return; }
+                        timer = setTimeout(start, 200); return;
+                    }
+                    playerWindow = bridge.contentWindow;
+                    playerDocument = bridge.contentDocument;
+                    videoMount = playerDocument.getElementById('lesson-player-root');
+                } catch (_) {
+                    setError('Não foi possível abrir a aula nesta janela. Volte à página da aula e tente novamente.'); return;
+                }
+            }
             if (!playerWindow.YT?.Player) {
-                if (++attempts > 100) { setError('Não foi possível carregar o player. Reabra a aula.'); return; }
+                if (++attempts > 250) { setError('Não foi possível carregar o player. Reabra a aula.'); return; }
                 timer = setTimeout(start, 200); return;
             }
             if (!mount.current || !platformVideoId(videoId)) { setError('O link desta aula é inválido. Informe o administrador.'); return; }
@@ -3134,8 +3172,8 @@ const CleanYouTubePlayer = ({ videoId, controller, onEnded, poster, posterFallba
             el.allow = 'autoplay; encrypted-media; fullscreen; picture-in-picture';
             el.allowFullscreen = true;
             el.src = platformYouTubeEmbedUrl(videoId);
-            mount.current.replaceChildren(el);
-            readyTimer = setTimeout(() => { if (!disposed) setError('O YouTube não respondeu. Verifique a conexão e tente novamente.'); }, 25000);
+            videoMount.replaceChildren(el);
+            readyTimer = setTimeout(() => { if (!disposed) setError('A aula demorou para responder. Confira sua conexão e tente novamente.'); }, 25000);
             player.current = new playerWindow.YT.Player(el, { videoId, width: '100%', height: '100%',
                 playerVars: platformYouTubePlayerVars(),
                 events: {
@@ -3207,17 +3245,19 @@ const CleanYouTubePlayer = ({ videoId, controller, onEnded, poster, posterFallba
                         const messages = {
                             2: 'O link desta aula é inválido. Informe o administrador.',
                             5: 'Não foi possível reproduzir o vídeo neste navegador. Tente novamente.',
-                            100: 'O vídeo está privado, foi removido ou não está disponível. O administrador deve conferir a visibilidade no YouTube Studio.',
-                            101: 'O canal não permite reproduzir este vídeo no site. O administrador deve habilitar a incorporação no YouTube Studio.',
-                            150: 'O canal não permite reproduzir este vídeo no site. O administrador deve habilitar a incorporação no YouTube Studio.',
-                            153: 'O YouTube não conseguiu identificar o site. Abra a aula pelo endereço HTTPS da plataforma e confira bloqueadores de privacidade.'
+                            100: 'Esta aula está indisponível no momento. Informe o administrador para verificar a publicação.',
+                            101: 'A reprodução desta aula não foi autorizada. Informe o administrador para verificar as configurações.',
+                            150: 'A reprodução desta aula não foi autorizada. Informe o administrador para verificar as configurações.',
+                            153: 'Não foi possível conectar a aula nesta janela. Tente novamente ou volte à página da aula.'
                         };
-                        setError(messages[e.data] || 'Vídeo indisponível. Se foi enviado agora, aguarde o processamento no YouTube.');
+                        console.warn('[Player da aula] Falha de reprodução', {code:e.data, detached:detachModeRef.current || 'pagina'});
+                        coverVideo(); setPlaying(false);
+                        setError(messages[e.data] || 'Aula indisponível no momento. Aguarde um pouco e tente novamente.');
                     }
                 }
             });
         };
-        if (!playerWindow.YT?.Player && !playerDocument.querySelector('script[src="https://www.youtube.com/iframe_api"]')) {
+        if (!bridge && !playerWindow.YT?.Player && !playerDocument.querySelector('script[src="https://www.youtube.com/iframe_api"]')) {
             const script = playerDocument.createElement('script'); script.src = 'https://www.youtube.com/iframe_api'; playerDocument.head.appendChild(script);
         }
         start();
@@ -3411,7 +3451,7 @@ const CleanYouTubePlayer = ({ videoId, controller, onEnded, poster, posterFallba
         </div>
         <div className="platform-quality-auto-note"><AlertCircle size={16}/><span><strong>Qualidade automática.</strong> A imagem se adapta à sua conexão e às condições de reprodução do seu dispositivo e navegador. Se a internet oscilar, a resolução pode diminuir para ajudar a manter a aula fluida e voltar a melhorar quando as condições permitirem.</span></div>
         {fullscreenMessage && <div className="platform-fullscreen-message" role="status">{fullscreenMessage}</div>}
-        {error && <div role="alert" className="absolute inset-0 z-40 bg-black flex flex-col gap-4 items-center justify-center p-8 text-white text-center"><p>{error}</p><button type="button" onClick={() => setRetry(n => n + 1)} className="px-4 py-2 rounded bg-indigo-600 text-white">Tentar novamente</button></div>}
+        {error && <div role="alert" className="absolute inset-0 z-40 flex flex-col gap-4 items-center justify-center p-6 text-white text-center" style={{background:'linear-gradient(140deg,#111827,#080b14)'}}><BookOpen size={32} aria-hidden="true"/><h3 className="text-lg font-bold">Vamos retomar sua aula</h3><p className="max-w-md text-sm text-slate-300">{error}</p><div className="flex flex-wrap justify-center gap-3"><button type="button" onClick={() => {saveDetachedPlayback();setRetry(n => n + 1);}} className="px-4 py-2 rounded bg-indigo-600 text-white">Tentar novamente</button>{detachedMode && <button type="button" onClick={restoreDock} className="px-4 py-2 rounded border border-slate-500 text-white">Voltar à página da aula</button>}</div></div>}
     </div>, playerHost)}</div>;
 };
 
@@ -12205,6 +12245,80 @@ const MindMapSection = ({ user, courses, purchasedIds, setView }) => {
 
    
     // --- APP PRINCIPAL ---
+// O dashboard só é montado depois da verificação no servidor.
+const platformHasVisibleLesson = () => {
+    if (document.visibilityState === 'visible') return true;
+    try { const win=window.__platformDetachedLessonWindow; return !!win && !win.closed && win.document.visibilityState === 'visible'; }
+    catch (_) { return false; }
+};
+const inactivityStudentCall = async (name,data={}) => (await httpsCallable(getFunctions(app,'southamerica-east1'),name,{timeout:20000})(data)).data;
+function InactivityGate({user,children}) {
+    const [access,setAccess]=React.useState(null), [error,setError]=React.useState('');
+    const [checking,setChecking]=React.useState(true), [sending,setSending]=React.useState(false);
+    const [message,setMessage]=React.useState('');
+    const alive=React.useRef(true), inFlight=React.useRef(null), version=React.useRef(0);
+    const check=async (foreground=false) => {
+        if (foreground) {version.current++;setChecking(true);}
+        if (inFlight.current) { await inFlight.current; if (!alive.current) return; }
+        // Uma mudança de visibilidade exige uma nova decisão após qualquer chamada antiga.
+        if (!foreground && !platformHasVisibleLesson()) return;
+        const generation=version.current;
+        const job=(async()=>{
+            try {
+                const result=await inactivityStudentCall('inactivityAccess',{mode:platformHasVisibleLesson()?'heartbeat':'inspect'});
+                if(alive.current && generation===version.current) {setAccess(result);setError('');setChecking(false);}
+            } catch(e) {
+                if(alive.current && generation===version.current) {setError('Não foi possível verificar seu acesso. Confira sua conexão e tente novamente.');setChecking(false);}
+            }
+        })();
+        inFlight.current=job;
+        await job;
+        if(inFlight.current===job) inFlight.current=null;
+    };
+    React.useEffect(()=>{
+        alive.current=true;check(true);
+        const timer=setInterval(()=>check(),20000);
+        const visibility=()=>{if(document.visibilityState==='visible') check(true);};
+        const online=()=>check(true);
+        document.addEventListener('visibilitychange',visibility);window.addEventListener('online',online);window.addEventListener('platform:lesson-window',online);
+        return ()=>{alive.current=false;version.current++;clearInterval(timer);document.removeEventListener('visibilitychange',visibility);window.removeEventListener('online',online);window.removeEventListener('platform:lesson-window',online);};
+    },[user.uid]);
+    const request=async()=>{
+        if(sending) return;
+        setSending(true);setError('');version.current++;
+        try {
+            if(inFlight.current) await inFlight.current;
+            const result=await inactivityStudentCall('inactivityRequestUnlock',{message});
+            if(alive.current) {setAccess(result);setMessage('');}
+        } catch(e) {if(alive.current) setError(e.message || 'Não foi possível enviar sua solicitação.');}
+        finally {if(alive.current) setSending(false);}
+    };
+    const allowed=!!access&&!access.inactivityBlocked&&!access.manualBlocked;
+    const showGate=checking||!!error||!allowed;
+    // Mantém a aula montada durante uma nova verificação, evitando fechar a janela externa.
+    // Uma negativa ou falha efetiva desmonta o conteúdo e interrompe a reprodução.
+
+    const pending=access?.request?.status==='pending';
+    return <React.Fragment><div style={{display:showGate?'none':'contents'}}>{allowed&&!error?children:null}</div>{showGate&&<div className="min-h-screen bg-[#080b14] text-slate-100 flex items-center justify-center p-5"><section className="w-full max-w-lg rounded-3xl border border-slate-700 bg-slate-900 p-7 sm:p-9 shadow-2xl">
+        <div className="w-14 h-14 rounded-2xl bg-indigo-500/20 flex items-center justify-center mb-6"><svg aria-hidden="true" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6"><rect x="5" y="10" width="14" height="11" rx="2"/><path d="M8 10V6a4 4 0 018 0v4M12 14v3"/></svg></div>
+        <h1 className="text-2xl font-bold">{checking?'Verificando seu acesso…':access?.inactivityBlocked?'Acesso bloqueado por falta de uso':access?.manualBlocked?'Acesso bloqueado':'Verificação de acesso'}</h1>
+        {checking?<p className="text-slate-400 mt-4" role="status">Aguarde enquanto verificamos sua conta.</p>:<>
+            {error&&<p role="alert" className="mt-4 p-3 bg-red-500/10 text-red-200 rounded-xl">{error}</p>}
+            {access?.inactivityBlocked&&<><p className="text-slate-300 mt-4 leading-relaxed">Sua conta atingiu o período máximo sem acessar a plataforma. Solicite o desbloqueio abaixo para o administrador analisar.</p>
+                {access.lastAccessAt&&<p className="text-xs text-slate-400 mt-3">Último acesso: {new Date(access.lastAccessAt).toLocaleString('pt-BR')}</p>}
+                {pending?<div role="status" className="mt-6 rounded-xl bg-amber-500/10 text-amber-200 p-4">Solicitação enviada. Aguardando aprovação do administrador. Esta página verifica a liberação automaticamente.</div>:<>
+                    {access.request?.status==='rejected'&&<p className="mt-4 text-amber-200">Sua solicitação anterior foi recusada. Você pode enviar uma nova justificativa.</p>}
+                    <label className="block text-sm mt-5">Mensagem para o administrador (opcional)<textarea maxLength="1000" value={message} onChange={e=>setMessage(e.target.value)} className="mt-2 w-full bg-slate-950 border border-slate-600 rounded-xl p-3 text-white" rows="3" placeholder="Conte por que deseja voltar a acessar."/></label>
+                    <button disabled={sending} onClick={request} className="mt-4 w-full bg-indigo-600 hover:bg-indigo-500 rounded-xl py-3 font-bold disabled:opacity-50">{sending?'Enviando…':'Solicitar desbloqueio'}</button>
+                </>}
+            </>}
+            {access?.manualBlocked&&<p className="text-amber-200 mt-4">Existe um bloqueio manual nesta conta. Entre em contato com o administrador para liberar esse bloqueio.</p>}
+            <button onClick={()=>check(true)} disabled={sending} className="mt-5 w-full border border-slate-600 rounded-xl py-3">Verificar novamente</button>
+        </>}
+        <button onClick={()=>signOut(auth)} className="mt-5 text-sm text-slate-400 underline w-full">Sair da conta</button>
+    </section></div>}</React.Fragment>;
+}
+
     const App = () => {
         usePlatformDomains();
        const [user, setUser] = useState(null);
@@ -12751,7 +12865,7 @@ const MindMapSection = ({ user, courses, purchasedIds, setView }) => {
        // 3. FLUXO NORMAL DA APLICAÇÃO (Aluno Autenticado ou Visitante)
        // 👇 AQUI A MÁGICA FINAL: O APP PASSA A LISTA DE PROMOÇÕES (promotions={promocoes}) PARA O DASHBOARD 👇
        if (user) {
-           return <StudentDashboard user={user} settings={genSettings} certificates={certificados} promotions={promocoes} onLogout={() => { if(auth) signOut(auth); else setUser(null); }} />;
+           return <InactivityGate key={user.uid} user={user}><StudentDashboard user={user} settings={genSettings} certificates={certificados} promotions={promocoes} onLogout={() => { if(auth) signOut(auth); else setUser(null); }} /></InactivityGate>;
        }
        
        if (showAuth) {
