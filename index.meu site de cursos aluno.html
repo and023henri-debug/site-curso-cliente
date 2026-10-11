@@ -995,7 +995,7 @@ class MeetMedia {
 
 class NativeMeetingConnection {
  constructor({session,user,isHost,onState,onError}){
-  this.session=session;this.user=meetUser(user);this.isHost=isHost;this.onState=onState;this.onError=onError;this.clientId=crypto.randomUUID();this.peers=new Map();this.members=[];this.quality={level:-1};this.offs=[];this.sentSignals=[];this.runId='';this.joined=false;this.closed=false;this.phase='preview';this.media=new MeetMedia(()=>this.mediaChanged(),message=>this.error(message));
+  this.session=session;this.user=meetUser(user);this.isHost=isHost;this.onState=onState;this.onError=onError;this.clientId=crypto.randomUUID();this.peers=new globalThis.Map();this.members=[];this.quality={level:-1};this.offs=[];this.sentSignals=[];this.runId='';this.joined=false;this.closed=false;this.phase='preview';this.media=new MeetMedia(()=>this.mediaChanged(),message=>this.error(message));
   this.ref=doc(db,'native_rooms',session.id);this.memberRef=doc(db,'native_rooms',session.id,'members',this.user.uid);
  }
  error(message){if(!this.closed)this.onError(message);}
@@ -1089,7 +1089,7 @@ class NativeMeetingConnection {
 }
 
 class MeetRecorder {
- constructor(engine,root,onDone){this.engine=engine;this.root=root;this.onDone=onDone;this.nodes=new Map();this.chunks=[];}
+ constructor(engine,root,onDone){this.engine=engine;this.root=root;this.onDone=onDone;this.nodes=new globalThis.Map();this.chunks=[];}
  async start(quality='1080'){
   if(!window.MediaRecorder||!HTMLCanvasElement.prototype.captureStream)throw Error('Este navegador não oferece gravação da sala.');
   this.canvas=document.createElement('canvas');this.canvas.width=quality==='4k'?3840:quality==='720'?1280:1920;this.canvas.height=Math.round(this.canvas.width*9/16);this.ctx=this.canvas.getContext('2d',{alpha:false,willReadFrequently:true});const AC=window.AudioContext||window.webkitAudioContext;this.audio=new AC();this.mix=this.audio.createMediaStreamDestination();await this.audio.resume();this.started=Date.now();
