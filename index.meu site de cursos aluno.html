@@ -928,10 +928,10 @@ const meetName = user => String(user?.displayName||user?.nome||user?.name||'Part
 const meetUser = user => ({uid:auth.currentUser?.uid||user?.uid||user?.id||'',name:meetName(user),photo:platformHttpsUrl(user?.photoURL)||''});
 const meetSessionId = value => /^[a-zA-Z0-9_-]{1,90}$/.test(String(value||'')) ? String(value) : '';
 const meetSessions = config => Array.isArray(config?.sessions) ? config.sessions.filter(s=>meetSessionId(s.id)&&s.enabled!==false) : [];
-const meetVisibleSessions = (config,user,purchases=[],groups=[]) => config?.enabled ? meetSessions(config).filter(session=>!(session.excludedUserIds||[]).includes(user?.uid)&&(session.audienceMode==='all'||(Array.isArray(session.allowedUserIds)?session.allowedUserIds.includes(user?.uid):audienceAllows(session,user,purchases,groups)))) : [];
+const meetVisibleSessions = (config,user,purchases=[],groups=[]) => {const identity={...user,uid:auth.currentUser?.uid||user?.uid||user?.id||''};return config?.enabled ? meetSessions(config).filter(session=>!(session.excludedUserIds||[]).includes(identity.uid)&&(session.audienceMode==='all'||(Array.isArray(session.allowedUserIds)?session.allowedUserIds.includes(identity.uid):audienceAllows(session,identity,purchases,groups)))) : [];};
 const meetEarlyEnough = (session,now=Date.now()) => !meetMillis(session.scheduledAt)||now>=meetMillis(session.scheduledAt)-(Number(session.earlyJoinMinutes)||10)*60000;
 const meetExpired = session => meetMillis(session.endsAt)>0 && Date.now()>meetMillis(session.endsAt);
-const meetError = error => error?.code==='permission-denied' ? 'Sua entrada não foi autorizada. Confira se você está na conta convidada e se o encontro está disponível; se persistir, avise o professor.' : error?.name==='NotAllowedError' ? 'O navegador não autorizou este dispositivo. Libere câmera e microfone nas permissões do site.' : error?.name==='NotFoundError' ? 'Nenhum dispositivo compatível foi encontrado. Você pode entrar sem câmera e sem microfone.' : error?.message||'Não foi possível completar esta ação.';
+const meetError = (error,context='') => error?.code==='permission-denied' ? context==='permissions' ? 'O banco não permitiu carregar ou alterar as permissões. Verifique a conta do professor e publique as regras atualizadas das salas.' : context==='request' ? 'Não foi possível registrar seu pedido de entrada. Confira se esta é a conta convidada; o professor deve verificar o público do encontro e as regras das salas.' : 'A plataforma não autorizou esta operação. Confira a conta e o convite; se persistir, o professor deve verificar as regras das salas.' : error?.name==='NotAllowedError' ? 'O navegador não autorizou este dispositivo. Libere câmera e microfone nas permissões do site.' : error?.name==='NotFoundError' ? 'Nenhum dispositivo compatível foi encontrado. Você pode entrar sem câmera e sem microfone.' : error?.message||'Não foi possível completar esta ação.';
 const meetSignalPayload = value => JSON.parse(JSON.stringify(value));
 const meetNetworkLabel = quality => quality?.level===3?'Boa conexão':quality?.level===2?'Conexão regular':quality?.level===1?'Conexão instável':quality?.level===0?'Sem conexão':'Medindo conexão';
 
@@ -1027,15 +1027,21 @@ class NativeMeetingConnection {
   await this.ice();if(this.closed)return;
   await meetTransaction(db,async tx=>{const roomSnap=await tx.get(this.ref),ownSnap=await tx.get(this.memberRef),old=roomSnap.data(),own=ownSnap.data();let room=old,approved=false;
    if(this.isHost){if(old?.status==='active'&&old.hostUid!==this.user.uid&&meetMillis(old.hostSeenAt)>Date.now()-90000)throw Error('Outro professor está conduzindo esta sala.');const continuing=old?.status==='active'&&old.hostUid===this.user.uid;room={sessionId:this.session.id,hostUid:this.user.uid,hostName:this.user.name,runId:continuing?old.runId:crypto.randomUUID(),status:'active',mode:this.session.mode,admissionMode:this.session.admissionMode||'manual',capacity:Math.min(MEET_MAX_PEOPLE,Number(this.session.capacity)||MEET_MAX_PEOPLE),activeUserIds:continuing?[...new Set([...(old.activeUserIds||[]),this.user.uid])]:[this.user.uid],recording:false,startedAt:continuing?old.startedAt:serverTimestamp(),hostSeenAt:serverTimestamp()};tx.set(this.ref,room);approved=true;}
-   else{if(own&&['removed','denied'].includes(own.status)&&own.runId===old?.runId)throw Error('Sua entrada não foi autorizada pelo professor.');approved=!!(old?.status==='active'&&(this.session.admissionMode==='auto'||own?.status==='approved'&&own.runId===old.runId));if(approved){const ids=old.activeUserIds||[];if(!ids.includes(this.user.uid)&&ids.length>=old.capacity)throw Error('A sala está completa. Aguarde o professor liberar uma vaga.');tx.update(this.ref,{activeUserIds:[...new Set([...ids,this.user.uid])]});}}
+   else{
+    if(own&&['removed','denied'].includes(own.status)&&own.runId===old?.runId)throw Error('O professor recusou ou removeu esta entrada. Peça que permita um novo pedido na aba Permissões.');
+    // Primeiro registra a solicitação. Uma sala cheia nunca descarta o pedido.
+    approved=!!(old?.status==='active'&&own?.status==='approved'&&own.runId===old.runId);
+    if(approved){const ids=old.activeUserIds||[];if(!ids.includes(this.user.uid)&&ids.length>=old.capacity)throw Error('A sala está cheia. Aguarde uma vaga para retomar sua entrada aprovada.');tx.update(this.ref,{activeUserIds:[...new Set([...ids,this.user.uid])]});}
+   }
    const continuingApproval=approved&&own?.status==='approved'&&own.runId===room?.runId;
    tx.set(this.memberRef,{uid:this.user.uid,name:this.user.name,photo:this.user.photo,clientId:this.clientId,status:approved?'approved':'waiting',runId:room?.runId||'',speaker:this.isHost||continuingApproval&&own.speaker===true,canPresent:this.isHost||continuingApproval?this.isHost||own.canPresent===true:this.session.mode==='meeting',cameraOn:this.media.settings.cameraOn,micOn:this.media.settings.micOn,sharing:false,hand:false,muteRequest:continuingApproval?own.muteRequest||0:0,lastSeen:serverTimestamp(),joinedAt:serverTimestamp()});
   });
   if(this.closed)return;this.phase='waiting';this.emit();
-  this.offs.push(onSnapshot(this.ref,snapshot=>{if(!snapshot.exists())return;this.room=snapshot.data();if(this.joined&&(this.room.status!=='active'||this.room.runId!==this.runId)){this.phase='ended';this.leave(false).catch(()=>{});return;}if(this.phase==='waiting'&&!this.isHost&&this.room.status==='active'&&this.session.admissionMode==='auto')this.autoAdmit().catch(error=>this.error(meetError(error)));this.emit();},error=>{this.error(meetError(error));if(this.joined)this.leave(false).catch(()=>{});}));
+  this.offs.push(onSnapshot(this.ref,snapshot=>{if(!snapshot.exists())return;this.room=snapshot.data();if(this.joined&&(this.room.status!=='active'||this.room.runId!==this.runId)){this.phase='ended';this.leave(false).catch(()=>{});return;}if(this.phase==='waiting'&&!this.isHost&&this.room.status==='active'&&this.session.admissionMode==='auto')this.autoAdmit().catch(error=>this.error(meetError(error,'request')));if(this.me?.status==='approved'&&!this.joined)this.activate().catch(error=>this.error(meetError(error)));this.emit();},error=>{this.error(meetError(error));if(this.joined)this.leave(false).catch(()=>{});}));
   this.offs.push(onSnapshot(this.memberRef,snapshot=>{if(!snapshot.exists())return;const previous=this.me;this.me=snapshot.data();if(this.me.clientId!==this.clientId){this.error('Sua conta entrou nesta sala em outro dispositivo.');this.phase='ended';this.leave(false).catch(()=>{});return;}
    if(['removed','denied'].includes(this.me.status)){this.phase=this.me.status;this.leave(false).catch(()=>{});return;}
    if(this.me.status==='approved'&&!this.joined)this.activate().catch(error=>this.error(meetError(error)));
+   else if(this.me.status==='waiting'&&!this.isHost&&this.session.admissionMode==='auto')this.autoAdmit().catch(error=>this.error(meetError(error,'request')));
    if(this.me.muteRequest&&(this.me.muteRequest!==previous?.muteRequest)&&this.media.settings.micOn)this.media.toggle('microphone').catch(()=>{});
    if(previous&&(this.me.speaker!==previous.speaker||this.me.canPresent!==previous.canPresent)){if(this.session.mode==='broadcast'&&!this.publish()){this.media.settings.micOn=false;this.media.mic?.getTracks().forEach(track=>track.enabled=false);this.media.settings.cameraOn=false;this.media.camera?.getTracks().forEach(track=>track.enabled=false);const camera=this.media.cameraTrack();if(camera)camera.enabled=false;}if(!this.me.canPresent&&this.media.screen)this.media.stopShare().catch(()=>{});this.reconcile();this.mediaChanged();}this.emit();
   },error=>this.error(meetError(error))));
@@ -1080,11 +1086,7 @@ class NativeMeetingConnection {
  async toggle(kind){if(!this.publish()&&this.joined)throw Error('O professor precisa convidar você a falar nesta live.');await this.media.toggle(kind);}
  async share(){if(!this.isHost&&this.me?.canPresent!==true)throw Error('Peça ao professor para liberar a apresentação da sua tela.');await this.media.share();}
  async hand(){if(!this.me)return;await updateDoc(this.memberRef,{hand:!this.me.hand});}
- async moderate(uid,action){if(!this.isHost)throw Error('Apenas o professor pode moderar esta sala.');const ref=doc(db,'native_rooms',this.session.id,'members',uid);await meetTransaction(db,async tx=>{const r=await tx.get(this.ref),m=await tx.get(ref),room=r.data(),member=m.data();if(!member)return;const ids=room.activeUserIds||[];
-  if(action==='approve'){if(!ids.includes(uid)&&ids.length>=room.capacity)throw Error('A sala atingiu o limite de participantes.');tx.update(this.ref,{activeUserIds:[...new Set([...ids,uid])]});tx.update(ref,{status:'approved',runId:room.runId});}
-  else if(action==='deny'||action==='remove'){tx.update(this.ref,{activeUserIds:ids.filter(id=>id!==uid)});tx.update(ref,{status:action==='deny'?'denied':'removed',sharing:false});}
-  else if(action==='mute')tx.update(ref,{muteRequest:Date.now()});else if(action==='speaker')tx.update(ref,{speaker:!member.speaker});else if(action==='present')tx.update(ref,{canPresent:!member.canPresent});
- });}
+ async moderate(uid,action){if(!this.isHost)throw Error('Apenas o professor pode moderar esta sala.');return meetModerate(this.session,uid,action);}
  control(peer){if(peer.channel?.readyState==='open')peer.channel.send(JSON.stringify({type:'quality',quality:this.quality,speaking:this.publish()&&this.media.settings.micOn?this.media.level:0,...(this.isHost?{roster:Object.fromEntries([...this.peers].map(([uid,item])=>[uid,item.quality||{level:-1}]))}:{})}));}
  async stats(){
   let rtt=0,lost=0,received=0,connected=0,bitrate=0;
@@ -1146,8 +1148,9 @@ function MeetingBackgroundGallery({manage=false,uploadFile,onSelect,selectedUrl=
 
 function NativeMeetingRoom({session,user,isHost=false,onExit,uploadFile}){
  const root=useRef(null),engineRef=useRef(null),recorderRef=useRef(null),mounted=useRef(true),effectUrl=useRef('');
- const [state,setState]=useState({phase:'preview',settings:{cameraOn:true,micOn:true,background:'none',quality:'720'},peers:[],members:[],quality:{level:-1}}),[error,setError]=useState(''),[busy,setBusy]=useState(false),[devices,setDevices]=useState([]),[meter,setMeter]=useState(0),[network,setNetwork]=useState('Ainda não testada'),[panel,setPanel]=useState('people'),[showPanel,setShowPanel]=useState(true),[pin,setPin]=useState(''),[layout,setLayout]=useState('auto'),[messages,setMessages]=useState([]),[text,setText]=useState(''),[audioBlocked,setAudioBlocked]=useState(false),[recording,setRecording]=useState(false),[recordQuality,setRecordQuality]=useState('1080'),[recordings,setRecordings]=useState([]),[uploading,setUploading]=useState(''),[now,setNow]=useState(Date.now());
- const uid=auth.currentUser?.uid||user?.uid;
+ const [state,setState]=useState({phase:'preview',settings:{cameraOn:true,micOn:true,background:'none',quality:'720'},peers:[],members:[],quality:{level:-1}}),[error,setError]=useState(''),[busy,setBusy]=useState(false),[devices,setDevices]=useState([]),[meter,setMeter]=useState(0),[network,setNetwork]=useState('Ainda não testada'),[panel,setPanel]=useState(isHost?'permissions':'people'),[showPanel,setShowPanel]=useState(true),[pin,setPin]=useState(''),[layout,setLayout]=useState('auto'),[messages,setMessages]=useState([]),[text,setText]=useState(''),[audioBlocked,setAudioBlocked]=useState(false),[recording,setRecording]=useState(false),[recordQuality,setRecordQuality]=useState('1080'),[recordings,setRecordings]=useState([]),[uploading,setUploading]=useState(''),[now,setNow]=useState(Date.now());
+ const uid=auth.currentUser?.uid||user?.uid,pendingCount=useRef(0);
+ useEffect(()=>{window.AemNativeMeetingCount=(window.AemNativeMeetingCount||0)+1;window.AemIaWidget?.syncVisibility?.();return()=>{window.AemNativeMeetingCount=Math.max(0,(window.AemNativeMeetingCount||0)-1);window.AemIaWidget?.syncVisibility?.();};},[]);
  useEffect(()=>{mounted.current=true;const engine=new NativeMeetingConnection({session,user,isHost,onState:value=>{if(mounted.current)setState(previous=>({...previous,...value}));},onError:message=>{if(mounted.current)setError(message);}});engineRef.current=engine;engine.prepare().then(()=>navigator.mediaDevices?.enumerateDevices()).then(value=>{if(mounted.current&&value)setDevices(value);}).catch(value=>{if(mounted.current)setError(meetError(value));});
   const deviceChange=()=>navigator.mediaDevices.enumerateDevices().then(value=>{if(mounted.current)setDevices(value);}).catch(()=>{});navigator.mediaDevices?.addEventListener('devicechange',deviceChange);
   const interval=setInterval(()=>{if(mounted.current){setMeter(engine.media.level);setNow(Date.now());}},250),unload=event=>{if(engine.joined||engine.phase==='waiting'){event.preventDefault();event.returnValue='';}},guard=event=>{if(!engine.closed&&(engine.joined||engine.phase==='waiting')){event.preventDefault();setError('Saia da sala antes de trocar de setor.');}};window.addEventListener('beforeunload',unload);window.addEventListener('platform:before-admin-navigation',guard);
@@ -1160,6 +1163,8 @@ function NativeMeetingRoom({session,user,isHost=false,onExit,uploadFile}){
  const background=(mode,image='')=>action(async()=>{try{await engineRef.current.media.background(mode,image);}catch(value){await engineRef.current.media.background('none');throw value;}});
  const imageBackground=event=>{const file=event.target.files?.[0];event.target.value='';if(!file)return;if(!['image/jpeg','image/png','image/webp'].includes(file.type)||file.size>8*1024*1024){setError('Escolha uma imagem JPG, PNG ou WebP com até 8 MB.');return;}if(effectUrl.current)URL.revokeObjectURL(effectUrl.current);effectUrl.current=URL.createObjectURL(file);background('image',effectUrl.current);};
  const settings=state.settings||{},joined=state.phase==='joined',waiting=state.phase==='waiting',publish=isHost||session.mode==='meeting'||state.me?.speaker,alive=['preview','waiting','joined'].includes(state.phase),approved=(state.members||[]).filter(member=>member.status==='approved'&&member.runId===state.room?.runId),pending=(state.members||[]).filter(member=>member.status==='waiting'),peers=state.peers||[];
+ useEffect(()=>{if(isHost&&pending.length>pendingCount.current){setPanel('permissions');setShowPanel(true);}pendingCount.current=pending.length;},[isHost,pending.length]);
+ const waitingMessage=!state.room||state.room.status!=='active'?'Seu pedido foi enviado. Aguardando o professor iniciar a sala.':session.admissionMode==='auto'?(state.room.activeUserIds||[]).length>=state.room.capacity?'Seu pedido está na fila. A entrada será automática quando houver uma vaga.':'Seu pedido foi enviado. Liberando sua entrada…':'Seu pedido foi enviado. O professor aprova sua entrada na aba Permissões.';
  const me={uid,name:meetName(user),photo:platformHttpsUrl(user?.photoURL),cameraOn:settings.cameraOn,micOn:settings.micOn,hand:state.me?.hand,...state.me};me.cameraOn=settings.cameraOn&&!!publish;me.micOn=settings.micOn&&!!publish;
  const participants=[me,...approved.filter(member=>member.uid!==uid)],peerFor=id=>peers.find(peer=>peer.uid===id),screenMembers=participants.filter(member=>member.uid===uid?!!state.screen:member.sharing&&peerFor(member.uid)?.screen?.getVideoTracks().length),pinned=pin?participants.find(member=>member.uid===pin):null,screenFeatured=layout==='auto'?screenMembers.find(member=>member.uid===state.room?.hostUid)||screenMembers[0]:null,featured=pinned||screenFeatured||(session.mode==='broadcast'&&layout==='auto'?participants.find(member=>member.uid===state.room?.hostUid):null);
  const tile=member=><MeetTile key={member.uid} member={member} stream={member.uid===uid?state.local:peerFor(member.uid)?.camera} self={member.uid===uid} speaking={member.uid===uid?meter>12:(peerFor(member.uid)?.speaking||0)>12} quality={member.uid===uid?state.quality:peerFor(member.uid)?.quality||state.qualities?.[member.uid]} onPin={()=>setPin(pin===member.uid?'':member.uid)}/>;
@@ -1170,18 +1175,65 @@ function NativeMeetingRoom({session,user,isHost=false,onExit,uploadFile}){
  useEffect(()=>{if(state.recording===false&&recorderRef.current?.stopped)setRecording(false);},[state.recording]);
  const saveRecording=async item=>{if(!uploadFile||uploading)return;setUploading(item.name);setError('');try{const file=new File([item.blob],item.name,{type:item.blob.type}),result=await uploadFile(file,'Reunioes/Gravacoes/'+session.id+'/'),url=platformHttpsUrl(result?.url||result?.webViewLink||result?.downloadUrl);if(!url)throw Error('O envio não retornou um endereço de arquivo.');await addDoc(collection(db,'native_rooms',session.id,'recordings'),{name:item.name,url,duration:item.duration,size:item.blob.size,createdAt:serverTimestamp(),createdBy:uid});setRecordings(items=>items.map(old=>old===item?{...old,saved:true}:old));}catch(value){setError(meetError(value));}finally{setUploading('');}};
  return <section className="nm-scope" ref={root}><style>{meetCss}</style>{error&&<div className="nm-error" role="alert">{error}<button className="nm-plain" aria-label="Fechar aviso" onClick={()=>setError('')}>×</button></div>}
-  {!joined&&alive&&<><div className="nm-heading"><div><p className="nm-kicker">{waiting?'Sala de espera':'Antes de entrar'}</p><h2>{session.title}</h2><p>{waiting?'Seu pedido foi enviado. O professor vai liberar sua entrada.':'Confira sua imagem, o áudio e a conexão. A sala só recebe sua mídia depois que você entra e é autorizado.'}</p></div><span className="nm-pill blue">{session.mode==='broadcast'?'Transmissão própria':'Reunião própria'}</span></div><div className="nm-step-line"><span className="nm-step"><b>1</b>Seus dispositivos</span><span className="nm-step"><b>2</b>{session.admissionMode==='auto'?'Entrada autorizada':'Aprovação do professor'}</span><span className="nm-step"><b>3</b>Sala ao vivo</span></div><div className="nm-grid"><div className="nm-card"><div className="nm-preview">{settings.cameraOn&&state.local?.getVideoTracks().length?<MeetVideo stream={state.local} uid={uid} name={me.name} mirror/>:<MeetAvatar name={me.name} photo={me.photo}/>}<span className="nm-preview-label">{me.name} · Sua prévia</span></div><div className="nm-preview-tools"><MeetButton icon="camera" label={settings.cameraOn?'Desligar câmera':'Testar câmera'} secondary active={settings.cameraOn} disabled={busy} onClick={()=>action(()=>engineRef.current.toggle('camera'))}/><MeetButton icon="microphone" label={settings.micOn?'Silenciar microfone':'Testar microfone'} secondary active={settings.micOn} disabled={busy} onClick={()=>action(()=>engineRef.current.toggle('microphone'))}/></div>{deviceFields}<div className="nm-form-section">{backgroundFields}</div></div><div className="nm-card"><h3 style={{fontSize:18,fontWeight:700,margin:'0 0 20px'}}>Tudo pronto para o encontro?</h3><div className="nm-check-list"><div className="nm-check"><header><span>Entrada do microfone</span><span style={{color:'#93c5fd',fontSize:10}}>{settings.micOn?'Fale para testar':'Microfone desligado'}</span></header><progress className="nm-meter" value={meter} max={100} aria-label="Nível do microfone"/></div><div className="nm-check"><header><span>Saída de áudio</span><MeetButton icon="speaker" label="Ouvir teste" secondary disabled={busy} onClick={()=>action(()=>engineRef.current.media.speakers())}/></header><p className="nm-muted" style={{margin:0}}>Você ouvirá um sinal curto no dispositivo escolhido.</p></div><div className="nm-check"><header><span>Sua conexão</span><button className="nm-plain" disabled={busy} onClick={networkTest}>Testar rede</button></header><p className="nm-muted" style={{margin:0}}>{network}</p><p className="nm-muted" style={{fontSize:10,margin:'6px 0 0'}}>O teste mede a latência até a plataforma. Na sala, o indicador usa os dados reais da chamada.</p></div></div><div className="nm-notice">{session.admissionMode==='auto'?'O público definido pelo professor entra sem aprovação manual, quando a sala estiver aberta.':'O professor aprova cada participante antes de liberar áudio e vídeo.'}</div><p className="nm-muted">Você pode entrar sem câmera e sem microfone. O professor poderá sinalizar e gravar o encontro.</p><div className="nm-actions" style={{marginTop:20}}>{!waiting?<MeetButton icon="check" label={busy?'Conectando…':isHost?'Iniciar sala':session.admissionMode==='auto'?'Entrar na sala':'Pedir para entrar'} disabled={busy} onClick={()=>action(()=>engineRef.current.join())}/>:<span className="nm-pill blue"><span className="nm-dot"/>Aguardando autorização</span>}<MeetButton icon="back" label={waiting?'Cancelar pedido':'Voltar à agenda'} secondary disabled={busy} onClick={leave}/></div></div></div></>}
+  {!joined&&alive&&<><div className="nm-heading"><div><p className="nm-kicker">{waiting?'Sala de espera':'Antes de entrar'}</p><h2>{session.title}</h2><p>{waiting?waitingMessage:'Confira sua imagem, o áudio e a conexão. A sala só recebe sua mídia depois que você entra e é autorizado.'}</p></div><span className="nm-pill blue">{session.mode==='broadcast'?'Transmissão própria':'Reunião própria'}</span></div><div className="nm-step-line"><span className="nm-step"><b>1</b>Seus dispositivos</span><span className="nm-step"><b>2</b>{session.admissionMode==='auto'?'Entrada autorizada':'Aprovação do professor'}</span><span className="nm-step"><b>3</b>Sala ao vivo</span></div><div className="nm-grid"><div className="nm-card"><div className="nm-preview">{settings.cameraOn&&state.local?.getVideoTracks().length?<MeetVideo stream={state.local} uid={uid} name={me.name} mirror/>:<MeetAvatar name={me.name} photo={me.photo}/>}<span className="nm-preview-label">{me.name} · Sua prévia</span></div><div className="nm-preview-tools"><MeetButton icon="camera" label={settings.cameraOn?'Desligar câmera':'Testar câmera'} secondary active={settings.cameraOn} disabled={busy} onClick={()=>action(()=>engineRef.current.toggle('camera'))}/><MeetButton icon="microphone" label={settings.micOn?'Silenciar microfone':'Testar microfone'} secondary active={settings.micOn} disabled={busy} onClick={()=>action(()=>engineRef.current.toggle('microphone'))}/></div>{deviceFields}<div className="nm-form-section">{backgroundFields}</div></div><div className="nm-card"><h3 style={{fontSize:18,fontWeight:700,margin:'0 0 20px'}}>Tudo pronto para o encontro?</h3><div className="nm-check-list"><div className="nm-check"><header><span>Entrada do microfone</span><span style={{color:'#93c5fd',fontSize:10}}>{settings.micOn?'Fale para testar':'Microfone desligado'}</span></header><progress className="nm-meter" value={meter} max={100} aria-label="Nível do microfone"/></div><div className="nm-check"><header><span>Saída de áudio</span><MeetButton icon="speaker" label="Ouvir teste" secondary disabled={busy} onClick={()=>action(()=>engineRef.current.media.speakers())}/></header><p className="nm-muted" style={{margin:0}}>Você ouvirá um sinal curto no dispositivo escolhido.</p></div><div className="nm-check"><header><span>Sua conexão</span><button className="nm-plain" disabled={busy} onClick={networkTest}>Testar rede</button></header><p className="nm-muted" style={{margin:0}}>{network}</p><p className="nm-muted" style={{fontSize:10,margin:'6px 0 0'}}>O teste mede a latência até a plataforma. Na sala, o indicador usa os dados reais da chamada.</p></div></div><div className="nm-notice">{session.admissionMode==='auto'?'O público definido pelo professor entra sem aprovação manual, quando a sala estiver aberta.':'O professor aprova cada participante antes de liberar áudio e vídeo.'}</div><p className="nm-muted">Você pode entrar sem câmera e sem microfone. O professor poderá sinalizar e gravar o encontro.</p><div className="nm-actions" style={{marginTop:20}}>{!waiting?<MeetButton icon="check" label={busy?'Conectando…':isHost?'Iniciar sala':session.admissionMode==='auto'?'Entrar na sala':'Pedir para entrar'} disabled={busy} onClick={()=>action(async()=>{try{await engineRef.current.join();}catch(error){throw Error(meetError(error,'request'));}})}/>:<span className="nm-pill blue"><span className="nm-dot"/>{!state.room||state.room.status!=='active'?'Aguardando abertura':session.admissionMode==='auto'?'Aguardando entrada / vaga':'Aguardando aprovação'}</span>}<MeetButton icon="back" label={waiting?'Cancelar pedido':'Voltar à agenda'} secondary disabled={busy} onClick={leave}/></div></div></div></>}
   {!alive&&<div className="nm-empty"><MeetIcon name="end"/><h3>{state.phase==='removed'?'Você foi removido da sala':state.phase==='denied'?'Entrada não autorizada':state.phase==='ended'?'O encontro foi encerrado':'Você saiu da sala'}</h3><p>Se precisar, retorne à agenda para consultar os próximos encontros.</p><MeetButton icon="back" label="Voltar à agenda" secondary onClick={()=>onExit?.()}/></div>}
   {joined&&<div className="nm-room"><header className="nm-room-head"><div><p className="nm-kicker" style={{marginBottom:5}}>Sala da plataforma</p><h3>{session.title}</h3><small>{isHost?'Você está conduzindo o encontro':'Com '+(state.room?.hostName||session.hostName||'o professor')} · {participants.length}/{state.room?.capacity||MEET_MAX_PEOPLE} participantes</small></div><div className="nm-room-status"><MeetQuality quality={state.quality} label/>{state.recording&&<span className="nm-pill"><span className="nm-record-dot"/>Gravando</span>}<span className="nm-pill blue"><span className="nm-dot"/>Ao vivo</span></div></header>{state.recording&&<div className="nm-room-notice">O professor está gravando as imagens, a apresentação e o áudio deste encontro.</div>}{!publish&&<div className="nm-room-notice">Você está assistindo à live. Levante a mão para pedir ao professor que libere sua participação.</div>}{audioBlocked&&<div className="nm-room-notice"><MeetButton icon="speaker" label="Ativar som da sala" secondary onClick={()=>{root.current.querySelectorAll('audio[data-meet-audio]').forEach(audio=>audio.play().catch(()=>{}));setAudioBlocked(false);}}/></div>}
    <div className="nm-room-body"><main className="nm-stage" aria-label="Vídeo dos participantes">{peers.map(peer=><MeetAudio key={peer.uid} stream={peer.audio} speaker={settings.speakerDevice} onBlocked={()=>setAudioBlocked(true)}/>)}{featured?<div className="nm-present">{screenFeatured&&!pinned?<MeetTile member={featured} screen stream={featured.uid===uid?state.screen:peerFor(featured.uid)?.screen} quality={featured.uid===uid?state.quality:peerFor(featured.uid)?.quality} onPin={()=>{setLayout('grid');setPin('');}}/>:tile(featured)}<div className="nm-present-rail">{participants.map(tile)}</div></div>:<><div className={'nm-mosaic'+(participants.length===1?' one':participants.length>4?' many':'')}>{participants.map(tile)}</div>{screenMembers.map(member=><div key={member.uid} style={{marginTop:12}}><MeetTile member={member} screen stream={member.uid===uid?state.screen:peerFor(member.uid)?.screen} quality={member.uid===uid?state.quality:peerFor(member.uid)?.quality} onPin={()=>{setLayout('auto');setPin('');}}/></div>)}</>}</main>
-   {showPanel&&<aside className="nm-room-panel"><div className="nm-panel-tabs" role="tablist" aria-label="Painéis da sala">{[['people','Pessoas'],['chat','Chat'],['settings','Ajustes']].map(([value,label])=><button key={value} role="tab" aria-selected={panel===value} onClick={()=>setPanel(value)}>{label}{value==='people'&&pending.length>0&&<span className="nm-badge-count">{pending.length}</span>}</button>)}</div><div className="nm-panel-scroll">{panel==='people'&&<>{isHost&&pending.length>0&&<><p className="nm-panel-title">Pedindo para entrar ({pending.length})</p>{pending.map(member=><div className="nm-person" key={member.uid}><div className="nm-person-head"><MeetAvatar name={member.name} photo={member.photo}/><div className="nm-person-name">{member.name}<small>Sala de espera</small></div></div><div className="nm-person-controls"><button aria-label={'Aprovar '+member.name} onClick={()=>action(()=>engineRef.current.moderate(member.uid,'approve'))}>Aprovar</button><button aria-label={'Recusar '+member.name} onClick={()=>action(()=>engineRef.current.moderate(member.uid,'deny'))}>Recusar</button></div></div>)}</>}<p className="nm-panel-title" style={{marginTop:pending.length?20:0}}>Na sala ({participants.length})</p>{participants.map(member=><div className="nm-person" key={member.uid}><div className="nm-person-head"><MeetAvatar name={member.name} photo={member.photo}/><div className="nm-person-name">{member.name}{member.uid===uid?' (você)':''}<small>{member.hand?'✋ Pediu a palavra':member.uid===state.room?.hostUid?'Professor':member.speaker?'Convidado a falar':'Participante'}</small></div><MeetQuality quality={member.uid===uid?state.quality:peerFor(member.uid)?.quality||state.qualities?.[member.uid]}/></div>{isHost&&member.uid!==uid&&<div className="nm-person-controls"><button aria-label={'Silenciar '+member.name} onClick={()=>action(()=>engineRef.current.moderate(member.uid,'mute'))}>Silenciar</button>{session.mode==='broadcast'&&<button aria-label={(member.speaker?'Voltar ':'Convidar ')+member.name+(member.speaker?' a assistir':' a falar')} onClick={()=>action(()=>engineRef.current.moderate(member.uid,'speaker'))}>{member.speaker?'Voltar a assistir':'Convidar a falar'}</button>}<button aria-label={(member.canPresent?'Bloquear tela de ':'Liberar tela de ')+member.name} onClick={()=>action(()=>engineRef.current.moderate(member.uid,'present'))}>{member.canPresent?'Bloquear tela':'Liberar tela'}</button><button aria-label={'Remover '+member.name} onClick={()=>action(()=>engineRef.current.moderate(member.uid,'remove'))}>Remover</button></div>}</div>)}</>}
+   {showPanel&&<aside className="nm-room-panel"><div className="nm-panel-tabs" role="tablist" aria-label="Painéis da sala">{[...(isHost?[['permissions','Permissões']]:[]),['people','Pessoas'],['chat','Chat'],['settings','Ajustes']].map(([value,label])=><button key={value} role="tab" aria-selected={panel===value} onClick={()=>setPanel(value)}>{label}{value==='permissions'&&pending.length>0&&<span className="nm-badge-count">{pending.length}</span>}</button>)}</div><div className="nm-panel-scroll">{isHost&&panel==='permissions'&&<MeetPermissionsPanel room={state.room} members={state.members} uid={uid} busy={busy} onAction={(memberUid,permission)=>action(()=>engineRef.current.moderate(memberUid,permission))}/>}
+    {panel==='people'&&<><p className="nm-panel-title">Na sala ({participants.length})</p>{participants.map(member=><div className="nm-person" key={member.uid}><div className="nm-person-head"><MeetAvatar name={member.name} photo={member.photo}/><div className="nm-person-name">{member.name}{member.uid===uid?' (você)':''}<small>{member.hand?'✋ Pediu a palavra':member.uid===state.room?.hostUid?'Professor':member.speaker?'Convidado a falar':'Participante'}</small></div><MeetQuality quality={member.uid===uid?state.quality:peerFor(member.uid)?.quality||state.qualities?.[member.uid]}/></div>{isHost&&member.uid!==uid&&<div className="nm-person-controls"><button aria-label={'Silenciar '+member.name} onClick={()=>action(()=>engineRef.current.moderate(member.uid,'mute'))}>Silenciar</button>{session.mode==='broadcast'&&<button aria-label={(member.speaker?'Voltar ':'Convidar ')+member.name+(member.speaker?' a assistir':' a falar')} onClick={()=>action(()=>engineRef.current.moderate(member.uid,'speaker'))}>{member.speaker?'Voltar a assistir':'Convidar a falar'}</button>}<button aria-label={(member.canPresent?'Bloquear tela de ':'Liberar tela de ')+member.name} onClick={()=>action(()=>engineRef.current.moderate(member.uid,'present'))}>{member.canPresent?'Bloquear tela':'Liberar tela'}</button><button aria-label={'Remover '+member.name} onClick={()=>action(()=>engineRef.current.moderate(member.uid,'remove'))}>Remover</button></div>}</div>)}</>}
     {panel==='chat'&&<>{messages.length?messages.map(message=><div className="nm-chat-row" key={message.id}><strong>{message.name}</strong><time>{meetMillis(message.createdAt)?new Date(meetMillis(message.createdAt)).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'}):''}</time><p>{message.text}</p></div>):<p className="nm-muted">Envie perguntas e compartilhe ideias com as pessoas desta sala.</p>}</>}
     {panel==='settings'&&<div className="nm-settings-panel">{deviceFields}{backgroundFields}<label className="nm-field">Visualização<select value={layout} onChange={event=>{setPin('');setLayout(event.target.value);}}><option value="auto">Apresentação em destaque</option><option value="grid">Mosaico de participantes</option></select></label>{isHost&&<label className="nm-field">Quadro da gravação<select value={recordQuality} disabled={recording} onChange={event=>setRecordQuality(event.target.value)}><option value="720">1280 × 720</option><option value="1080">1920 × 1080</option><option value="4k">3840 × 2160 · composição 4K</option></select><small>A resolução das fontes depende das câmeras e da conexão. Um quadro maior não cria detalhes que a câmera não capturou.</small></label>}<p className="nm-muted">Qualidade: {state.quality?.rtt||0} ms · perda {state.quality?.loss||0}% · envio {state.quality?.kbps||0} kbps.</p><MeetButton icon="speaker" label="Testar saída de áudio" secondary onClick={()=>action(()=>engineRef.current.media.speakers())}/></div>}
    </div>{panel==='chat'&&<form className="nm-chat-form" onSubmit={event=>{event.preventDefault();if(!text.trim())return;const message=text;setText('');engineRef.current.chat(message).catch(value=>setError(meetError(value)));}}><input aria-label="Mensagem para a sala" placeholder="Escreva uma mensagem…" value={text} maxLength={2000} onChange={event=>setText(event.target.value)}/><button className="nm-button" aria-label="Enviar mensagem"><MeetIcon name="send"/></button></form>}</aside>}
-   </div><footer className="nm-room-controls"><MeetButton icon="microphone" label={settings.micOn?'Silenciar':'Microfone'} active={settings.micOn&&publish} secondary disabled={busy||!publish} onClick={()=>action(()=>engineRef.current.toggle('microphone'))}/><MeetButton icon="camera" label={settings.cameraOn?'Câmera ligada':'Câmera'} active={settings.cameraOn&&publish} secondary disabled={busy||!publish} onClick={()=>action(()=>engineRef.current.toggle('camera'))}/><MeetButton icon="screen" label={state.screen?'Parar tela':'Apresentar tela'} active={!!state.screen} secondary disabled={busy||(!isHost&&!state.me?.canPresent)} onClick={()=>action(()=>engineRef.current.share())}/><MeetButton icon="hand" label={state.me?.hand?'Baixar mão':'Levantar mão'} active={state.me?.hand} secondary onClick={()=>action(()=>engineRef.current.hand())}/><MeetButton icon="users" label="Pessoas" active={showPanel&&panel==='people'} badge={pending.length} secondary onClick={()=>{setPanel('people');setShowPanel(!(showPanel&&panel==='people'));}}/><MeetButton icon="chat" label="Chat" active={showPanel&&panel==='chat'} secondary onClick={()=>{setPanel('chat');setShowPanel(!(showPanel&&panel==='chat'));}}/><MeetButton icon="settings" label="Ajustes" active={showPanel&&panel==='settings'} secondary onClick={()=>{setPanel('settings');setShowPanel(!(showPanel&&panel==='settings'));}}/>{isHost&&<MeetButton icon="record" label={recording?'Parar gravação':'Gravar sala'} active={recording} secondary disabled={busy} onClick={startRecord}/>}<MeetButton icon="expand" label="Tela cheia" secondary onClick={()=>action(()=>document.fullscreenElement?document.exitFullscreen():root.current.querySelector('.nm-room').requestFullscreen())}/><MeetButton icon="end" label={isHost?'Encerrar sala':'Sair'} danger disabled={busy} onClick={leave}/></footer>
+   </div><footer className="nm-room-controls"><MeetButton icon="microphone" label={settings.micOn?'Silenciar':'Microfone'} active={settings.micOn&&publish} secondary disabled={busy||!publish} onClick={()=>action(()=>engineRef.current.toggle('microphone'))}/><MeetButton icon="camera" label={settings.cameraOn?'Câmera ligada':'Câmera'} active={settings.cameraOn&&publish} secondary disabled={busy||!publish} onClick={()=>action(()=>engineRef.current.toggle('camera'))}/><MeetButton icon="screen" label={state.screen?'Parar tela':'Apresentar tela'} active={!!state.screen} secondary disabled={busy||(!isHost&&!state.me?.canPresent)} onClick={()=>action(()=>engineRef.current.share())}/><MeetButton icon="hand" label={state.me?.hand?'Baixar mão':'Levantar mão'} active={state.me?.hand} secondary onClick={()=>action(()=>engineRef.current.hand())}/>{isHost&&<MeetButton icon="check" label="Permissões" active={showPanel&&panel==='permissions'} badge={pending.length} secondary onClick={()=>{setPanel('permissions');setShowPanel(!(showPanel&&panel==='permissions'));}}/>}<MeetButton icon="users" label="Pessoas" active={showPanel&&panel==='people'} secondary onClick={()=>{setPanel('people');setShowPanel(!(showPanel&&panel==='people'));}}/><MeetButton icon="chat" label="Chat" active={showPanel&&panel==='chat'} secondary onClick={()=>{setPanel('chat');setShowPanel(!(showPanel&&panel==='chat'));}}/><MeetButton icon="settings" label="Ajustes" active={showPanel&&panel==='settings'} secondary onClick={()=>{setPanel('settings');setShowPanel(!(showPanel&&panel==='settings'));}}/>{isHost&&<MeetButton icon="record" label={recording?'Parar gravação':'Gravar sala'} active={recording} secondary disabled={busy} onClick={startRecord}/>}<MeetButton icon="expand" label="Tela cheia" secondary onClick={()=>action(()=>document.fullscreenElement?document.exitFullscreen():root.current.querySelector('.nm-room').requestFullscreen())}/><MeetButton icon="end" label={isHost?'Encerrar sala':'Sair'} danger disabled={busy} onClick={leave}/></footer>
   </div>}
   {recordings.length>0&&<div className="nm-recording-list">{recordings.map(item=><div className="nm-recording-item" key={item.url}><div><strong>{item.name}</strong><small>{Math.round(item.blob.size/1024/1024*10)/10} MB · {item.duration}s · gravação local concluída</small></div><div className="nm-actions"><a className="nm-button secondary" href={item.url} download={item.name}><MeetIcon name="download"/>Baixar gravação</a>{uploadFile&&<MeetButton icon="download" label={item.saved?'Salva no R2':uploading===item.name?'Enviando…':'Salvar no R2'} secondary disabled={item.saved||!!uploading} onClick={()=>saveRecording(item)}/>}</div></div>)}</div>}
  </section>;
+}
+
+// A mesma transação atende a agenda e o painel de permissões da sala.
+const meetModerate = async (session, uid, action) => {
+ const teacherUid=auth.currentUser?.uid;
+ if(!teacherUid||!meetSessionId(session.id))throw Error('Entre na conta do professor para gerenciar as permissões.');
+ if(uid===teacherUid)throw Error('Use Encerrar sala para sair como professor.');
+ const roomRef=doc(db,'native_rooms',session.id),memberRef=doc(db,'native_rooms',session.id,'members',uid);
+ return meetTransaction(db,async tx=>{
+  const roomSnap=await tx.get(roomRef),memberSnap=await tx.get(memberRef),room=roomSnap.data(),member=memberSnap.data();
+  if(!member)throw Error('Este pedido já não está disponível.');
+  if(room?.status!=='active'||room.hostUid!==teacherUid)throw Error('Inicie a sala com sua conta antes de aprovar ou alterar permissões.');
+  const ids=room.activeUserIds||[];
+  if(action==='approve'){
+   if(!['waiting','approved'].includes(member.status))throw Error('Libere um novo pedido antes de aprovar este aluno.');
+   if(!ids.includes(uid)&&ids.length>=room.capacity)throw Error('A sala está cheia. Libere uma vaga; o pedido continuará aguardando.');
+   const continuing=member.status==='approved'&&member.runId===room.runId;
+   tx.update(roomRef,{activeUserIds:[...new Set([...ids,uid])]});
+   tx.update(memberRef,{status:'approved',runId:room.runId,sharing:false,...(!continuing?{speaker:false,canPresent:room.mode==='meeting',muteRequest:0}:{})});
+  }else if(['deny','remove','restore'].includes(action)){
+   tx.update(roomRef,{activeUserIds:ids.filter(id=>id!==uid)});
+   tx.update(memberRef,{status:action==='deny'?'denied':action==='remove'?'removed':'left',runId:room.runId,sharing:false,...(action==='restore'?{speaker:false,canPresent:room.mode==='meeting',muteRequest:0}:{})});
+  }else if(member.status!=='approved'||member.runId!==room.runId)throw Error('Este aluno não está na sala.');
+  else if(action==='mute')tx.update(memberRef,{muteRequest:Date.now()});
+  else if(action==='speaker')tx.update(memberRef,{speaker:!member.speaker});
+  else if(action==='present')tx.update(memberRef,{canPresent:!member.canPresent});
+  else throw Error('Permissão inválida.');
+ });
+};
+
+function MeetPermissionsPanel({room,members=[],uid,onAction,busy=false,onStart}){
+ const active=room?.status==='active',canModerate=active&&room.hostUid===uid;
+ const waiting=members.filter(member=>member.status==='waiting').sort((a,b)=>meetMillis(a.joinedAt)-meetMillis(b.joinedAt));
+ const blocked=members.filter(member=>['denied','removed'].includes(member.status)&&member.runId===room?.runId);
+ const admitted=members.filter(member=>member.status==='approved'&&member.runId===room?.runId&&member.uid!==room?.hostUid);
+ const full=active&&(room.activeUserIds||[]).length>=room.capacity;
+ return <div className="nm-permissions" aria-live="polite">
+  <div className="nm-actions" style={{marginBottom:16}}><span className="nm-pill blue">{waiting.length} {waiting.length===1?'pedido pendente':'pedidos pendentes'}</span><span className="nm-pill">{active?(room.activeUserIds||[]).length+'/'+room.capacity+' vagas ocupadas':'Sala ainda não iniciada'}</span></div>
+  {!canModerate&&<div className="nm-notice">{active?'A aprovação está com o professor que iniciou esta sala.':'Os pedidos já aparecem aqui. Inicie a sala para aprovar a entrada dos alunos.'}{!active&&onStart&&<div style={{marginTop:12}}><MeetButton icon="camera" label="Preparar sala para aprovar" onClick={onStart}/></div>}</div>}
+  {full&&<p className="nm-notice">A sala está cheia. Os pedidos continuam na fila; libere uma vaga em Pessoas.</p>}
+  <p className="nm-panel-title">Solicitações de entrada</p>
+  {!waiting.length&&<p className="nm-muted">Nenhum pedido pendente. Novas solicitações aparecerão automaticamente.</p>}
+  {waiting.map(member=><div className="nm-person" key={member.uid}><div className="nm-person-head"><MeetAvatar name={member.name} photo={member.photo}/><div className="nm-person-name">{member.name}<small>{meetMillis(member.joinedAt)?'Solicitou às '+new Date(meetMillis(member.joinedAt)).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'}):'Na sala de espera'}</small></div></div><div className="nm-person-controls"><button aria-label={'Aprovar '+member.name} disabled={busy||!canModerate||full&&!(room.activeUserIds||[]).includes(member.uid)} onClick={()=>onAction(member.uid,'approve')}>Aprovar entrada</button><button aria-label={'Recusar '+member.name} disabled={busy||!canModerate} onClick={()=>onAction(member.uid,'deny')}>Recusar</button></div></div>)}
+  {blocked.length>0&&<><p className="nm-panel-title" style={{marginTop:22}}>Entradas recusadas / removidas</p>{blocked.map(member=><div className="nm-person" key={member.uid}><div className="nm-person-head"><MeetAvatar name={member.name} photo={member.photo}/><div className="nm-person-name">{member.name}<small>{member.status==='denied'?'Pedido recusado':'Removido da sala'}</small></div></div><div className="nm-person-controls"><button aria-label={'Permitir novo pedido de '+member.name} disabled={busy||!canModerate} onClick={()=>onAction(member.uid,'restore')}>Permitir novo pedido</button></div></div>)}</>}
+  {admitted.length>0&&<><p className="nm-panel-title" style={{marginTop:22}}>Entradas aprovadas ({admitted.length})</p>{admitted.map(member=><div className="nm-person" key={member.uid}><div className="nm-person-head"><MeetAvatar name={member.name} photo={member.photo}/><div className="nm-person-name">{member.name}<small>Entrada aprovada</small></div></div><div className="nm-person-controls"><button aria-label={'Remover '+member.name} disabled={busy||!canModerate} onClick={()=>onAction(member.uid,'remove')}>Remover / liberar vaga</button></div></div>)}</>}
+ </div>;
 }
 
 const useLiveConfiguration = () => {
@@ -12357,21 +12409,10 @@ function useCustomStudentTabs(user,purchasedIds=[],groups=[]){
         }, [loadingData, allCourses, purchasedIds]);
 
         useEffect(() => {
-            // 👇 ISSO AVISA A IA GLOBAL ONDE ESTAMOS 👇
-           window.AemCurrentView = view;
-           
-           const fab = document.getElementById('aem-chat-fab');
-           if (fab) {
-               if (view === 'home') {
-                   fab.style.display = 'none';
-                   if (window.AemIaWidget && window.AemIaWidget.closeWidget) {
-                       window.AemIaWidget.closeWidget();
-                   }
-               } else {
-                   fab.style.display = 'flex';
-               }
-           }
-       }, [view]);
+            window.AemCurrentView = view;
+            window.AemIaAuthenticated = !!user;
+            window.AemIaWidget?.syncVisibility?.();
+        }, [view, user?.uid]);
        if (loadingData) return <div className="h-screen flex items-center justify-center cosmic-bg"><div className="w-16 h-16 border-4 border-purple-500 border-t-transparent rounded-full animate-spin"></div></div>;
 
        // 👇 COLE ESSE CÓDIGO NOVO NO LUGAR (A PARTIR DAQUI) 👇
@@ -12868,6 +12909,8 @@ function InactivityGate({user,children}) {
 }
 
     const App = () => {
+       const urlParams = new URLSearchParams(window.location.search);
+       const isPreview = urlParams.get('preview');
         usePlatformDomains();
        const [user, setUser] = useState(null);
        const [loading, setLoading] = useState(true);
@@ -13146,45 +13189,14 @@ function InactivityGate({user,children}) {
        // 👆 FIM DO MOTOR DA IA 👆
       
        useEffect(() => {
-           const checkAndToggleIA = () => {
-               const fab = document.getElementById('aem-chat-fab');
-               if (fab) {
-                   // 👇 AGORA ELE RESPEITA A TELA "HOME" E NÃO SOBRESCREVE 👇
-                   if (user && window.AemCurrentView !== 'home') {
-                       fab.style.display = 'flex'; 
-                   } else {
-                       fab.style.display = 'none'; 
-                       if (window.AemIaWidget && window.AemIaWidget.closeWidget) {
-                           window.AemIaWidget.closeWidget();
-                       }
-                   }
-               }
-           };
-
-           checkAndToggleIA();
-           const interval = setInterval(checkAndToggleIA, 1000);
-           return () => clearInterval(interval);
-       }, [user]);useEffect(() => {
-           const checkAndToggleIA = () => {
-               const fab = document.getElementById('aem-chat-fab');
-               if (fab) {
-                   // 👇 AGORA ELE RESPEITA A TELA "HOME" E NÃO SOBRESCREVE 👇
-                   if (user && window.AemCurrentView !== 'home') {
-                       fab.style.display = 'flex'; 
-                   } else {
-                       fab.style.display = 'none'; 
-                       if (window.AemIaWidget && window.AemIaWidget.closeWidget) {
-                           window.AemIaWidget.closeWidget();
-                       }
-                   }
-               }
-           };
-
-           checkAndToggleIA();
-           const interval = setInterval(checkAndToggleIA, 1000);
+           window.AemIaAuthenticated = !!user;
+           if (!user) window.AemCurrentView = 'home';
+           const sync = () => window.AemIaWidget?.syncVisibility?.();
+           sync();
+           const interval = setInterval(sync, 1000);
            return () => clearInterval(interval);
        }, [user]);
-      
+
        // --- INÍCIO DO MOTOR DE TEMA DINÂMICO ---
       const applyThemeToDOM = (settings) => {
           if (!settings) return;
@@ -13343,8 +13355,7 @@ function InactivityGate({user,children}) {
       // --- FIM DO MOTOR DE TEMA DINÂMICO ---
 
        // --- MODO PREVIEW FORÇADO (Detecta se está dentro do Iframe do Admin) ---
-       const urlParams = new URLSearchParams(window.location.search);
-       const isPreview = urlParams.get('preview');
+       // A detecção de preview ocorre no início do App, antes dos efeitos.
 
        // 2. Autenticação com Timeout de Segurança (Desativado no modo Preview)
        useEffect(() => {
@@ -13461,7 +13472,7 @@ function InactivityGate({user,children}) {
 
     // ⚡ DESPERTADOR DA IA: Acorda o servidor silenciosamente enquanto o aluno navega
     // Isso evita a lentidão de 5 a 10s na primeira mensagem do dia (Vercel Cold Start)
-    fetch("https://meu-backend-ia.vercel.app").catch(() => {});
+    // O servidor só é aquecido quando a IA está disponível nesta aba.
 
     // Injetar CSS Seguro do Widget
 
@@ -13541,6 +13552,8 @@ function InactivityGate({user,children}) {
             </div>
         </div>
     `;
+    root.hidden = true;
+    root.style.display = "none";
     document.body.appendChild(root);
 
     // 👇 INÍCIO DA LÓGICA DE MOVIMENTAÇÃO DO BOTÃO (DRAG AND DROP) 👇
@@ -13652,28 +13665,54 @@ function InactivityGate({user,children}) {
     });
     // 👆 FIM DA LÓGICA DO BOTÃO ARRASTÁVEL 👆
 
-    // Lógica de UI do Widget
-    let isWidgetOpen = false;
-    
+    // Uma única regra controla botão, painel, voz e pedidos em andamento.
+    let isWidgetOpen = false, closeTimer = null, focusTimer = null, backendAwake = false;
+    const iaRequests = new Set();
+    window.AemIaWidget.canShow = () => window.AemIaAuthenticated === true
+        && !!window.AemCurrentView && !['home', 'live_sessions'].includes(window.AemCurrentView)
+        && !(window.AemNativeMeetingCount > 0);
     window.AemIaWidget.openWidget = () => {
+        if (!window.AemIaWidget.canShow()) return;
+        window.AemIaWidget.syncVisibility();
+        clearTimeout(closeTimer); clearTimeout(focusTimer);
         isWidgetOpen = true;
         document.getElementById('aem-chat-widget').classList.remove('hidden', 'aem-widget-exit');
         document.getElementById('aem-chat-widget').classList.add('aem-widget-enter');
-        document.getElementById('aem-chat-fab').style.transform = 'scale(0)';
-        setTimeout(() => document.getElementById('aem-ia-input').focus(), 300);
+        fab.style.transform = 'scale(0)';
+        focusTimer = setTimeout(() => { if (isWidgetOpen && window.AemIaWidget.canShow()) document.getElementById('aem-ia-input').focus(); }, 300);
     };
-
     window.AemIaWidget.closeWidget = () => {
+        clearTimeout(closeTimer); clearTimeout(focusTimer);
         isWidgetOpen = false;
         document.getElementById('aem-chat-widget').classList.remove('aem-widget-enter');
         document.getElementById('aem-chat-widget').classList.add('aem-widget-exit');
-        document.getElementById('aem-chat-fab').style.transform = 'scale(1)';
-        setTimeout(() => document.getElementById('aem-chat-widget').classList.add('hidden'), 300);
+        fab.style.transform = 'scale(1)';
+        closeTimer = setTimeout(() => document.getElementById('aem-chat-widget').classList.add('hidden'), 300);
     };
-
     window.AemIaWidget.toggleWidget = () => {
+        if (!window.AemIaWidget.canShow()) return;
         if (isWidgetOpen) window.AemIaWidget.closeWidget();
         else window.AemIaWidget.openWidget();
+    };
+    window.AemIaWidget.syncVisibility = () => {
+        const allowed = window.AemIaWidget.canShow();
+        root.hidden = !allowed;
+        root.style.display = allowed ? '' : 'none';
+        root.toggleAttribute('inert', !allowed);
+        root.setAttribute('aria-hidden', String(!allowed));
+        fab.disabled = !allowed;
+        fab.tabIndex = allowed ? 0 : -1;
+        fab.style.display = allowed ? 'flex' : 'none';
+        if (!allowed) {
+            if (isWidgetOpen) window.AemIaWidget.closeWidget();
+            document.getElementById('aem-chat-widget').classList.add('hidden');
+            if (isListening) { try { recognition?.abort(); } catch (_) {} }
+            stopListening();
+            iaRequests.forEach(controller => controller.abort());
+        } else if (!backendAwake) {
+            backendAwake = true;
+            fetch("https://meu-backend-ia.vercel.app").catch(() => {});
+        }
     };
 
     // 👇 INÍCIO DO CÓDIGO DE VOZ OTIMIZADO 👇
@@ -13688,6 +13727,7 @@ function InactivityGate({user,children}) {
         recognition.lang = 'pt-BR';
 
         recognition.onstart = function() {
+            if (!window.AemIaWidget.canShow()) { recognition.abort(); stopListening(); return; }
             isListening = true; 
             micBtn.classList.replace('bg-gray-800', 'bg-red-500'); 
             micBtn.classList.replace('text-gray-300', 'text-white');
@@ -13696,6 +13736,7 @@ function InactivityGate({user,children}) {
         };
         
         recognition.onresult = function(event) {
+            if (!window.AemIaWidget.canShow()) { stopListening(); return; }
             clearTimeout(autoSendTimer); 
             let transcriptText = '';
             let isFinal = false;
@@ -13711,7 +13752,7 @@ function InactivityGate({user,children}) {
            // Só envia automaticamente se a IA tiver certeza que o usuário parou de falar (isFinal)
             if (isFinal) {
                 autoSendTimer = setTimeout(() => {
-                    if (document.getElementById('aem-ia-input').value.trim() !== '') {
+                    if (window.AemIaWidget.canShow() && document.getElementById('aem-ia-input').value.trim() !== '') {
                         if (isListening) recognition.stop();
                         document.getElementById('aem-ia-btn').click(); 
                     }
@@ -13732,6 +13773,7 @@ function InactivityGate({user,children}) {
     }
 
     window.AemIaWidget.toggleVoice = () => {
+        if (!window.AemIaWidget.canShow()) return;
         if (!recognition) return window.platformAlert("Microfone não suportado no seu navegador.");
         if (isListening) recognition.stop();
         else { document.getElementById('aem-ia-input').value = ''; recognition.start(); }
@@ -13781,6 +13823,7 @@ function InactivityGate({user,children}) {
         iaForm.dataset.listenerActive = 'true';
         iaForm.addEventListener('submit', async (e) => {
         e.preventDefault();
+        if (!window.AemIaWidget.canShow()) return;
         const input = document.getElementById('aem-ia-input');
         const userMsg = input.value.trim();
         if (!userMsg) return;
@@ -13794,7 +13837,9 @@ function InactivityGate({user,children}) {
             typing.classList.remove('hidden');
         }
         
-        const backendUrl = "https://meu-backend-ia.vercel.app"; 
+        const backendUrl = "https://meu-backend-ia.vercel.app";
+        const requestController = new AbortController();
+        iaRequests.add(requestController); 
         
         try {
             const nomeDaIA = window.AemIaName || "Assistente Virtual";
@@ -13837,10 +13882,11 @@ JSON Permitidos (Siga exatamente estes formatos):
             
             const response = await fetch(`${backendUrl}/api/chat`, {
                 method: "POST", headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ message: payload })
+                body: JSON.stringify({ message: payload }), signal: requestController.signal
             });
             
             const data = await response.json();
+            if (!window.AemIaWidget.canShow() || requestController.signal.aborted) return;
             typing.classList.add('hidden');
             
             let aiReply = data.reply || "Ação processada.";
@@ -13934,7 +13980,9 @@ JSON Permitidos (Siga exatamente estes formatos):
             
         } catch (err) {
             typing.classList.add('hidden');
-            appendMessage("⚠️ Sistema offline ou falha na conexão.", false);
+            if (err.name !== "AbortError" && window.AemIaWidget.canShow()) appendMessage("⚠️ Sistema offline ou falha na conexão.", false);
+        } finally {
+            iaRequests.delete(requestController);
         }
     });
     }
@@ -13965,6 +14013,7 @@ JSON Permitidos (Siga exatamente estes formatos):
     }
     
     
+    window.AemIaWidget.syncVisibility();
 })();
   </script>
 </body>
