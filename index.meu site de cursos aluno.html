@@ -984,6 +984,93 @@ async function meetBackgroundProcessor(onResults,isCurrent,modelSelection){
  return {backend:'main',send:input=>model.send(input),close:()=>model.close()};
 }
 
+// Refinamento da máscara no dispositivo: filtro bilateral guiado pela câmera.
+// Só roda quando chega um recorte novo; a transmissão mantém seu próprio relógio.
+function meetMaskRefiner(){
+ const canvas=document.createElement('canvas'),fallback=document.createElement('canvas');
+ const fallbackContext=fallback.getContext('2d',{willReadFrequently:true});
+ const guide=document.createElement('canvas'),guideContext=guide.getContext('2d',{willReadFrequently:true});
+ const curve=value=>{const x=Math.max(0,Math.min(1,(value-.24)/.52));return x*x*(3-2*x);};
+ const lut=Uint8Array.from({length:256},(_,i)=>Math.round(curve(i/255)*255));
+ let gl=null,program=null,buffer=null,textures=[],shaders=[],width=0,height=0,hasPrevious=false,disposed=false,previousPixels=null;
+ const destroyGPU=()=>{if(gl){textures.forEach(texture=>gl.deleteTexture(texture));shaders.forEach(shader=>gl.deleteShader(shader));if(buffer)gl.deleteBuffer(buffer);if(program)gl.deleteProgram(program);}textures=[];shaders=[];buffer=null;program=null;gl=null;};
+ const fallbackRefine=(source,image,w,h)=>{
+  if(fallback.width!==w||fallback.height!==h){fallback.width=guide.width=w;fallback.height=guide.height=h;previousPixels=null;}
+  fallbackContext.clearRect(0,0,w,h);fallbackContext.drawImage(source,0,0,w,h);guideContext.drawImage(image,0,0,w,h);
+  const frame=fallbackContext.getImageData(0,0,w,h),color=guideContext.getImageData(0,0,w,h).data,input=new Uint8ClampedArray(frame.data),out=frame.data;
+  const last=previousPixels,next=new Uint8ClampedArray(w*h),offsets=[[-1,0],[1,0],[0,-1],[0,1]];
+  for(let y=0;y<h;y++)for(let x=0;x<w;x++){
+   const index=y*w+x,p=index*4,a=input[p+3];let value=a/255;
+   if(a>3&&a<252){let sum=value*2,weight=2;for(const [dx,dy] of offsets){const nx=Math.max(0,Math.min(w-1,x+dx)),ny=Math.max(0,Math.min(h-1,y+dy)),q=(ny*w+nx)*4,dr=(color[p]-color[q])/255,dg=(color[p+1]-color[q+1])/255,db=(color[p+2]-color[q+2])/255,k=1/(1+55*(dr*dr+dg*dg+db*db));sum+=input[q+3]/255*k;weight+=k;}value=sum/weight;}
+   let refined=a===0||a===255?lut[a]:Math.round(curve(value)*255);
+   // Não acumula a máscara antiga quando o contorno está se deslocando.
+   if(last&&Math.abs(refined-last[index])<20)refined=Math.round(refined*.8+last[index]*.2);
+   next[index]=refined;out[p]=out[p+1]=out[p+2]=255;out[p+3]=refined;
+  }
+  previousPixels=next;fallbackContext.putImageData(frame,0,0);return fallback;
+ };
+ try{
+  gl=canvas.getContext('webgl',{alpha:true,premultipliedAlpha:false,antialias:false,depth:false,stencil:false,preserveDrawingBuffer:true});
+  if(!gl)throw Error('WebGL indisponível.');
+  const compile=(type,source)=>{const shader=gl.createShader(type);shaders.push(shader);gl.shaderSource(shader,source);gl.compileShader(shader);if(!gl.getShaderParameter(shader,gl.COMPILE_STATUS))throw Error('Filtro de recorte incompatível.');return shader;};
+  program=gl.createProgram();
+  gl.attachShader(program,compile(gl.VERTEX_SHADER,'attribute vec2 position;varying vec2 uv;void main(){uv=position*.5+.5;gl_Position=vec4(position,0.,1.);}'));
+  gl.attachShader(program,compile(gl.FRAGMENT_SHADER,`
+   precision mediump float;
+   varying vec2 uv;
+   uniform sampler2D maskTexture,guideTexture,previousMask,previousGuide;
+   uniform vec2 stepSize;
+   uniform float previousReady;
+   void main(){
+    vec3 center=texture2D(guideTexture,uv).rgb;
+    float original=texture2D(maskTexture,uv).a;
+    float sum=0.,weights=0.;
+    if(original>.01&&original<.99){
+     for(int y=-2;y<=2;y++)for(int x=-2;x<=2;x++){
+      vec2 offset=vec2(float(x),float(y)),point=uv+offset*stepSize;
+      vec3 difference=texture2D(guideTexture,point).rgb-center;
+      float weight=exp(-dot(offset,offset)*.22-dot(difference,difference)*55.);
+      sum+=texture2D(maskTexture,point).a*weight;weights+=weight;
+     }
+    }else{sum=original;weights=1.;}
+    float alpha=smoothstep(.24,.76,sum/max(weights,.001));
+    float oldAlpha=texture2D(previousMask,uv).a;
+    vec3 movement=center-texture2D(previousGuide,uv).rgb;
+    float stable=(1.-smoothstep(.001,.012,dot(movement,movement)))*(1.-smoothstep(.035,.13,abs(alpha-oldAlpha)));
+    alpha=mix(alpha,oldAlpha,.22*stable*previousReady);
+    gl_FragColor=vec4(1.,1.,1.,alpha);
+   }
+  `));
+  gl.linkProgram(program);if(!gl.getProgramParameter(program,gl.LINK_STATUS))throw Error('Filtro de recorte incompatível.');gl.useProgram(program);
+  buffer=gl.createBuffer();gl.bindBuffer(gl.ARRAY_BUFFER,buffer);gl.bufferData(gl.ARRAY_BUFFER,new Float32Array([-1,-1,1,-1,-1,1,1,1]),gl.STATIC_DRAW);
+  const position=gl.getAttribLocation(program,'position');gl.enableVertexAttribArray(position);gl.vertexAttribPointer(position,2,gl.FLOAT,false,0,0);
+  for(const [i,name] of ['maskTexture','guideTexture','previousMask','previousGuide'].entries()){
+   const texture=gl.createTexture();textures.push(texture);gl.activeTexture(gl.TEXTURE0+i);gl.bindTexture(gl.TEXTURE_2D,texture);
+   gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.LINEAR);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,gl.LINEAR);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,gl.CLAMP_TO_EDGE);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_T,gl.CLAMP_TO_EDGE);
+   gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,1,1,0,gl.RGBA,gl.UNSIGNED_BYTE,new Uint8Array([255,255,255,0]));gl.uniform1i(gl.getUniformLocation(program,name),i);
+  }
+  gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL,true);gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL,false);gl.disable(gl.BLEND);
+ }catch(_){destroyGPU();}
+ return {
+  get backend(){return gl?'webgl':'canvas';},
+  refine(source,image,w,h){
+   if(disposed)throw Error('O filtro de recorte foi encerrado.');
+   if(gl&&!gl.isContextLost())try{
+    const upload=(index,value)=>{gl.activeTexture(gl.TEXTURE0+index);gl.bindTexture(gl.TEXTURE_2D,textures[index]);gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,gl.RGBA,gl.UNSIGNED_BYTE,value);};
+    // Copia a máscara anterior antes de limpar o canvas de saída.
+    if(hasPrevious&&width===w&&height===h)upload(2,canvas);else hasPrevious=false;
+    if(width!==w||height!==h){width=canvas.width=w;height=canvas.height=h;gl.viewport(0,0,w,h);}
+    upload(0,source);upload(1,image);if(!hasPrevious)upload(3,image);
+    gl.uniform2f(gl.getUniformLocation(program,'stepSize'),2/w,2/h);gl.uniform1f(gl.getUniformLocation(program,'previousReady'),hasPrevious?1:0);
+    gl.drawArrays(gl.TRIANGLE_STRIP,0,4);if(gl.getError()!==gl.NO_ERROR)throw Error('O filtro não produziu uma máscara.');
+    upload(3,image);hasPrevious=true;return canvas;
+   }catch(_){destroyGPU();}
+   if(gl)destroyGPU();return fallbackRefine(source,image,w,h);
+  },
+  close(){if(disposed)return;disposed=true;destroyGPU();previousPixels=null;}
+ };
+}
+
 class MeetMedia {
  constructor(onChange,onError){this.onChange=onChange;this.onError=onError;this.settings={videoDevice:'',audioDevice:'',speakerDevice:'',quality:'720',cameraOn:true,micOn:true,background:'none',blurLevel:'medium'};this.camera=null;this.mic=null;this.screen=null;this.cameraOutput=null;this.generation=0;this.destroyed=false;this.level=0;this.loop=0;this.effectGeneration=0;}
  async prepare(settings={}){
@@ -1028,7 +1115,7 @@ class MeetMedia {
  }
  stopEffect(){
   ++this.effectGeneration;const state=this.effectState;this.effectState=null;if(state)state.stopped=true;
-  cancelAnimationFrame(this.effectFrame);this.effectFrame=0;clearTimeout(state?.watchdog);clearTimeout(state?.renderTimer);
+  cancelAnimationFrame(this.effectFrame);this.effectFrame=0;clearTimeout(state?.watchdog);clearTimeout(state?.renderTimer);state?.refiner?.close();
   if(state?.videoFrame&&this.video?.cancelVideoFrameCallback)this.video.cancelVideoFrameCallback(state.videoFrame);
   if(this.segmenter){try{Promise.resolve(this.segmenter.close?.()).catch(()=>{});}catch(_){}}
   this.segmenter=null;this.backgroundCanvas=null;
@@ -1055,14 +1142,16 @@ class MeetMedia {
    const output=makeCanvas(false),foreground=makeCanvas(true),background=makeCanvas(false),blur=makeCanvas(false),input=makeCanvas(false),mask=makeCanvas(true);
    const cameraSettings=this.camera.getVideoTracks()[0]?.getSettings?.()||{};
    const state={mode,image,stopped:false,backgroundDirty:true,hasMask:false,processing:false,nextInference:0,inferenceMillis:0,frames:0,inferences:0,startedAt:performance.now(),fps:Math.max(12,Math.min(30,Number(cameraSettings.frameRate)||24)),renderLimit:this.settings.quality==='1080'?1920:1280,renderMillis:0};
-   this.effectState=state;
+   state.refiner=meetMaskRefiner();state.modelSelection=0;this.effectState=state;
    const resize=()=>{
     const width=this.video.videoWidth||cameraSettings.width,height=this.video.videoHeight||cameraSettings.height;if(!width||!height)return false;
     const scale=Math.min(1,state.renderLimit/Math.max(width,height)),w=Math.max(2,Math.round(width*scale)),h=Math.max(2,Math.round(height*scale));
     if(output.canvas.width!==w||output.canvas.height!==h){for(const surface of [output,foreground,background]){surface.canvas.width=w;surface.canvas.height=h;}state.backgroundDirty=true;}
     const small=Math.min(1,320/Math.max(width,height)),bw=Math.max(2,Math.round(width*small)),bh=Math.max(2,Math.round(height*small));
     if(blur.canvas.width!==bw||blur.canvas.height!==bh){blur.canvas.width=bw;blur.canvas.height=bh;}
-    if(!state.processing&&(input.canvas.width!==bw||input.canvas.height!==bh)){input.canvas.width=bw;input.canvas.height=bh;}
+    // Mais detalhe para guiar o contorno; o desfoque continua em resolução leve.
+    const detail=Math.min(1,512/Math.max(width,height)),iw=Math.max(2,Math.round(width*detail)),ih=Math.max(2,Math.round(height*detail));
+    if(!state.processing&&(input.canvas.width!==iw||input.canvas.height!==ih)){input.canvas.width=iw;input.canvas.height=ih;}
     return true;
    };
    resize();
@@ -1070,9 +1159,9 @@ class MeetMedia {
     if(!isCurrent()||!result.segmentationMask)return;const source=result.segmentationMask;
     const w=source.width||input.canvas.width,h=source.height||input.canvas.height;
     if(mask.canvas.width!==w||mask.canvas.height!==h){mask.canvas.width=w;mask.canvas.height=h;}
-    mask.ctx.clearRect(0,0,w,h);mask.ctx.drawImage(source,0,0,w,h);state.hasMask=true;result.segmentationMask?.close?.();result.image?.close?.();
+    mask.ctx.clearRect(0,0,w,h);mask.ctx.drawImage(state.refiner.refine(source,input.canvas,w,h),0,0,w,h);state.hasMask=true;state.refinementBackend=state.refiner.backend;result.segmentationMask?.close?.();result.image?.close?.();
    };
-   const processor=await meetBackgroundProcessor(onResults,isCurrent,this.video.videoWidth>=this.video.videoHeight?1:0);if(!processor||!isCurrent())return;
+   const processor=await meetBackgroundProcessor(onResults,isCurrent,state.modelSelection);if(!processor||!isCurrent())return;
    this.segmenter=processor;state.backend=processor.backend;
    const infer=async first=>{
     if(state.processing||!isCurrent())return;state.processing=true;const start=performance.now();
@@ -1080,7 +1169,7 @@ class MeetMedia {
      input.ctx.drawImage(this.video,0,0,input.canvas.width,input.canvas.height);
      await processor.send({image:input.canvas});state.inferences++;
      const duration=performance.now()-start;if(!first)state.inferenceMillis=state.inferenceMillis?state.inferenceMillis*.75+duration*.25:duration;
-     const interval=Math.max(66,Math.min(250,(state.inferenceMillis||60)*1.3));state.nextInference=performance.now()+Math.max(0,interval-duration);
+     const interval=Math.max(40,Math.min(180,(state.inferenceMillis||60)*1.1));state.nextInference=performance.now()+Math.max(0,interval-duration);
     }finally{state.processing=false;}
    };
    await meetTimed(infer(true),15000,'O primeiro quadro do fundo não foi processado.');
@@ -1369,7 +1458,7 @@ function NativeMeetingRoom({session,user,isHost=false,onExit,uploadFile}){
  const participants=[me,...approved.filter(member=>member.uid!==uid)],peerFor=id=>peers.find(peer=>peer.uid===id),screenMembers=participants.filter(member=>member.uid===uid?!!state.screen:member.sharing&&peerFor(member.uid)?.screen?.getVideoTracks().length),pinned=pin?participants.find(member=>member.uid===pin):null,screenFeatured=layout==='auto'?screenMembers.find(member=>member.uid===state.room?.hostUid)||screenMembers[0]:null,featured=pinned||screenFeatured||(session.mode==='broadcast'&&layout==='auto'?participants.find(member=>member.uid===state.room?.hostUid):null);
  const tile=member=><MeetTile key={member.uid} member={member} stream={member.uid===uid?state.local:peerFor(member.uid)?.camera} self={member.uid===uid} speaking={member.uid===uid?meter>12:(peerFor(member.uid)?.speaking||0)>12} quality={member.uid===uid?state.quality:peerFor(member.uid)?.quality||state.qualities?.[member.uid]} onPin={()=>setPin(pin===member.uid?'':member.uid)}/>;
  const deviceFields=<div className="nm-form-grid">{[['videoDevice','Câmera / placa de captura','videoinput'],['audioDevice','Microfone','audioinput'],['speakerDevice','Saída de áudio','audiooutput']].map(([key,label,kind])=><label className="nm-field" key={key}>{label}<select aria-label={label} value={settings[key]||''} disabled={busy} onChange={event=>action(async()=>{const value=event.target.value;if(key==='speakerDevice'){engineRef.current.media.settings[key]=value;engineRef.current.emit();}else await engineRef.current.prepare({[key]:value,cameraOn:settings.cameraOn,micOn:settings.micOn});})}><option value="">Dispositivo padrão</option>{devices.filter(device=>device.kind===kind).map((device,index)=><option key={device.deviceId} value={device.deviceId}>{device.label||label+' '+(index+1)}</option>)}</select>{key==='videoDevice'&&<small>Webcam, câmera USB ou placa de captura reconhecida pelo seu computador.</small>}</label>)}<label className="nm-field">Qualidade da câmera<select aria-label="Qualidade da câmera" value={settings.quality||'720'} disabled={busy} onChange={event=>action(()=>engineRef.current.prepare({quality:event.target.value}))}><option value="720">720p · menor consumo</option><option value="1080">1080p · mais detalhes</option></select></label></div>;
- const backgroundFields=<div><p className="nm-panel-title">Fundo da câmera</p><div className="nm-backgrounds">{[['none','Original'],['blur','Desfocar'],['studio','Estúdio'],['blue','Azul']].map(([value,label])=><button type="button" key={value} disabled={busy} aria-pressed={settings.background===value} onClick={()=>background(value)}>{label}</button>)}<label className="nm-file-button">Sua imagem neste dispositivo<input type="file" aria-label="Imagem de fundo" accept="image/jpeg,image/png,image/webp" disabled={busy} onChange={imageBackground}/></label></div>{settings.background==='blur'&&<div style={{marginTop:14}}><p className="nm-panel-title" style={{marginBottom:8}}>Intensidade do desfoque</p><div className="nm-backgrounds" role="group" aria-label="Intensidade do desfoque">{[['light','Leve'],['medium','Médio'],['strong','Forte']].map(([value,label])=><button type="button" key={value} disabled={busy} aria-pressed={(settings.blurLevel||'medium')===value} onClick={()=>engineRef.current?.media.setBlurLevel(value)}>{label}</button>)}</div></div>}<p className="nm-muted" style={{fontSize:10,marginTop:9}}>O fundo preserva a proporção da sua câmera. O recorte é processado no seu dispositivo; use uma boa iluminação.</p>{state.backgroundStatus&&<p className="nm-notice" role="status">{state.backgroundStatus}</p>}<MeetingBackgroundGallery manage={isHost} uploadFile={uploadFile} disabled={busy} selectedUrl={settings.background==='image'?engineRef.current?.media.backgroundImageUrl:''} onSelect={url=>background('image',url)}/></div>;
+ const backgroundFields=<div><p className="nm-panel-title">Fundo da câmera</p><div className="nm-backgrounds">{[['none','Original'],['blur','Desfocar'],['studio','Estúdio'],['blue','Azul']].map(([value,label])=><button type="button" key={value} disabled={busy} aria-pressed={settings.background===value} onClick={()=>background(value)}>{label}</button>)}<label className="nm-file-button">Sua imagem neste dispositivo<input type="file" aria-label="Imagem de fundo" accept="image/jpeg,image/png,image/webp" disabled={busy} onChange={imageBackground}/></label></div>{settings.background==='blur'&&<div style={{marginTop:14}}><p className="nm-panel-title" style={{marginBottom:8}}>Intensidade do desfoque</p><div className="nm-backgrounds" role="group" aria-label="Intensidade do desfoque">{[['light','Leve'],['medium','Médio'],['strong','Forte']].map(([value,label])=><button type="button" key={value} disabled={busy} aria-pressed={(settings.blurLevel||'medium')===value} onClick={()=>engineRef.current?.media.setBlurLevel(value)}>{label}</button>)}</div></div>}<p className="nm-muted" style={{fontSize:10,marginTop:9}}>Recorte refinado para cabelo e contornos, processado no seu dispositivo. A proporção da câmera é preservada; luz de frente ajuda a separar você do fundo.</p>{state.backgroundStatus&&<p className="nm-notice" role="status">{state.backgroundStatus}</p>}<MeetingBackgroundGallery manage={isHost} uploadFile={uploadFile} disabled={busy} selectedUrl={settings.background==='image'?engineRef.current?.media.backgroundImageUrl:''} onSelect={url=>background('image',url)}/></div>;
  const startRecord=()=>action(async()=>{if(recording){recorderRef.current?.stop();await updateDoc(engineRef.current.ref,{recording:false});setRecording(false);return;}await updateDoc(engineRef.current.ref,{recording:true});const recorder=new MeetRecorder(engineRef.current,root.current,result=>{const link=document.createElement('a');link.href=result.url;link.download=result.name;document.body.appendChild(link);link.click();link.remove();if(mounted.current){setRecordings(old=>[...old,result]);setRecording(false);}if(!engineRef.current.closed)updateDoc(engineRef.current.ref,{recording:false}).catch(()=>{});});recorderRef.current=recorder;try{await recorder.start(recordQuality);setRecording(true);}catch(value){recorder.stop();await updateDoc(engineRef.current.ref,{recording:false}).catch(()=>{});throw value;}});
  useEffect(()=>{if(state.phase!=='joined'&&recorderRef.current){recorderRef.current.stop();setRecording(false);}},[state.phase]);
  useEffect(()=>{if(state.recording===false&&recorderRef.current?.stopped)setRecording(false);},[state.recording]);
