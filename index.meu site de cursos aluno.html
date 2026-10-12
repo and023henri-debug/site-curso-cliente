@@ -943,7 +943,7 @@ const meetBackgroundRoots = () => {
 const meetTimed = (job,millis,message) => {
  let timer;return Promise.race([job,new Promise((_,reject)=>{timer=setTimeout(()=>reject(Error(message)),millis);})]).finally(()=>clearTimeout(timer));
 };
-const meetBackgroundRuntime = async (onResults,isCurrent) => {
+const meetBackgroundRuntime = async (onResults,isCurrent,modelSelection=1) => {
  const roots=meetBackgroundRoots(),cached=window.__platformMeetingBackgroundRoot;
  if(cached&&roots.includes(cached)){roots.splice(roots.indexOf(cached),1);roots.unshift(cached);}
  for(const base of roots){
@@ -955,7 +955,7 @@ const meetBackgroundRuntime = async (onResults,isCurrent) => {
    if(!isCurrent())return null;
    await meetTimed(loadPlatformScript(base+'selfie_segmentation.js',()=>!!window.SelfieSegmentation),12000,'O carregamento dos fundos excedeu o tempo esperado.');
    if(!isCurrent())return null;
-   model=new window.SelfieSegmentation({locateFile:file=>base+file});model.setOptions({modelSelection:1,selfieMode:false});model.onResults(onResults);
+   model=new window.SelfieSegmentation({locateFile:file=>base+file});model.setOptions({modelSelection,selfieMode:false});model.onResults(onResults);
    await meetTimed(model.initialize(),35000,'Não foi possível iniciar os modelos de fundo.');
    if(!isCurrent()){await model.close().catch(()=>{});return null;}
    window.__platformMeetingBackgroundRoot=base;return model;
@@ -978,8 +978,14 @@ const meetConnectionError = (error,stage) => {
  const result=Error(message);result.code=error?.code;result.meetStage=stage;return result;
 };
 
+// Recorte leve: recebe um quadro reduzido e atualiza a máscara, sem comandar o vídeo.
+async function meetBackgroundProcessor(onResults,isCurrent,modelSelection){
+ const model=await meetBackgroundRuntime(onResults,isCurrent,modelSelection);if(!model)return null;
+ return {backend:'main',send:input=>model.send(input),close:()=>model.close()};
+}
+
 class MeetMedia {
- constructor(onChange,onError){this.onChange=onChange;this.onError=onError;this.settings={videoDevice:'',audioDevice:'',speakerDevice:'',quality:'720',cameraOn:true,micOn:true,background:'none'};this.camera=null;this.mic=null;this.screen=null;this.cameraOutput=null;this.generation=0;this.destroyed=false;this.level=0;this.loop=0;this.effectGeneration=0;}
+ constructor(onChange,onError){this.onChange=onChange;this.onError=onError;this.settings={videoDevice:'',audioDevice:'',speakerDevice:'',quality:'720',cameraOn:true,micOn:true,background:'none',blurLevel:'medium'};this.camera=null;this.mic=null;this.screen=null;this.cameraOutput=null;this.generation=0;this.destroyed=false;this.level=0;this.loop=0;this.effectGeneration=0;}
  async prepare(settings={}){
   const generation=++this.generation;this.settings={...this.settings,...settings};let video=null,audio=null,errors=[];
   if(!navigator.mediaDevices?.getUserMedia)throw Error('Abra a plataforma em HTTPS para usar os dispositivos.');
@@ -1017,38 +1023,102 @@ class MeetMedia {
   this.screen=stream;stream.getVideoTracks()[0].onended=()=>this.stopShare();await this.rebuildAudio();this.onChange();
  }
  async stopShare(){const stream=this.screen;this.screen=null;stream?.getTracks().forEach(track=>{track.onended=null;track.stop();});await this.rebuildAudio();this.onChange();}
- stopEffect(){++this.effectGeneration;cancelAnimationFrame(this.effectFrame);this.effectFrame=0;if(this.segmenter)Promise.resolve(this.segmenter.close?.()).catch(()=>{});this.segmenter=null;this.backgroundCanvas=null;if(this.cameraOutput&&this.cameraOutput!==this.camera)this.cameraOutput.getTracks().forEach(track=>track.stop());this.cameraOutput=this.camera;}
+ setBlurLevel(level){
+  if(!['light','medium','strong'].includes(level))return;this.settings.blurLevel=level;this.onChange();
+ }
+ stopEffect(){
+  ++this.effectGeneration;const state=this.effectState;this.effectState=null;if(state)state.stopped=true;
+  cancelAnimationFrame(this.effectFrame);this.effectFrame=0;clearTimeout(state?.watchdog);clearTimeout(state?.renderTimer);
+  if(state?.videoFrame&&this.video?.cancelVideoFrameCallback)this.video.cancelVideoFrameCallback(state.videoFrame);
+  if(this.segmenter){try{Promise.resolve(this.segmenter.close?.()).catch(()=>{});}catch(_){}}
+  this.segmenter=null;this.backgroundCanvas=null;
+  if(this.cameraOutput&&this.cameraOutput!==this.camera)this.cameraOutput.getTracks().forEach(track=>track.stop());this.cameraOutput=this.camera;
+ }
  async background(mode,imageUrl=''){
-  this.stopEffect();this.settings.background=mode;if(imageUrl)this.backgroundImageUrl=imageUrl;
-  this.backgroundStatus='';this.onChange();if(mode==='none')return;
-  if(!this.camera||!this.settings.cameraOn){this.backgroundStatus='Fundo escolhido. Ligue a câmera para aplicá-lo.';this.onChange();return;}
-  if(!['blur','studio','blue','image'].includes(mode))throw Error('Escolha um fundo compatível.');
+  if(!['none','blur','studio','blue','image'].includes(mode))throw Error('Escolha um fundo compatível.');
+  const request=this.backgroundRequest=(this.backgroundRequest||0)+1;
+  if(mode==='none'){this.stopEffect();this.settings.background=mode;this.backgroundStatus='';this.onChange();return;}
+  if(imageUrl)this.backgroundImageUrl=imageUrl;
+  if(!this.camera||!this.settings.cameraOn){this.stopEffect();this.settings.background=mode;this.backgroundStatus='Fundo escolhido. Ligue a câmera para aplicá-lo.';this.onChange();return;}
   if(!HTMLCanvasElement.prototype.captureStream)throw Error('Este navegador não oferece efeitos de câmera. Use Chrome ou Edge atualizado.');
+  const current=this.effectState;
+  const image=mode==='image'?await meetBackgroundImage(imageUrl||this.backgroundImageUrl||''):null;
+  if(this.destroyed||request!==this.backgroundRequest)return;
+  // Trocar o fundo ou sua intensidade conserva o modelo e a faixa transmitida.
+  if(current&&current===this.effectState&&!current.stopped){current.mode=mode;current.image=image;current.backgroundDirty=true;this.settings.background=mode;this.backgroundStatus='Fundo aplicado à sua câmera.';this.onChange();return;}
+  this.stopEffect();this.settings.background=mode;this.backgroundStatus='Carregando o fundo da câmera…';this.onChange();
   const generation=this.effectGeneration,isCurrent=()=>!this.destroyed&&generation===this.effectGeneration;
-  this.backgroundStatus='Carregando o fundo da câmera…';this.onChange();
   try{
-   const image=mode==='image'?await meetBackgroundImage(imageUrl||this.backgroundImageUrl||''):null;
+   if(this.video.readyState<2)await meetTimed(new Promise(resolve=>this.video.addEventListener('loadeddata',resolve,{once:true})),5000,'A câmera ainda não enviou imagem.');
    if(!isCurrent())return;
-   const canvas=document.createElement('canvas');canvas.width=1280;canvas.height=720;const ctx=canvas.getContext('2d');
-   const layer=document.createElement('canvas');layer.width=canvas.width;layer.height=canvas.height;const fg=layer.getContext('2d');let received=false;
-   const onResults=results=>{
-    if(!isCurrent()||!results.image||!results.segmentationMask)return;
-    const w=canvas.width,h=canvas.height;fg.clearRect(0,0,w,h);fg.globalCompositeOperation='source-over';fg.drawImage(results.segmentationMask,0,0,w,h);fg.globalCompositeOperation='source-in';fg.drawImage(results.image,0,0,w,h);fg.globalCompositeOperation='source-over';ctx.save();ctx.clearRect(0,0,w,h);
-    if(mode==='blur'){ctx.filter='blur(18px)';ctx.drawImage(results.image,-28,-28,w+56,h+56);ctx.filter='none';}
-    else if(image){const scale=Math.max(w/image.naturalWidth,h/image.naturalHeight),iw=image.naturalWidth*scale,ih=image.naturalHeight*scale;ctx.drawImage(image,(w-iw)/2,(h-ih)/2,iw,ih);}
-    else{const gradient=ctx.createLinearGradient(0,0,w,h);gradient.addColorStop(0,mode==='studio'?'#080808':'#172554');gradient.addColorStop(1,mode==='studio'?'#1e3a8a':'#2563eb');ctx.fillStyle=gradient;ctx.fillRect(0,0,w,h);ctx.strokeStyle='#ffffff12';for(let x=0;x<w;x+=90){ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,h);ctx.stroke();}}
-    ctx.drawImage(layer,0,0);ctx.restore();received=true;
+   const makeCanvas=alpha=>{const canvas=document.createElement('canvas');return {canvas,ctx:canvas.getContext('2d',{alpha})};};
+   const output=makeCanvas(false),foreground=makeCanvas(true),background=makeCanvas(false),blur=makeCanvas(false),input=makeCanvas(false),mask=makeCanvas(true);
+   const cameraSettings=this.camera.getVideoTracks()[0]?.getSettings?.()||{};
+   const state={mode,image,stopped:false,backgroundDirty:true,hasMask:false,processing:false,nextInference:0,inferenceMillis:0,frames:0,inferences:0,startedAt:performance.now(),fps:Math.max(12,Math.min(30,Number(cameraSettings.frameRate)||24)),renderLimit:this.settings.quality==='1080'?1920:1280,renderMillis:0};
+   this.effectState=state;
+   const resize=()=>{
+    const width=this.video.videoWidth||cameraSettings.width,height=this.video.videoHeight||cameraSettings.height;if(!width||!height)return false;
+    const scale=Math.min(1,state.renderLimit/Math.max(width,height)),w=Math.max(2,Math.round(width*scale)),h=Math.max(2,Math.round(height*scale));
+    if(output.canvas.width!==w||output.canvas.height!==h){for(const surface of [output,foreground,background]){surface.canvas.width=w;surface.canvas.height=h;}state.backgroundDirty=true;}
+    const small=Math.min(1,320/Math.max(width,height)),bw=Math.max(2,Math.round(width*small)),bh=Math.max(2,Math.round(height*small));
+    if(blur.canvas.width!==bw||blur.canvas.height!==bh){blur.canvas.width=bw;blur.canvas.height=bh;}
+    if(!state.processing&&(input.canvas.width!==bw||input.canvas.height!==bh)){input.canvas.width=bw;input.canvas.height=bh;}
+    return true;
    };
-   const model=await meetBackgroundRuntime(onResults,isCurrent);if(!model||!isCurrent())return;
-   this.segmenter=model;
-   if(this.video.readyState<2)await meetTimed(new Promise(resolve=>this.video.addEventListener('loadeddata',resolve,{once:true})),5000,'A câmera ainda não enviou imagem. Ligue a câmera e tente novamente.');
-   if(!isCurrent())return;
-   await meetTimed(model.send({image:this.video}),15000,'O primeiro quadro do fundo não foi processado.');
-   if(!isCurrent())return;if(!received)throw Error('O modelo não retornou uma imagem válida.');
-   this.cameraOutput=canvas.captureStream(20);this.cameraTrack().enabled=this.settings.cameraOn;
-   this.backgroundCanvas=canvas;this.backgroundStatus='Fundo aplicado à sua câmera.';this.onChange();
-   const frame=async()=>{if(!isCurrent())return;try{if(this.settings.cameraOn&&this.video.readyState>=2)await model.send({image:this.video});}catch(_){if(isCurrent()){this.stopEffect();this.settings.background='none';this.backgroundStatus='';this.onChange();this.onError('O efeito de fundo foi interrompido neste dispositivo. Escolha o fundo novamente ou use a câmera original.');}return;}if(isCurrent())this.effectFrame=requestAnimationFrame(frame);};
-   this.effectFrame=requestAnimationFrame(frame);
+   resize();
+   const onResults=result=>{
+    if(!isCurrent()||!result.segmentationMask)return;const source=result.segmentationMask;
+    const w=source.width||input.canvas.width,h=source.height||input.canvas.height;
+    if(mask.canvas.width!==w||mask.canvas.height!==h){mask.canvas.width=w;mask.canvas.height=h;}
+    mask.ctx.clearRect(0,0,w,h);mask.ctx.drawImage(source,0,0,w,h);state.hasMask=true;result.segmentationMask?.close?.();result.image?.close?.();
+   };
+   const processor=await meetBackgroundProcessor(onResults,isCurrent,this.video.videoWidth>=this.video.videoHeight?1:0);if(!processor||!isCurrent())return;
+   this.segmenter=processor;state.backend=processor.backend;
+   const infer=async first=>{
+    if(state.processing||!isCurrent())return;state.processing=true;const start=performance.now();
+    try{
+     input.ctx.drawImage(this.video,0,0,input.canvas.width,input.canvas.height);
+     await processor.send({image:input.canvas});state.inferences++;
+     const duration=performance.now()-start;if(!first)state.inferenceMillis=state.inferenceMillis?state.inferenceMillis*.75+duration*.25:duration;
+     const interval=Math.max(66,Math.min(250,(state.inferenceMillis||60)*1.3));state.nextInference=performance.now()+Math.max(0,interval-duration);
+    }finally{state.processing=false;}
+   };
+   await meetTimed(infer(true),15000,'O primeiro quadro do fundo não foi processado.');
+   if(!isCurrent())return;if(!state.hasMask)throw Error('O recorte não retornou uma imagem válida.');
+   const draw=()=>{
+    if(!resize())return;const w=output.canvas.width,h=output.canvas.height,ctx=output.ctx;
+    if(state.mode==='blur'){
+     const radius={light:1.1,medium:2.4,strong:4.6}[this.settings.blurLevel||'medium']||2.4,bw=blur.canvas.width,bh=blur.canvas.height,pad=Math.ceil(radius*3);
+     const scale=Math.max((bw+pad*2)/this.video.videoWidth,(bh+pad*2)/this.video.videoHeight),dw=this.video.videoWidth*scale,dh=this.video.videoHeight*scale;
+     blur.ctx.fillStyle='#050505';blur.ctx.fillRect(0,0,bw,bh);blur.ctx.filter='blur('+radius+'px)';blur.ctx.drawImage(this.video,(bw-dw)/2,(bh-dh)/2,dw,dh);blur.ctx.filter='none';ctx.drawImage(blur.canvas,0,0,w,h);
+    }else{
+     if(state.backgroundDirty){
+      const bg=background.ctx;bg.fillStyle='#080808';bg.fillRect(0,0,w,h);
+      if(state.image){const scale=Math.max(w/state.image.naturalWidth,h/state.image.naturalHeight),iw=state.image.naturalWidth*scale,ih=state.image.naturalHeight*scale;bg.drawImage(state.image,(w-iw)/2,(h-ih)/2,iw,ih);}
+      else{const gradient=bg.createLinearGradient(0,0,w,h);gradient.addColorStop(0,state.mode==='studio'?'#080808':'#172554');gradient.addColorStop(1,state.mode==='studio'?'#1e3a8a':'#2563eb');bg.fillStyle=gradient;bg.fillRect(0,0,w,h);bg.strokeStyle='#ffffff12';const gap=Math.max(30,w/14);for(let x=0;x<w;x+=gap){bg.beginPath();bg.moveTo(x,0);bg.lineTo(x,h);bg.stroke();}}
+      state.backgroundDirty=false;
+     }ctx.drawImage(background.canvas,0,0,w,h);
+    }
+    const fg=foreground.ctx;fg.globalCompositeOperation='source-over';fg.clearRect(0,0,w,h);fg.drawImage(this.video,0,0,w,h);fg.globalCompositeOperation='destination-in';fg.drawImage(mask.canvas,0,0,w,h);fg.globalCompositeOperation='source-over';ctx.drawImage(foreground.canvas,0,0);state.frames++;
+   };
+   draw();const stream=output.canvas.captureStream(state.fps),track=stream.getVideoTracks()[0];
+   this.cameraOutput=stream;track.enabled=this.settings.cameraOn;try{track.contentHint='motion';}catch(_){}
+   this.backgroundCanvas=output.canvas;this.backgroundStatus='Fundo aplicado à sua câmera.';state.startedAt=performance.now();this.onChange();track.requestFrame?.();
+   let lastFrame=-1;
+   const fail=()=>{if(isCurrent()){this.stopEffect();this.settings.background='none';this.backgroundStatus='';this.onChange();this.onError('O efeito de fundo foi interrompido. Escolha o fundo novamente ou use a câmera original.');}};
+   const render=now=>{
+    if(!isCurrent())return;
+    if(this.settings.cameraOn&&this.video.readyState>=2&&this.video.currentTime!==lastFrame&&now+2>=(state.nextRender||0)){
+     const interval=1000/state.fps;state.nextRender=Math.max(state.nextRender||now,now-interval)+interval;
+     lastFrame=this.video.currentTime;const start=performance.now();try{draw();track.requestFrame?.();}catch(_){fail();return;}
+     const elapsed=performance.now()-start;state.renderMillis=state.renderMillis?state.renderMillis*.9+elapsed*.1:elapsed;
+     if(state.renderMillis>1000/state.fps*.65&&state.frames%60===0&&state.renderLimit>640){state.renderLimit=Math.max(640,Math.round(state.renderLimit*.8));state.renderMillis=0;}
+     if(!state.processing&&now>=state.nextInference)infer(false).catch(fail);
+    }
+   };
+   // A câmera interna não depende de estar visível no DOM para continuar.
+   const tick=()=>{if(!isCurrent())return;const start=performance.now();render(start);if(isCurrent())state.renderTimer=setTimeout(tick,Math.max(2,1000/state.fps-(performance.now()-start)));};
+   state.renderTimer=setTimeout(tick,0);
   }catch(error){if(isCurrent()){this.stopEffect();this.settings.background='none';this.backgroundStatus='';this.onChange();throw error;}}
  }
  async speakers(){const AC=window.AudioContext||window.webkitAudioContext;if(!AC)throw Error('Teste de saída não suportado.');const context=new AC();try{if(this.settings.speakerDevice&&context.setSinkId)await context.setSinkId(this.settings.speakerDevice);await context.resume();const oscillator=context.createOscillator(),gain=context.createGain();gain.gain.value=.08;oscillator.frequency.value=660;oscillator.connect(gain).connect(context.destination);oscillator.start();oscillator.stop(context.currentTime+.65);oscillator.onended=()=>context.close();}catch(error){await context.close();throw error;}}
@@ -1299,7 +1369,7 @@ function NativeMeetingRoom({session,user,isHost=false,onExit,uploadFile}){
  const participants=[me,...approved.filter(member=>member.uid!==uid)],peerFor=id=>peers.find(peer=>peer.uid===id),screenMembers=participants.filter(member=>member.uid===uid?!!state.screen:member.sharing&&peerFor(member.uid)?.screen?.getVideoTracks().length),pinned=pin?participants.find(member=>member.uid===pin):null,screenFeatured=layout==='auto'?screenMembers.find(member=>member.uid===state.room?.hostUid)||screenMembers[0]:null,featured=pinned||screenFeatured||(session.mode==='broadcast'&&layout==='auto'?participants.find(member=>member.uid===state.room?.hostUid):null);
  const tile=member=><MeetTile key={member.uid} member={member} stream={member.uid===uid?state.local:peerFor(member.uid)?.camera} self={member.uid===uid} speaking={member.uid===uid?meter>12:(peerFor(member.uid)?.speaking||0)>12} quality={member.uid===uid?state.quality:peerFor(member.uid)?.quality||state.qualities?.[member.uid]} onPin={()=>setPin(pin===member.uid?'':member.uid)}/>;
  const deviceFields=<div className="nm-form-grid">{[['videoDevice','Câmera / placa de captura','videoinput'],['audioDevice','Microfone','audioinput'],['speakerDevice','Saída de áudio','audiooutput']].map(([key,label,kind])=><label className="nm-field" key={key}>{label}<select aria-label={label} value={settings[key]||''} disabled={busy} onChange={event=>action(async()=>{const value=event.target.value;if(key==='speakerDevice'){engineRef.current.media.settings[key]=value;engineRef.current.emit();}else await engineRef.current.prepare({[key]:value,cameraOn:settings.cameraOn,micOn:settings.micOn});})}><option value="">Dispositivo padrão</option>{devices.filter(device=>device.kind===kind).map((device,index)=><option key={device.deviceId} value={device.deviceId}>{device.label||label+' '+(index+1)}</option>)}</select>{key==='videoDevice'&&<small>Webcam, câmera USB ou placa de captura reconhecida pelo seu computador.</small>}</label>)}<label className="nm-field">Qualidade da câmera<select aria-label="Qualidade da câmera" value={settings.quality||'720'} disabled={busy} onChange={event=>action(()=>engineRef.current.prepare({quality:event.target.value}))}><option value="720">720p · menor consumo</option><option value="1080">1080p · mais detalhes</option></select></label></div>;
- const backgroundFields=<div><p className="nm-panel-title">Fundo da câmera</p><div className="nm-backgrounds">{[['none','Original'],['blur','Desfocar'],['studio','Estúdio'],['blue','Azul']].map(([value,label])=><button type="button" key={value} disabled={busy} aria-pressed={settings.background===value} onClick={()=>background(value)}>{label}</button>)}<label className="nm-file-button">Sua imagem neste dispositivo<input type="file" aria-label="Imagem de fundo" accept="image/jpeg,image/png,image/webp" disabled={busy} onChange={imageBackground}/></label></div><p className="nm-muted" style={{fontSize:10,marginTop:9}}>O recorte da pessoa é processado no seu dispositivo. Use uma boa iluminação.</p>{state.backgroundStatus&&<p className="nm-notice" role="status">{state.backgroundStatus}</p>}<MeetingBackgroundGallery manage={isHost} uploadFile={uploadFile} disabled={busy} selectedUrl={settings.background==='image'?engineRef.current?.media.backgroundImageUrl:''} onSelect={url=>background('image',url)}/></div>;
+ const backgroundFields=<div><p className="nm-panel-title">Fundo da câmera</p><div className="nm-backgrounds">{[['none','Original'],['blur','Desfocar'],['studio','Estúdio'],['blue','Azul']].map(([value,label])=><button type="button" key={value} disabled={busy} aria-pressed={settings.background===value} onClick={()=>background(value)}>{label}</button>)}<label className="nm-file-button">Sua imagem neste dispositivo<input type="file" aria-label="Imagem de fundo" accept="image/jpeg,image/png,image/webp" disabled={busy} onChange={imageBackground}/></label></div>{settings.background==='blur'&&<div style={{marginTop:14}}><p className="nm-panel-title" style={{marginBottom:8}}>Intensidade do desfoque</p><div className="nm-backgrounds" role="group" aria-label="Intensidade do desfoque">{[['light','Leve'],['medium','Médio'],['strong','Forte']].map(([value,label])=><button type="button" key={value} disabled={busy} aria-pressed={(settings.blurLevel||'medium')===value} onClick={()=>engineRef.current?.media.setBlurLevel(value)}>{label}</button>)}</div></div>}<p className="nm-muted" style={{fontSize:10,marginTop:9}}>O fundo preserva a proporção da sua câmera. O recorte é processado no seu dispositivo; use uma boa iluminação.</p>{state.backgroundStatus&&<p className="nm-notice" role="status">{state.backgroundStatus}</p>}<MeetingBackgroundGallery manage={isHost} uploadFile={uploadFile} disabled={busy} selectedUrl={settings.background==='image'?engineRef.current?.media.backgroundImageUrl:''} onSelect={url=>background('image',url)}/></div>;
  const startRecord=()=>action(async()=>{if(recording){recorderRef.current?.stop();await updateDoc(engineRef.current.ref,{recording:false});setRecording(false);return;}await updateDoc(engineRef.current.ref,{recording:true});const recorder=new MeetRecorder(engineRef.current,root.current,result=>{const link=document.createElement('a');link.href=result.url;link.download=result.name;document.body.appendChild(link);link.click();link.remove();if(mounted.current){setRecordings(old=>[...old,result]);setRecording(false);}if(!engineRef.current.closed)updateDoc(engineRef.current.ref,{recording:false}).catch(()=>{});});recorderRef.current=recorder;try{await recorder.start(recordQuality);setRecording(true);}catch(value){recorder.stop();await updateDoc(engineRef.current.ref,{recording:false}).catch(()=>{});throw value;}});
  useEffect(()=>{if(state.phase!=='joined'&&recorderRef.current){recorderRef.current.stop();setRecording(false);}},[state.phase]);
  useEffect(()=>{if(state.recording===false&&recorderRef.current?.stopped)setRecording(false);},[state.recording]);
