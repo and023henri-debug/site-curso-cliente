@@ -974,7 +974,7 @@ const meetBackgroundImage = async value => {
 const meetConnectionError = (error,stage) => {
  if(error?.meetStage)return error;
  const labels={schedule:'confirmar o convite na agenda',room:'consultar o estado da sala',member:'consultar seu pedido',request:'salvar seu pedido de entrada',host:'iniciar a sala do professor',auto:'liberar a entrada automática',activation:'confirmar sua aprovação na sala'};
- const denied=error?.code==='permission-denied',message=denied?'O Firebase bloqueou a operação de '+(labels[stage]||stage)+'. O administrador precisa publicar as regras de reuniões e fundos no projeto usado pelas duas páginas.':meetError(error);
+ const denied=error?.code==='permission-denied',message=denied?'O Firebase bloqueou a operação de '+(labels[stage]||stage)+'. Informe este erro ao administrador para verificar as permissões da sala.':meetError(error);
  const result=Error(message);result.code=error?.code;result.meetStage=stage;return result;
 };
 
