@@ -146,7 +146,7 @@ window.addEventListener('DOMContentLoaded', () => {
     }
   </script>
 
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/aws-sdk/2.1363.0/aws-sdk.min.js"></script>
+  
   <script src="https://sdk.mercadopago.com/js/v2"></script>
   
   <script type="importmap">
@@ -366,177 +366,58 @@ window.addEventListener('DOMContentLoaded', () => {
 
   </style>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Montserrat:wght@500;600;700;800&display=swap" rel="stylesheet">
-<script>
-    (function() {
-      // 1. Define a função globalmente para poder ser usada pelo React depois
-      window.applyTheme = function(theme) {
-        if (!theme) return;
-        const root = document.documentElement;
-
-        const darkenHex = (hex, percent) => {
-          if (!hex) return '#000000';
-          hex = hex.replace('#', '');
-          if (hex.length === 3) hex = hex.split('').map(c => c + c).join('');
-          let r = parseInt(hex.substring(0, 2), 16);
-          let g = parseInt(hex.substring(2, 4), 16);
-          let b = parseInt(hex.substring(4, 6), 16);
-          r = Math.max(0, Math.floor(r * (100 - percent) / 100));
-          g = Math.max(0, Math.floor(g * (100 - percent) / 100));
-          b = Math.max(0, Math.floor(b * (100 - percent) / 100));
-          return '#' + [r, g, b].map(x => x.toString(16).padStart(2, '0')).join('');
-        };
-
-        if (theme.primaryColor) {
-          root.style.setProperty('--color-primary', theme.primaryColor);
-          root.style.setProperty('--color-primary-hover', darkenHex(theme.primaryColor, 15)); 
-          root.style.setProperty('--color-primary-soft', theme.primaryColor + '26'); 
-        }
-        if (theme.secondaryColor) root.style.setProperty('--color-secondary', theme.secondaryColor);
-        if (theme.backgroundLight) root.style.setProperty('--background-light', theme.backgroundLight);
-        if (theme.backgroundDark) root.style.setProperty('--background-dark', theme.backgroundDark);
-        if (theme.textLight) root.style.setProperty('--text-light', theme.textLight);
-        if (theme.textDark) root.style.setProperty('--text-dark', theme.textDark);
-      };
-
-
-window.applyPwaManifest = async function(settings) {
-        if (!settings) return;
-
-        // Prioriza as configurações específicas de PWA definidas no Admin
-        const appName = settings.pwaName || settings.siteName || "Sua Plataforma";
-        const shortName = settings.pwaShortName || (settings.siteName ? settings.siteName.substring(0, 12) : "Portal");
-        const themeColor = settings.pwaThemeColor || settings.colorPrimary || "#4f46e5";
-        const bgColor = settings.colorBgDark || "#0a0a0a";
-        const iconUrl = settings.pwaIconUrl || settings.siteLogoUrl || settings.logoUrl || "https://api.dicebear.com/7.x/bottts/svg?seed=default";
-
-        const signature = JSON.stringify([appName, shortName, themeColor, bgColor, iconUrl]);
-        if (window.platformPwaSignature === signature) return;
-        window.platformPwaSignature = signature;
-        try { localStorage.setItem('platform-pwa-settings-v2', JSON.stringify({ pwaName:appName, pwaShortName:shortName, pwaThemeColor:themeColor, colorBgDark:bgColor, pwaIconUrl:iconUrl })); } catch (_) {}
-        const pageUrl = new URL(window.location.pathname, window.location.origin).href;
-        const scopeUrl = new URL('./', pageUrl).href;
-        let image = null;
-        try {
-            image = await new Promise((resolve, reject) => {
-                const img = new Image(); img.crossOrigin = 'anonymous';
-                const timeout = setTimeout(() => reject(new Error('icon timeout')), 5000);
-                img.onload = () => { clearTimeout(timeout); resolve(img); };
-                img.onerror = () => { clearTimeout(timeout); reject(new Error('icon unavailable')); };
-                img.src = new URL(iconUrl, window.location.href).href;
-            });
-        } catch (_) {}
-        const makeIcon = size => {
-            const canvas = document.createElement('canvas'); canvas.width = canvas.height = size;
-            const ctx = canvas.getContext('2d');
-            const drawFallback = () => {
-                ctx.fillStyle = themeColor; ctx.fillRect(0,0,size,size);
-                ctx.fillStyle = '#ffffff'; ctx.font = `bold ${Math.round(size * .4)}px sans-serif`;
-                ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(appName.trim().charAt(0).toUpperCase() || 'A',size/2,size/2);
-            };
-            drawFallback();
-            if (image) { const scale = size * .8 / Math.max(image.naturalWidth,image.naturalHeight); const w=image.naturalWidth*scale,h=image.naturalHeight*scale; ctx.drawImage(image,(size-w)/2,(size-h)/2,w,h); }
-            try { return canvas.toDataURL('image/png'); }
-            catch (_) { canvas.width = size; drawFallback(); return canvas.toDataURL('image/png'); }
-        };
-        if (window.platformPwaSignature !== signature) return;
-        const icon192 = makeIcon(192), icon512 = makeIcon(512);
-        // 1. Detecta o tipo da imagem para o Android não bloquear a logo
-        let imgType = "image/png";
-        const lowerUrl = iconUrl.toLowerCase();
-        if (lowerUrl.includes(".jpg") || lowerUrl.includes(".jpeg")) imgType = "image/jpeg";
-        else if (lowerUrl.includes(".webp")) imgType = "image/webp";
-        else if (lowerUrl.includes(".svg")) imgType = "image/svg+xml";
-
-        // 2. Monta os dados do Aplicativo
-        const manifestData = {
-          name: appName,
-          short_name: shortName,
-          id: pageUrl,
-          start_url: pageUrl,
-          scope: scopeUrl,
-          lang: 'pt-BR',
-          prefer_related_applications: false,
-          display: "standalone",
-          background_color: bgColor,
-          theme_color: themeColor,
-          icons: [
-            { src: icon192, sizes: '192x192', type: 'image/png', purpose: 'any' },
-            { src: icon512, sizes: '512x512', type: 'image/png', purpose: 'any maskable' }
-          ]
-        };
-
-        // 3. Converte usando o formato estrito do Android (manifest+json)
-        const manifestString = JSON.stringify(manifestData);
-        const blob = new Blob([manifestString], { type: 'application/manifest+json' });
-        const manifestUrl = URL.createObjectURL(blob);
-
-        let manifestLink = document.querySelector('link[rel="manifest"]');
-        if (!manifestLink) {
-          manifestLink = document.createElement('link');
-          manifestLink.rel = 'manifest';
-          document.head.appendChild(manifestLink);
-        }
-        const oldManifestUrl = manifestLink.href || '';
-        manifestLink.href = manifestUrl;
-        if (oldManifestUrl.startsWith('blob:')) setTimeout(() => URL.revokeObjectURL(oldManifestUrl), 60000);
-        let appleIcon = document.querySelector('link[rel="apple-touch-icon"]');
-        if (!appleIcon) { appleIcon = document.createElement('link'); appleIcon.rel = 'apple-touch-icon'; document.head.appendChild(appleIcon); }
-        appleIcon.href = icon192;
-
-        let themeColorMeta = document.querySelector('meta[name="theme-color"]');
-        if(!themeColorMeta){
-             themeColorMeta = document.createElement('meta');
-             themeColorMeta.name = 'theme-color';
-             document.head.appendChild(themeColorMeta);
-        }
-        themeColorMeta.content = themeColor;
-
-        // Suporte iOS (Apple)
-        let appleTitle = document.querySelector('meta[name="apple-mobile-web-app-title"]');
-        if(!appleTitle) {
-            appleTitle = document.createElement('meta');
-            appleTitle.name = 'apple-mobile-web-app-title';
-            document.head.appendChild(appleTitle);
-        }
-        appleTitle.content = shortName;
-
-        let appleCapable = document.querySelector('meta[name="apple-mobile-web-app-capable"]');
-        if(!appleCapable) {
-            appleCapable = document.createElement('meta');
-            appleCapable.name = 'apple-mobile-web-app-capable';
-            document.head.appendChild(appleCapable);
-        }
-        appleCapable.content = 'yes';
-
-        window.dispatchEvent(new Event('platform-pwa-state'));
-      };
-      try { const cached = JSON.parse(localStorage.getItem('platform-pwa-settings-v2')); if (cached) window.applyPwaManifest(cached); } catch (_) {}
-
-
-      // 2. Define o Tema Padrão (Fallback de Segurança)
-      const defaultTheme = {
-        primaryColor: '#4f46e5',
-        secondaryColor: '#fbbf24',
-        backgroundLight: '#f8fafc',
-        backgroundDark: '#0a0a0a',
-        textLight: '#0f172a',
-        textDark: '#f8fafc'
-      };
-
-      // 3. Execução Imediata: Tenta ler o Cache do Navegador
-      try {
-        const savedTheme = localStorage.getItem('siteTheme');
-        if (savedTheme) {
-          window.applyTheme(JSON.parse(savedTheme));
-        } else {
-          window.applyTheme(defaultTheme);
-        }
-      } catch (e) {
-        console.error("Erro ao ler tema local:", e);
-        window.applyTheme(defaultTheme);
-      }
-    })();
-  </script>
+<script>(() => {
+ if(window.platformPwaRuntime)return;window.platformPwaRuntime=true;
+ let revision=0,manifestBlob='',lastSettings={},registration=null;
+ const cacheKey='platform-branding-v3:'+location.origin+location.pathname;
+ const brandingOnly=settings=>Object.fromEntries(Object.entries(settings).filter(([key])=>/^(pwa|color|siteName$|siteLogoUrl$|logoUrl$|primaryColor$|secondaryColor$|background|text|title|subtitle)/.test(key)));
+ const color=(value,fallback)=>/^#[\da-f]{6}$/i.test(value||'')?value:fallback;
+ window.platformPwaValues=settings=>{
+  const same=settings?.pwaUseSiteBranding!==false;
+  return {name:String((same?settings?.siteName:settings?.pwaName)||settings?.pwaName||settings?.siteName||'Sua plataforma'),shortName:String((same?settings?.siteName:settings?.pwaShortName)||settings?.pwaShortName||settings?.siteName||'Portal').slice(0,24),iconUrl:(same?(settings?.siteLogoUrl||settings?.logoUrl):settings?.pwaIconUrl)||settings?.pwaIconUrl||settings?.siteLogoUrl||settings?.logoUrl||'',themeColor:color((same?settings?.colorPrimary:settings?.pwaThemeColor)||settings?.pwaThemeColor||settings?.colorPrimary||settings?.primaryColor,'#2563eb'),backgroundColor:color(settings?.colorBgDark||settings?.backgroundDark,'#050505'),same};
+ };
+ const meta=(name,value)=>{let node=document.querySelector('meta[name="'+name+'"]');if(!node){node=document.createElement('meta');node.name=name;document.head.append(node);}node.content=value;};
+ const link=(rel,url)=>{let node=document.querySelector('link[rel="'+rel+'"]');if(!node){node=document.createElement('link');node.rel=rel;document.head.append(node);}node.href=url;return node;};
+ window.applyTheme=settings=>{if(!settings)return;const root=document.documentElement;for(const [key,legacy,css] of [['colorPrimary','primaryColor','--color-primary'],['colorSecondary','secondaryColor','--color-secondary'],['colorBgLight','backgroundLight','--background-light'],['colorBgDark','backgroundDark','--background-dark'],['colorTextLight','textLight','--text-light'],['colorTextDark','textDark','--text-dark'],['colorTitleLight','','--title-light'],['colorTitleDark','','--title-dark'],['colorSubtitleLight','','--subtitle-light'],['colorSubtitleDark','','--subtitle-dark']]){const value=settings[key]||settings[legacy];if(value)root.style.setProperty(css,value);}const primary=color(settings.colorPrimary||settings.primaryColor,'#2563eb');root.style.setProperty('--color-primary-soft',primary+'26');root.style.setProperty('--color-primary-hover','#'+[1,3,5].map(offset=>Math.round(parseInt(primary.slice(offset,offset+2),16)*.85).toString(16).padStart(2,'0')).join(''));try{localStorage.setItem('siteTheme',JSON.stringify(brandingOnly(settings)));}catch(_){};};
+ const loadImage=url=>new Promise((resolve,reject)=>{const image=new Image();image.crossOrigin='anonymous';const timer=setTimeout(()=>reject(Error('A logo não respondeu.')),7000);image.onload=()=>{clearTimeout(timer);resolve(image);};image.onerror=()=>{clearTimeout(timer);reject(Error('A logo não liberou sua leitura.'));};image.src=url;});
+ const iconsFor=async values=>{
+  let image=null;if(values.iconUrl)try{image=await loadImage(new URL(values.iconUrl,location.href).href);}catch(_){}
+  const create=size=>{if(values.iconUrl&&!image)return new URL(values.iconUrl,location.href).href;const canvas=document.createElement('canvas');canvas.width=canvas.height=size;const ctx=canvas.getContext('2d');ctx.fillStyle=values.themeColor;ctx.fillRect(0,0,size,size);if(image){const scale=size*.8/Math.max(image.naturalWidth,image.naturalHeight);ctx.drawImage(image,(size-image.naturalWidth*scale)/2,(size-image.naturalHeight*scale)/2,image.naturalWidth*scale,image.naturalHeight*scale);}else{ctx.fillStyle='white';ctx.font='bold '+Math.round(size*.4)+'px sans-serif';ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText(values.name.charAt(0),size/2,size/2);}try{return canvas.toDataURL('image/png');}catch(_){return values.iconUrl;}};
+  return {icon192:create(192),icon512:create(512),icon180:create(180)};
+ };
+ const sendWorker=async(worker,branding)=>{if(!worker)return false;const channel=new MessageChannel();return new Promise(resolve=>{const timer=setTimeout(()=>resolve(false),4000);channel.port1.onmessage=event=>{clearTimeout(timer);resolve(event.data?.ok===true);channel.port1.close();};worker.postMessage({type:'PLATFORM_PWA_BRANDING',branding},[channel.port2]);});};
+ window.applyPwaManifest=async settings=>{
+  if(!settings)return;const current=++revision;lastSettings=settings;window.platformPublicSettings=settings;window.applyTheme(settings);const values=window.platformPwaValues(settings);document.title=values.name;meta('theme-color',values.themeColor);meta('apple-mobile-web-app-title',values.shortName);meta('apple-mobile-web-app-capable','yes');meta('mobile-web-app-capable','yes');meta('apple-mobile-web-app-status-bar-style','black-translucent');
+  if(values.iconUrl){link('icon',values.iconUrl);link('apple-touch-icon',values.iconUrl);}
+  try{localStorage.setItem(cacheKey,JSON.stringify(brandingOnly(settings)));}catch(_){}
+  const icons=await iconsFor(values);if(current!==revision)return;
+  const page=new URL(location.pathname,location.origin),base=new URL('./',page),manifest={id:page.href,start_url:page.href,scope:base.href,name:values.name,short_name:values.shortName,lang:'pt-BR',display:'standalone',theme_color:values.themeColor,background_color:values.backgroundColor,prefer_related_applications:false,icons:[{src:icons.icon192,sizes:'192x192',type:icons.icon192.startsWith('data:')?'image/png':undefined,purpose:'any'},{src:icons.icon512,sizes:'512x512',type:icons.icon512.startsWith('data:')?'image/png':undefined,purpose:'any maskable'}]};
+  window.platformCurrentManifest=manifest;window.platformCurrentPwaIcons=icons;
+  const worker=navigator.serviceWorker?.controller||registration?.active;
+  const branding={manifest,icons,base:base.href,revision:Date.now()*1000+(current%1000)};
+  const stored=worker?await sendWorker(worker,branding):false;if(current!==revision)return;
+  let url;
+  if(stored&&navigator.serviceWorker.controller){url=new URL('platform-app.webmanifest?app='+encodeURIComponent(page.pathname),base).href;link('apple-touch-icon',new URL('platform-apple-icon.png?app='+encodeURIComponent(page.pathname),base).href);window.platformPwaStatus='ready';}
+  else{const previous=manifestBlob;url=manifestBlob=URL.createObjectURL(new Blob([JSON.stringify(manifest)],{type:'application/manifest+json'}));if(previous)setTimeout(()=>URL.revokeObjectURL(previous),60000);link('apple-touch-icon',values.iconUrl||icons.icon180);window.platformPwaStatus='needs-worker';}
+  const node=link('manifest',url);node.crossOrigin='anonymous';window.dispatchEvent(new Event('platform-pwa-state'));
+ };
+ window.platformAppInstalled=()=>window.platformPwaInstalledThisSession===true||window.matchMedia('(display-mode: standalone)').matches||navigator.standalone===true;
+ window.platformIos=()=>/iPhone|iPad|iPod/.test(navigator.userAgent)||(navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1);
+ window.platformShowInstallGuide=()=>{
+  if(document.getElementById('platform-install-guide'))return;const previous=document.activeElement,overlay=document.createElement('div');overlay.id='platform-install-guide';overlay.style.cssText='position:fixed;inset:0;z-index:2147483646;background:#000b;display:flex;align-items:center;justify-content:center;padding:20px;color:white;font-family:system-ui';
+  const panel=document.createElement('div');panel.setAttribute('role','dialog');panel.setAttribute('aria-modal','true');panel.setAttribute('aria-label','Instalar aplicativo');panel.style.cssText='max-width:470px;width:100%;padding:28px;border:1px solid #334155;border-radius:20px;background:#0b111b';const title=document.createElement('h2');title.textContent='Instalar '+window.platformPwaValues(lastSettings).name;title.style.cssText='font-size:22px;margin:0 0 16px;font-weight:700';const text=document.createElement('p');text.style.cssText='line-height:1.7;white-space:pre-line;color:#cbd5e1';
+  const inApp=/Instagram|FBAN|FBAV|\bwv\b/i.test(navigator.userAgent);text.textContent=window.platformIos()?(inApp?'Abra este endereço no Safari.\n\n':'')+'1. Toque em Compartilhar no navegador.\n2. Escolha Adicionar à Tela de Início.\n3. Se aparecer Abrir como App, deixe ativado.\n4. Toque em Adicionar.':inApp?'Abra este endereço no Chrome ou Edge e escolha Instalar aplicativo no menu.':'Abra o menu do navegador e escolha Instalar aplicativo ou Adicionar à Tela de Início. Se o navegador não mostrar a opção, tente no Chrome, Edge ou Safari.';
+  const buttons=document.createElement('div');buttons.style.cssText='display:flex;gap:10px;margin-top:22px';const copy=document.createElement('button'),close=document.createElement('button');copy.textContent='Copiar endereço';close.textContent='Entendi';for(const button of [copy,close]){button.type='button';button.style.cssText='padding:12px 16px;border-radius:10px;border:1px solid #334155;background:#1d4ed8;color:white;cursor:pointer';}
+  copy.onclick=async()=>{try{await navigator.clipboard.writeText(new URL(location.pathname,location.origin).href);copy.textContent='Endereço copiado';}catch(_){const input=document.createElement('textarea');input.value=new URL(location.pathname,location.origin).href;panel.append(input);input.select();document.execCommand('copy');input.remove();copy.textContent='Endereço copiado';}};
+  const finish=()=>{overlay.remove();document.removeEventListener('keydown',key);previous?.focus();};const key=event=>{if(event.key==='Escape')finish();if(event.key==='Tab'){event.preventDefault();(document.activeElement===close?copy:close).focus();}};close.onclick=finish;overlay.onclick=event=>{if(event.target===overlay)finish();};panel.append(title,text,buttons);buttons.append(copy,close);overlay.append(panel);document.body.append(overlay);document.addEventListener('keydown',key);close.focus();
+ };
+ window.platformInstallApp=async()=>{if(window.platformAppInstalled())return {state:'installed',message:'Aplicativo instalado.'};const event=window.deferredPrompt||window.deferredInstallPrompt;if(!event){window.platformShowInstallGuide();return {state:'instructions',message:window.platformIos()?'No iPhone, use Compartilhar → Adicionar à Tela de Início.':'Veja as instruções de instalação.'};}window.deferredPrompt=window.deferredInstallPrompt=null;try{await event.prompt();const choice=await event.userChoice;return {state:choice.outcome==='accepted'?'accepted':'dismissed',message:choice.outcome==='accepted'?'O navegador está concluindo a instalação.':'Você pode instalar novamente pelo menu do navegador.'};}finally{window.dispatchEvent(new Event('platform-pwa-state'));}};
+ window.addEventListener('beforeinstallprompt',event=>{event.preventDefault();window.deferredPrompt=window.deferredInstallPrompt=event;window.dispatchEvent(new Event('platform-pwa-state'));window.dispatchEvent(new Event('pwa-ready'));});
+ window.addEventListener('appinstalled',()=>{window.platformPwaInstalledThisSession=true;window.deferredPrompt=window.deferredInstallPrompt=null;window.dispatchEvent(new Event('platform-pwa-state'));});
+ if('serviceWorker'in navigator&&window.isSecureContext){const scope=new URL('./',new URL(location.pathname,location.origin));navigator.serviceWorker.register(new URL('platform-sw.js',scope).href,{scope:scope.pathname}).then(async result=>{registration=result;await navigator.serviceWorker.ready;if(Object.keys(lastSettings).length)window.applyPwaManifest(lastSettings);}).catch(()=>{window.platformPwaStatus='needs-worker';window.dispatchEvent(new Event('platform-pwa-state'));});navigator.serviceWorker.addEventListener('controllerchange',()=>{if(Object.keys(lastSettings).length)window.applyPwaManifest(lastSettings);});}
+ try{const saved=JSON.parse(localStorage.getItem(cacheKey)||'null');if(saved)window.applyPwaManifest(saved);}catch(_){}
+})();
+</script>
 <style>
 /* 1. CONFIGURAÇÃO PARA MOBILE (Seu padrão atual) */
 .meu-background {
@@ -581,7 +462,7 @@ window.applyPwaManifest = async function(settings) {
 }
 </style>
 <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/aws-sdk/2.1363.0/aws-sdk.min.js"></script>
+  
 
   <link href="https://vjs.zencdn.net/8.10.0/video-js.css" rel="stylesheet" />
   <script src="https://vjs.zencdn.net/8.10.0/video.min.js"></script>
@@ -590,17 +471,7 @@ window.applyPwaManifest = async function(settings) {
 <meta name="theme-color" content="#3b82f6">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<script>
-window.platformAppInstalled = () => window.matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
-window.addEventListener('beforeinstallprompt', event => {
-    event.preventDefault(); window.deferredPrompt = event;
-    window.dispatchEvent(new Event('platform-pwa-state'));
-});
-window.addEventListener('appinstalled', () => {
-    window.deferredPrompt = null; window.platformPwaInstalledThisSession = true;
-    window.dispatchEvent(new Event('platform-pwa-state'));
-});
-</script>
+<script>// Instalação gerenciada pelo runtime compartilhado de PWA.</script>
 
 
 
@@ -757,6 +628,110 @@ import { runTransaction as inactivityTransaction, query as inactivityQuery, orde
     import { getDocFromServer, getFirestore, doc, getDoc, getDocs, setDoc, collection, addDoc, query, orderBy, onSnapshot, serverTimestamp, updateDoc, arrayUnion, arrayRemove, deleteDoc, where, limit } from 'firebase/firestore';
     import { jsPDF } from "jspdf";
     import { pipeline, env } from 'transformers';
+function platformFirestoreData(value){
+ if(value===undefined)return undefined;
+ if(typeof value==='number'&&!Number.isFinite(value))throw Error('Há um valor numérico inválido. Revise os campos antes de salvar.');
+ if(Array.isArray(value))return value.map(item=>item===undefined?null:platformFirestoreData(item));
+ if(value&&typeof value==='object'&&Object.getPrototypeOf(value)===Object.prototype){const result={};for(const [key,item] of Object.entries(value)){const clean=platformFirestoreData(item);if(clean!==undefined)result[key]=clean;}return result;}
+ return value;
+}
+const CERTIFICATE_PAGE={width:1123,height:794};
+function certificateFields(value=[]){
+ if(!Array.isArray(value)||value.length>200)throw Error('O certificado aceita até 200 elementos.');
+ const number=(v,fallback,min,max)=>{const n=Number(v);return Number.isFinite(n)?Math.max(min,Math.min(max,n)):fallback;};
+ return value.map((field,index)=>platformFirestoreData({...field,id:String(field.id||'field-'+index),type:String(field.type||'fixedText'),x:number(field.x,50,0,100),y:number(field.y,50,0,100),rotation:number(field.rotation,0,-360,360),...(field.fontSize!==undefined?{fontSize:number(field.fontSize,30,6,240)}:{}),...(field.width!==undefined?{width:number(field.width,150,1,2246)}:{}),...(field.height!==undefined?{height:number(field.height,2,1,1588)}:{})}));
+}
+function certificateTemplateFor(list=[],courseId){
+ return list.filter(item=>item.courseId===courseId||item.id===courseId).sort((a,b)=>(b.id===courseId)-(a.id===courseId)||((b.updatedAt?.toMillis?.()||Date.parse(b.updatedAt)||0)-(a.updatedAt?.toMillis?.()||Date.parse(a.updatedAt)||0))).find(item=>item.bgUrl)||null;
+}
+function certificateText(field,data={}){
+ const name=data.nome||data.name||'MARIA SILVA',course=data.curso||data.courseName||'NOME DO CURSO',date=data.dataConclusao||data.date||new Date().toLocaleDateString('pt-BR');
+ const aliases={macro_studentName:name,studentName:name,macro_courseName:course,courseName:course,macro_date:date,date,macro_cpf:data.cpf||data.custom?.CPF||'000.000.000-00',cpf:data.cpf||data.custom?.CPF||'000.000.000-00',macro_signature:data.assinatura||name,signature:data.assinatura||name,macro_workload:data.cargaHoraria??'Carga horária',macro_completionText:`Certificamos que ${name} concluiu com êxito o curso ${course} em ${date}.`};
+ if(field.type==='custom_macro')return String(data.custom?.[field.label]??field.label??'');
+ return String(aliases[field.type]??field.label??'Texto');
+}
+function CertificatePreview({bgUrl='',fields=[],data={},selectedId=null,onPointerDown,canvasRef,showLabels=false}){
+ const ref=React.useRef(null),[scale,setScale]=React.useState(.6);
+ React.useEffect(()=>{const update=()=>setScale(Math.max(.12,Math.min(1,(ref.current?.clientWidth||700)/CERTIFICATE_PAGE.width)));update();const observer=new ResizeObserver(update);if(ref.current)observer.observe(ref.current);return()=>observer.disconnect();},[]);
+ return <div ref={ref} style={{width:'100%'}}><div style={{width:CERTIFICATE_PAGE.width*scale,height:CERTIFICATE_PAGE.height*scale,margin:'0 auto'}}><div ref={canvasRef} data-certificate-canvas style={{width:CERTIFICATE_PAGE.width,height:CERTIFICATE_PAGE.height,position:'relative',overflow:'hidden',backgroundColor:'white',backgroundImage:bgUrl?`url("${bgUrl}")`:undefined,backgroundSize:'100% 100%',transform:`scale(${scale})`,transformOrigin:'top left',color:'#111'}}>
+  {fields.map(field=>{const selected=selectedId===field.id,style={position:'absolute',left:`${field.x}%`,top:`${field.y}%`,transform:`translate(-50%,-50%) rotate(${field.rotation||0}deg)`,outline:selected?'2px solid #2563eb':undefined,outlineOffset:6,cursor:onPointerDown?'move':'default',touchAction:onPointerDown?'none':undefined,userSelect:'none',zIndex:selected?50:20};const pointer=onPointerDown?event=>onPointerDown(event,field.id):undefined;
+   if(field.type==='image')return <img key={field.id} data-certificate-field={field.id} src={field.url} alt="Logo ou selo" draggable={false} onPointerDown={pointer} style={{...style,width:field.width||150,height:'auto'}}/>;
+   if(field.type==='line')return <div key={field.id} data-certificate-field={field.id} onPointerDown={pointer} style={{...style,width:field.width||300,height:field.height||2,background:field.color||'#111'}}/>;
+   const description=field.type==='macro_completionText';return <div key={field.id} data-certificate-field={field.id} onPointerDown={pointer} style={{...style,fontSize:field.fontSize||30,fontFamily:field.fontFamily||'Arial',fontWeight:field.fontWeight||'normal',color:field.color||'#111',textAlign:field.textAlign||'center',whiteSpace:description?'normal':'pre-wrap',width:description?(field.width||950):(field.width||'max-content'),maxWidth:CERTIFICATE_PAGE.width,lineHeight:1.2}}>{showLabels&&field.type.startsWith('macro_')?field.label||certificateText(field,data):certificateText(field,data)}</div>;
+  })}
+ </div></div></div>;
+}
+
+function certificateStudentData(user={},course={},dateValue){
+ const date=dateValue?.toDate?.()||(dateValue?.seconds?new Date(dateValue.seconds*1000):dateValue?new Date(dateValue):new Date());
+ return {nome:user.nome||user.name||user.displayName||'Aluno',cpf:user.cpf||'000.000.000-00',curso:course.title||course.titulo||'Curso',dataConclusao:Number.isNaN(date.getTime())?'':date.toLocaleDateString('pt-BR'),cargaHoraria:course.cargaHoraria||course.workload||'',custom:{...course,...user,CPF:user.cpf||'000.000.000-00'}};
+}
+async function certificateRenderCanvas(template,data){
+ if(!template?.bgUrl)throw Error('O curso ainda não tem um modelo de certificado.');
+ const load=url=>new Promise((resolve,reject)=>{const image=new Image();image.crossOrigin='anonymous';const timer=setTimeout(()=>reject(Error('A imagem do certificado não respondeu.')),15000);image.onload=()=>{clearTimeout(timer);resolve(image);};image.onerror=()=>{clearTimeout(timer);reject(Error('Não foi possível ler uma imagem do certificado. Confira o endereço e o CORS do R2.'));};image.src=url;});
+ await document.fonts?.ready;const background=await load(template.bgUrl),canvas=document.createElement('canvas');canvas.width=CERTIFICATE_PAGE.width*2;canvas.height=CERTIFICATE_PAGE.height*2;const ctx=canvas.getContext('2d');ctx.scale(2,2);ctx.fillStyle='white';ctx.fillRect(0,0,1123,794);ctx.drawImage(background,0,0,1123,794);
+ for(const field of certificateFields(template.fields||[])){
+  ctx.save();ctx.translate(field.x/100*1123,field.y/100*794);ctx.rotate((field.rotation||0)*Math.PI/180);
+  if(field.type==='image'){if(field.url){const image=await load(field.url),width=field.width||150,height=image.naturalHeight*width/image.naturalWidth;ctx.drawImage(image,-width/2,-height/2,width,height);}}
+  else if(field.type==='line'){ctx.fillStyle=field.color||'#111';ctx.fillRect(-(field.width||300)/2,-(field.height||2)/2,field.width||300,field.height||2);}
+  else{const fontSize=field.fontSize||30,text=certificateText(field,data);ctx.font=`${field.fontWeight||'normal'} ${fontSize}px ${field.fontFamily||'Arial'}`;ctx.fillStyle=field.color||'#111';ctx.textBaseline='middle';ctx.textAlign=field.textAlign||'center';const maxWidth=field.type==='macro_completionText'?(field.width||950):(field.width||1123),lines=[];
+   for(const paragraph of text.split('\n')){if(field.type!=='macro_completionText'&&!field.width){lines.push(paragraph);continue;}let line='';for(const word of paragraph.split(' ')){const next=line?line+' '+word:word;if(line&&ctx.measureText(next).width>maxWidth){lines.push(line);line=word;}else line=next;}lines.push(line);}
+   const measuredWidth=Math.min(1123,Math.max(...lines.map(line=>ctx.measureText(line).width),0)),boxWidth=field.width||measuredWidth,anchor=ctx.textAlign==='left'?-boxWidth/2:ctx.textAlign==='right'?boxWidth/2:0;
+   lines.forEach((line,index)=>ctx.fillText(line,anchor,(index-(lines.length-1)/2)*fontSize*1.2));
+  }
+  ctx.restore();
+ }
+ return canvas;
+}
+function certificateDownload(url,name){const link=document.createElement('a');link.href=url;link.download=(name||'Certificado').replace(/[\\/:*?"<>|]/g,'_')+'.jpg';document.body.append(link);link.click();link.remove();}
+
+async function platformBackendRequest(kind,payload={},settings=window.platformPublicSettings||{}){
+ const endpoint=kind==='uploads'?(settings.uploadBackendUrl||settings.r2UploadBackendUrl):settings.paymentBackendUrl;
+ let url;try{url=new URL(String(endpoint||('./api/'+kind)).trim(),location.href);}catch(_){throw Object.assign(Error('O endereço do servidor de '+(kind==='uploads'?'arquivos':'pagamentos')+' é inválido.'),{code:'platform/invalid-backend-url'});}if(url.protocol!=='https:'&&!(url.protocol==='http:'&&['localhost','127.0.0.1','[::1]'].includes(url.hostname)))throw Object.assign(Error('Configure um endereço HTTPS para o servidor.'),{code:'platform/insecure-backend-url'});
+ if(!auth?.currentUser)throw Object.assign(Error('Entre na plataforma para continuar.'),{code:'platform/sign-in-required',status:401});
+ const token=await auth.currentUser.getIdToken(),controller=new AbortController(),timer=setTimeout(()=>controller.abort(),30000);
+ try{const response=await fetch(url.href,{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+token},body:JSON.stringify(payload),signal:controller.signal});const data=await response.json().catch(()=>({}));if(!response.ok)throw Object.assign(Error(data.error||((response.status===404)?'O servidor ainda não foi publicado. Confira o endereço desta integração nos Ajustes gerais.':'O servidor não concluiu esta operação.')),{code:'platform/backend-http-error',status:response.status});return data;}catch(error){if(error.name==='AbortError')throw Object.assign(Error('O servidor não respondeu. Tente novamente.'),{code:'platform/backend-timeout'});throw error;}finally{clearTimeout(timer);}
+}
+async function platformSignedUpload(file,folder='Community/',settings=window.platformPublicSettings||{}){
+ if(!file)return null;if(isConversationUpload(folder))await assertConversationUploads();
+ const controller=new AbortController(),stop=watchConversationUpload({abort:()=>controller.abort()},folder);
+ try{const result=await platformBackendRequest('uploads',{name:file.name||'arquivo',size:file.size,contentType:file.type||'application/octet-stream',folder},settings);if(!result.uploadUrl||!result.url)throw Error('O servidor não retornou o endereço de envio.');const response=await fetch(result.uploadUrl,{method:'PUT',headers:{'Content-Type':result.contentType||file.type||'application/octet-stream'},body:file,signal:controller.signal});if(!response.ok)throw Error('O R2 não aceitou o arquivo. Confira as permissões CORS do bucket.');return {url:result.url,name:result.name||file.name,type:file.type.startsWith('video/')?'video':file.type.startsWith('audio/')?'audio':file.type.startsWith('image/')?'image':'file'};}finally{stop();}
+}
+function platformCleanSettings(value={}){
+ const result={};for(const [key,item] of Object.entries(value))if(!/(access.?token|secret.?access.?key|access.?key.?id|private.?key|webhook.?secret|aiApiKey|emailApiKey|youtubeApiKey)/i.test(key))result[key]=item;return result;
+}
+
+const platformAiBundles=new globalThis.Map();
+async function platformHydrateAIConfiguration(value={}){
+ if(!value.aiKnowledgeUrl)return value;
+ try{if(!platformAiBundles.has(value.aiKnowledgeUrl))platformAiBundles.set(value.aiKnowledgeUrl,fetch(value.aiKnowledgeUrl,{cache:'force-cache'}).then(response=>{if(!response.ok)throw Error('O conhecimento não carregou.');return response.json();}).catch(error=>{platformAiBundles.delete(value.aiKnowledgeUrl);throw error;}));const bundle=await platformAiBundles.get(value.aiKnowledgeUrl),documents=bundle.aiDocuments||[],blocks=bundle.aiKnowledgeBlocks||[];return {...value,aiCustomText:bundle.aiCustomText??value.aiCustomText,aiDocuments:(value.aiDocuments||documents).map(doc=>({...documents.find(item=>(item.id&&item.id===doc.id)||item.url===doc.url),...doc,text:doc.text??documents.find(item=>(item.id&&item.id===doc.id)||item.url===doc.url)?.text??''})),aiKnowledgeBlocks:(value.aiKnowledgeBlocks||blocks).map(block=>({...block,content:block.content??blocks.find(item=>item.id===block.id)?.content??''}))};}catch(error){return {...value,aiKnowledgeLoadError:error.message};}
+}
+async function platformStoreAIConfiguration(value,upload){
+ const keys=['aiCustomText','aiDocuments','aiKnowledgeBlocks'],bundle=Object.fromEntries(keys.map(key=>[key,value[key]||({aiDocuments:[],aiKnowledgeBlocks:[],aiCustomText:''}[key])])),large=new TextEncoder().encode(JSON.stringify(bundle)).byteLength>220000;
+ if(!large&&!value.aiKnowledgeUrl)return value;
+ const file=new File([JSON.stringify(bundle)],'conhecimento-ia.json',{type:'application/json'}),result=await upload(file,'IA_Conhecimento/');if(!result?.url)throw Error('O R2 não retornou o endereço do conhecimento da IA.');
+ return {...value,aiKnowledgeUrl:result.url,aiCustomText:'',aiDocuments:bundle.aiDocuments.map(({text,...metadata})=>metadata),aiKnowledgeBlocks:bundle.aiKnowledgeBlocks.map(({content,...metadata})=>metadata)};
+}
+
+async function platformAIReadDocument(file){
+ if(/\.txt$/i.test(file.name)||file.type==='text/plain')return (await file.text()).trim();
+ if(!/\.pdf$/i.test(file.name)&&file.type!=='application/pdf')throw Error('Para a IA ler o conteúdo, envie PDF ou TXT.');
+ const reader=window.pdfjsLib||window['pdfjs-dist/build/pdf'];if(!reader)throw Error('O leitor de PDF não carregou. Atualize a página e tente novamente.');reader.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';const pdf=await reader.getDocument({data:new Uint8Array(await file.arrayBuffer())}).promise;
+ try{const paragraphs=[];for(let index=1;index<=pdf.numPages;index++){const page=await pdf.getPage(index),text=await page.getTextContent();paragraphs.push(text.items.map(item=>item.str||'').join(' '));page.cleanup();}return paragraphs.join('\n\n').trim();}finally{await pdf.destroy();}
+}
+
+function platformAIEndpoint(){return window.platformPublicSettings?.aiBackendUrl||'https://meu-backend-ia.vercel.app/api/chat';}
+window.platformAIEndpoint=platformAIEndpoint;
+
+const PlatformCheckout=({item,itemType,user,onClose,settings,showNotification})=>{
+ const [state,setState]=React.useState({loading:true,error:'',url:'',amount:null}),requestId=React.useRef(crypto.randomUUID());
+ const title=item.title||item.titulo||'Produto';
+ React.useEffect(()=>{let active=true;(async()=>{try{const attribution=await resolvePurchaseAttribution(item,itemType,platformMoney(item.price||item.preco||0));const data=await platformBackendRequest('payments',{action:'create',itemType,itemId:item.id,ref:attribution.ref,requestId:requestId.current},settings);if(!active)return;localStorage.setItem(itemType==='product'?'last_mp_order_id':'last_transaction_id',data.orderId);if(data.free){showNotification?.('Acesso liberado sem cobrança.','success');onClose();return;}const url=data.init_point||data.sandbox_init_point;if(!/^https:\/\//.test(url||''))throw Error('O servidor não retornou o endereço de pagamento.');setState({loading:false,error:'',url,amount:data.amount});}catch(e){if(active)setState({loading:false,error:e.message,url:'',amount:null});}})();return()=>{active=false;};},[item.id,user.uid]);
+ return <div role="dialog" aria-modal="true" aria-label="Pagamento" className="fixed inset-0 z-[100000] bg-black/80 flex items-center justify-center p-5"><div className="w-full max-w-lg border border-slate-700 rounded-2xl bg-[#080d15] text-white p-7"><header className="flex justify-between gap-5"><h2 className="text-xl font-bold">{title}</h2><button type="button" aria-label="Fechar pagamento" onClick={onClose}>✕</button></header><p className="text-slate-400 text-sm mt-3">O pagamento e sua confirmação são processados pelo Mercado Pago.</p>{state.loading?<p role="status" className="py-10 text-blue-300">Preparando seu pagamento…</p>:state.error?<div role="alert" className="mt-6 p-4 rounded-xl border border-red-900 text-red-300">{state.error}</div>:<><p className="text-3xl font-bold mt-7">{Number(state.amount).toLocaleString('pt-BR',{style:'currency',currency:'BRL'})}</p><a className="flex justify-center mt-6 px-5 py-4 bg-blue-600 hover:bg-blue-500 rounded-xl font-bold" href={state.url}>Continuar no Mercado Pago</a><p className="text-xs text-slate-400 mt-4">Após a aprovação, o acesso aparece automaticamente na plataforma.</p></>}<button type="button" className="text-slate-400 text-sm underline mt-6" onClick={onClose}>Voltar à plataforma</button></div></div>;
+};
+function platformMoney(value){if(typeof value==='number')return Number.isFinite(value)?value:0;const raw=String(value||'0').replace(/[^\d,.-]/g,'');const number=Number(raw.includes(',')?raw.replace(/\./g,'').replace(',','.'):raw);return Number.isFinite(number)?number:0;}
+
+
 
     // Desativar requisições locais para rodar puramente via CDN
     env.allowLocalModels = false;
@@ -978,8 +953,99 @@ const meetConnectionError = (error,stage) => {
  const result=Error(message);result.code=error?.code;result.meetStage=stage;return result;
 };
 
-// Recorte leve: recebe um quadro reduzido e atualiza a máscara, sem comandar o vídeo.
+// O modelo distingue cabelo, pele, roupa e acessórios do ambiente.
+// A análise roda em Worker para não interromper a prévia nem a transmissão.
+// O modelo distingue cabelo, pele, roupa e acessórios do ambiente.
+// A análise roda em Worker para não interromper a prévia nem a transmissão.
+async function meetDetailedBackgroundProcessor(onResults,isCurrent){
+ if(window.PLATFORM_MEETING_DETAILED_BACKGROUND===false||typeof Worker==='undefined'||typeof OffscreenCanvas==='undefined'||typeof createImageBitmap==='undefined')return null;
+ const workerMain=()=>{
+  let model=null,backgroundIndex=0,lastTimestamp=-1,labels=[];
+  const frameCanvas=new OffscreenCanvas(1,1),frameContext=frameCanvas.getContext('2d');
+  self.onmessage=async event=>{
+   const data=event.data;
+   if(data.type==='init')try{
+    const {FilesetResolver,ImageSegmenter}=await import(data.moduleUrl);
+    const files=await FilesetResolver.forVisionTasks(data.wasmBase);
+    const options=delegate=>({baseOptions:{modelAssetPath:data.modelUrl,delegate},canvas:new OffscreenCanvas(1,1),runningMode:'VIDEO',outputCategoryMask:false,outputConfidenceMasks:true});
+    let delegate='GPU';try{model=await ImageSegmenter.createFromOptions(files,options(delegate));}catch(_){delegate='CPU';model=await ImageSegmenter.createFromOptions(files,options(delegate));}
+    labels=model.getLabels();const index=labels.findIndex(label=>label.toLowerCase()==='background');backgroundIndex=index>=0?index:0;
+    self.postMessage({type:'ready',delegate,labels});
+   }catch(error){self.postMessage({type:'error',message:error.message||'O modelo detalhado não iniciou.'});}
+   if(data.type==='frame'){
+    const bitmap=data.image,start=performance.now();
+    try{
+     if(!model)throw Error('O recorte detalhado não está pronto.');
+     lastTimestamp=Math.max(lastTimestamp+1,data.timestamp);
+     // ImageBitmap pode ignorar a inversão de textura em drivers WebGL.
+     // Normaliza o quadro em 2D antes da análise para conservar cima/baixo.
+     if(frameCanvas.width!==bitmap.width||frameCanvas.height!==bitmap.height){frameCanvas.width=bitmap.width;frameCanvas.height=bitmap.height;}
+     frameContext.drawImage(bitmap,0,0,frameCanvas.width,frameCanvas.height);
+     model.segmentForVideo(frameCanvas,lastTimestamp,result=>{
+      const background=result.confidenceMasks?.[backgroundIndex];if(!background)throw Error('A máscara detalhada não foi produzida.');
+      const probabilities=background.getAsFloat32Array(),alpha=new Uint8ClampedArray(probabilities.length);
+      const masks=result.confidenceMasks,core=new Float32Array(alpha.length);
+      // Cabelo, pele e roupa formam a pessoa inteira. Acessórios precisam
+      // estar próximos desse corpo; objetos do ambiente não entram no recorte.
+      if(masks.length>=6){
+       for(const index of [1,2,3,4]){const values=masks[index].getAsFloat32Array();for(let i=0;i<core.length;i++)core[i]+=values[i]||0;}
+       const others=masks[5].getAsFloat32Array(),w=background.width,h=background.height,radius=Math.max(5,Math.round(Math.max(w,h)*.045)),distance=new Uint16Array(alpha.length);distance.fill(radius+1);
+       for(let y=0;y<h;y++)for(let x=0;x<w;x++){const i=y*w+x;if(core[i]>=.5)distance[i]=0;else distance[i]=Math.min(distance[i],x?distance[i-1]+1:radius+1,y?distance[i-w]+1:radius+1);}
+       for(let y=h-1;y>=0;y--)for(let x=w-1;x>=0;x--){const i=y*w+x;distance[i]=Math.min(distance[i],x+1<w?distance[i+1]+1:radius+1,y+1<h?distance[i+w]+1:radius+1);const proximity=Math.max(0,Math.min(1,(radius+1-distance[i])/Math.max(1,radius*.25)));alpha[i]=Math.round(Math.max(0,Math.min(1,core[i]+others[i]*proximity))*255);}
+      }else for(let i=0;i<alpha.length;i++)alpha[i]=Number.isFinite(probabilities[i])?Math.round(Math.max(0,Math.min(1,1-probabilities[i]))*255):0;
+      self.postMessage({type:'mask',id:data.id,width:background.width,height:background.height,buffer:alpha.buffer,millis:performance.now()-start},[alpha.buffer]);
+     });
+    }catch(error){self.postMessage({type:'error',id:data.id,message:error.message||'O recorte detalhado falhou.'});}
+    finally{bitmap.close();}
+   }
+  };
+ };
+ const config=window.PLATFORM_MEETING_MATTING||{},base='https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.21/';
+ const source=new Blob(['('+workerMain.toString()+')();'],{type:'text/javascript'}),url=URL.createObjectURL(source);
+ let worker=null,closed=false,sequence=0,initResolve,initReject,cancelTimer;const requests=new globalThis.Map();
+ const ready=new Promise((resolve,reject)=>{initResolve=resolve;initReject=reject;});
+ ready.catch(()=>{});
+ const surface=document.createElement('canvas'),context=surface.getContext('2d');
+ const close=()=>{if(closed)return;closed=true;clearInterval(cancelTimer);worker?.terminate();URL.revokeObjectURL(url);initReject?.(Error('O recorte foi encerrado.'));for(const request of requests.values()){clearTimeout(request.timer);request.reject(Error('O recorte foi encerrado.'));}requests.clear();};
+ try{
+  worker=new Worker(url,{name:'recorte-detalhado-da-camera'});
+  cancelTimer=setInterval(()=>{if(!isCurrent())close();},100);
+  worker.onerror=event=>{const error=Error(event.message||'O recorte detalhado não iniciou.');initReject(error);for(const request of requests.values()){clearTimeout(request.timer);request.reject(error);}requests.clear();};
+  worker.onmessage=event=>{
+   const data=event.data;if(data.type==='ready'){initResolve(data);return;}
+   if(data.type==='error'&&!data.id){initReject(Error(data.message));return;}
+   const request=requests.get(data.id);if(!request)return;requests.delete(data.id);clearTimeout(request.timer);
+   if(data.type==='error'){request.reject(Error(data.message));return;}
+   if(!isCurrent()){request.resolve();return;}
+   try{
+    const alpha=new Uint8ClampedArray(data.buffer);if(alpha.length!==data.width*data.height)throw Error('O recorte retornou dimensões inválidas.');
+    surface.width=data.width;surface.height=data.height;const image=context.createImageData(data.width,data.height);
+    for(let i=0,p=0;i<alpha.length;i++,p+=4){image.data[p]=image.data[p+1]=image.data[p+2]=255;image.data[p+3]=alpha[i];}
+    context.putImageData(image,0,0);onResults({segmentationMask:surface,image:request.image});request.resolve();
+   }catch(error){request.reject(error);}
+  };
+  worker.postMessage({type:'init',moduleUrl:new URL(config.moduleUrl||base+'vision_bundle.mjs',location.href).href,wasmBase:new URL(config.wasmBase||base+'wasm/',location.href).href,modelUrl:new URL(config.modelUrl||'https://storage.googleapis.com/mediapipe-models/image_segmenter/selfie_multiclass_256x256/float32/1/selfie_multiclass_256x256.tflite',location.href).href});
+  const info=await meetTimed(ready,50000,'O carregamento do recorte detalhado excedeu o tempo esperado.');
+  clearInterval(cancelTimer);
+  if(!isCurrent()){close();return null;}
+  return {backend:'worker',model:'multiclass',delegate:info.delegate,
+   async send({image}){
+    if(closed||!isCurrent())return;const bitmap=await createImageBitmap(image);
+    if(closed||!isCurrent()){bitmap.close();return;}
+    const id=++sequence;
+    return new Promise((resolve,reject)=>{
+     const timer=setTimeout(()=>{requests.delete(id);reject(Error('O recorte detalhado não respondeu.'));},12000);
+     requests.set(id,{resolve,reject,timer,image});
+     try{worker.postMessage({type:'frame',id,image:bitmap,timestamp:performance.now()},[bitmap]);}catch(error){clearTimeout(timer);requests.delete(id);bitmap.close();reject(error);}
+    });
+   },close};
+ }catch(_){close();return null;}
+}
+
+
+// Compatibilidade com navegadores sem recorte detalhado.
 async function meetBackgroundProcessor(onResults,isCurrent,modelSelection){
+ const detailed=await meetDetailedBackgroundProcessor(onResults,isCurrent);if(detailed)return detailed;if(!isCurrent())return null;
  const model=await meetBackgroundRuntime(onResults,isCurrent,modelSelection);if(!model)return null;
  return {backend:'main',send:input=>model.send(input),close:()=>model.close()};
 }
@@ -1071,8 +1137,59 @@ function meetMaskRefiner(){
  };
 }
 
+// Desfoque normalizado: a cor da pessoa não participa do filtro do ambiente.
+// Dois passes pequenos preservam rosto, roupa e fone no vídeo original.
+function meetDepthBlur(){
+ const canvas=document.createElement('canvas');let gl=null,program=null,buffer=null,textures=[],shaders=[],framebuffer=null,width=0,height=0,maskRevision=-1,closed=false;
+ const close=()=>{if(closed)return;closed=true;if(gl){textures.forEach(t=>gl.deleteTexture(t));shaders.forEach(s=>gl.deleteShader(s));gl.deleteFramebuffer(framebuffer);gl.deleteBuffer(buffer);gl.deleteProgram(program);}gl=null;};
+ try{
+  gl=canvas.getContext('webgl',{alpha:false,premultipliedAlpha:false,antialias:false,depth:false,stencil:false,preserveDrawingBuffer:true});if(!gl)throw Error('Sem WebGL.');
+  const compile=(type,source)=>{const shader=gl.createShader(type);shaders.push(shader);gl.shaderSource(shader,source);gl.compileShader(shader);if(!gl.getShaderParameter(shader,gl.COMPILE_STATUS))throw Error('Filtro incompatível.');return shader;};
+  program=gl.createProgram();gl.attachShader(program,compile(gl.VERTEX_SHADER,'attribute vec2 position;varying vec2 uv;void main(){uv=position*.5+.5;gl_Position=vec4(position,0.,1.);}'));
+  gl.attachShader(program,compile(gl.FRAGMENT_SHADER,`
+   precision mediump float;
+   varying vec2 uv;
+   uniform sampler2D sourceTexture,maskTexture,originalTexture;
+   uniform vec2 direction;
+   uniform float radius,stage;
+   void main(){
+    vec4 sum=vec4(0.);float weights=0.;
+    for(int i=-10;i<=10;i++){
+     float distance=float(i)*.27,weight=exp(-distance*distance*.5);
+     vec2 point=uv+direction*radius*distance;
+     vec4 pixel=texture2D(sourceTexture,point);
+     if(stage<.5){float background=1.-texture2D(maskTexture,point).a;background*=background;pixel=vec4(pixel.rgb*background,background);}
+     sum+=pixel*weight;weights+=weight;
+    }
+    if(stage<.5)gl_FragColor=sum/weights;
+    else{vec3 color=sum.a>.004?sum.rgb/sum.a:texture2D(originalTexture,uv).rgb;gl_FragColor=vec4(color,1.);}
+   }
+  `));gl.linkProgram(program);if(!gl.getProgramParameter(program,gl.LINK_STATUS))throw Error('Filtro incompatível.');gl.useProgram(program);
+  buffer=gl.createBuffer();gl.bindBuffer(gl.ARRAY_BUFFER,buffer);gl.bufferData(gl.ARRAY_BUFFER,new Float32Array([-1,-1,1,-1,-1,1,1,1]),gl.STATIC_DRAW);
+  const position=gl.getAttribLocation(program,'position');gl.enableVertexAttribArray(position);gl.vertexAttribPointer(position,2,gl.FLOAT,false,0,0);
+  for(let i=0;i<3;i++){const texture=gl.createTexture();textures.push(texture);gl.activeTexture(gl.TEXTURE0+i);gl.bindTexture(gl.TEXTURE_2D,texture);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.LINEAR);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,gl.LINEAR);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,gl.CLAMP_TO_EDGE);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_T,gl.CLAMP_TO_EDGE);gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,1,1,0,gl.RGBA,gl.UNSIGNED_BYTE,new Uint8Array([0,0,0,0]));}
+  framebuffer=gl.createFramebuffer();gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL,true);gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL,false);gl.disable(gl.BLEND);
+ }catch(_){close();}
+ return {
+  get available(){return !!gl&&!gl.isContextLost()&&!closed;},
+  render(image,mask,revision,radius){
+   if(!gl||closed||gl.isContextLost())return null;
+   try{
+    const w=image.width,h=image.height;
+    if(width!==w||height!==h){width=canvas.width=w;height=canvas.height=h;gl.viewport(0,0,w,h);gl.activeTexture(gl.TEXTURE2);gl.bindTexture(gl.TEXTURE_2D,textures[2]);gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,w,h,0,gl.RGBA,gl.UNSIGNED_BYTE,null);gl.bindFramebuffer(gl.FRAMEBUFFER,framebuffer);gl.framebufferTexture2D(gl.FRAMEBUFFER,gl.COLOR_ATTACHMENT0,gl.TEXTURE_2D,textures[2],0);if(gl.checkFramebufferStatus(gl.FRAMEBUFFER)!==gl.FRAMEBUFFER_COMPLETE)throw Error('Filtro indisponível.');maskRevision=-1;}
+    gl.activeTexture(gl.TEXTURE0);gl.bindTexture(gl.TEXTURE_2D,textures[0]);gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,gl.RGBA,gl.UNSIGNED_BYTE,image);
+    if(maskRevision!==revision){gl.activeTexture(gl.TEXTURE1);gl.bindTexture(gl.TEXTURE_2D,textures[1]);gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,gl.RGBA,gl.UNSIGNED_BYTE,mask);maskRevision=revision;}
+    gl.uniform1i(gl.getUniformLocation(program,'sourceTexture'),0);gl.uniform1i(gl.getUniformLocation(program,'maskTexture'),1);gl.uniform1i(gl.getUniformLocation(program,'originalTexture'),0);
+    gl.uniform1f(gl.getUniformLocation(program,'radius'),radius);gl.uniform1f(gl.getUniformLocation(program,'stage'),0);gl.uniform2f(gl.getUniformLocation(program,'direction'),1/w,0);gl.bindFramebuffer(gl.FRAMEBUFFER,framebuffer);gl.drawArrays(gl.TRIANGLE_STRIP,0,4);
+    gl.activeTexture(gl.TEXTURE2);gl.bindTexture(gl.TEXTURE_2D,textures[2]);gl.uniform1i(gl.getUniformLocation(program,'sourceTexture'),2);gl.uniform1f(gl.getUniformLocation(program,'stage'),1);gl.uniform2f(gl.getUniformLocation(program,'direction'),0,1/h);gl.bindFramebuffer(gl.FRAMEBUFFER,null);gl.drawArrays(gl.TRIANGLE_STRIP,0,4);
+    if(gl.getError()!==gl.NO_ERROR)throw Error('Filtro indisponível.');return canvas;
+   }catch(_){close();return null;}
+  },close
+ };
+}
+
 class MeetMedia {
- constructor(onChange,onError){this.onChange=onChange;this.onError=onError;this.settings={videoDevice:'',audioDevice:'',speakerDevice:'',quality:'720',cameraOn:true,micOn:true,background:'none',blurLevel:'medium'};this.camera=null;this.mic=null;this.screen=null;this.cameraOutput=null;this.generation=0;this.destroyed=false;this.level=0;this.loop=0;this.effectGeneration=0;}
+ constructor(onChange,onError){this.onChange=onChange;this.onError=onError;this.settings={videoDevice:'',audioDevice:'',speakerDevice:'',quality:'720',cameraOn:true,micOn:true,background:'none',blurLevel:'strong'};this.camera=null;this.mic=null;this.screen=null;this.cameraOutput=null;this.generation=0;this.destroyed=false;this.level=0;this.loop=0;this.effectGeneration=0;}
  async prepare(settings={}){
   const generation=++this.generation;this.settings={...this.settings,...settings};let video=null,audio=null,errors=[];
   if(!navigator.mediaDevices?.getUserMedia)throw Error('Abra a plataforma em HTTPS para usar os dispositivos.');
@@ -1115,7 +1232,7 @@ class MeetMedia {
  }
  stopEffect(){
   ++this.effectGeneration;const state=this.effectState;this.effectState=null;if(state)state.stopped=true;
-  cancelAnimationFrame(this.effectFrame);this.effectFrame=0;clearTimeout(state?.watchdog);clearTimeout(state?.renderTimer);state?.refiner?.close();
+  cancelAnimationFrame(this.effectFrame);this.effectFrame=0;clearTimeout(state?.watchdog);clearTimeout(state?.renderTimer);state?.refiner?.close();state?.depthBlur?.close();
   if(state?.videoFrame&&this.video?.cancelVideoFrameCallback)this.video.cancelVideoFrameCallback(state.videoFrame);
   if(this.segmenter){try{Promise.resolve(this.segmenter.close?.()).catch(()=>{});}catch(_){}}
   this.segmenter=null;this.backgroundCanvas=null;
@@ -1132,7 +1249,7 @@ class MeetMedia {
   const image=mode==='image'?await meetBackgroundImage(imageUrl||this.backgroundImageUrl||''):null;
   if(this.destroyed||request!==this.backgroundRequest)return;
   // Trocar o fundo ou sua intensidade conserva o modelo e a faixa transmitida.
-  if(current&&current===this.effectState&&!current.stopped){current.mode=mode;current.image=image;current.backgroundDirty=true;this.settings.background=mode;this.backgroundStatus='Fundo aplicado à sua câmera.';this.onChange();return;}
+  if(current&&current===this.effectState&&!current.stopped){current.mode=mode;current.image=image;current.backgroundDirty=true;this.settings.background=mode;this.backgroundStatus='Fundo aplicado à sua câmera.'+(current.segmentationModel==='multiclass'?' Recorte detalhado ativo.':' Recorte compatível ativo.');this.onChange();return;}
   this.stopEffect();this.settings.background=mode;this.backgroundStatus='Carregando o fundo da câmera…';this.onChange();
   const generation=this.effectGeneration,isCurrent=()=>!this.destroyed&&generation===this.effectGeneration;
   try{
@@ -1142,7 +1259,7 @@ class MeetMedia {
    const output=makeCanvas(false),foreground=makeCanvas(true),background=makeCanvas(false),blur=makeCanvas(false),input=makeCanvas(false),mask=makeCanvas(true);
    const cameraSettings=this.camera.getVideoTracks()[0]?.getSettings?.()||{};
    const state={mode,image,stopped:false,backgroundDirty:true,hasMask:false,processing:false,nextInference:0,inferenceMillis:0,frames:0,inferences:0,startedAt:performance.now(),fps:Math.max(12,Math.min(30,Number(cameraSettings.frameRate)||24)),renderLimit:this.settings.quality==='1080'?1920:1280,renderMillis:0};
-   state.refiner=meetMaskRefiner();state.modelSelection=0;this.effectState=state;
+   state.refiner=meetMaskRefiner();state.depthBlur=meetDepthBlur();state.maskRevision=0;state.modelSelection=0;this.effectState=state;
    const resize=()=>{
     const width=this.video.videoWidth||cameraSettings.width,height=this.video.videoHeight||cameraSettings.height;if(!width||!height)return false;
     const scale=Math.min(1,state.renderLimit/Math.max(width,height)),w=Math.max(2,Math.round(width*scale)),h=Math.max(2,Math.round(height*scale));
@@ -1157,12 +1274,12 @@ class MeetMedia {
    resize();
    const onResults=result=>{
     if(!isCurrent()||!result.segmentationMask)return;const source=result.segmentationMask;
-    const w=source.width||input.canvas.width,h=source.height||input.canvas.height;
+    const w=input.canvas.width,h=input.canvas.height;
     if(mask.canvas.width!==w||mask.canvas.height!==h){mask.canvas.width=w;mask.canvas.height=h;}
-    mask.ctx.clearRect(0,0,w,h);mask.ctx.drawImage(state.refiner.refine(source,input.canvas,w,h),0,0,w,h);state.hasMask=true;state.refinementBackend=state.refiner.backend;result.segmentationMask?.close?.();result.image?.close?.();
+    mask.ctx.clearRect(0,0,w,h);mask.ctx.drawImage(state.refiner.refine(source,input.canvas,w,h),0,0,w,h);state.hasMask=true;state.maskRevision++;state.refinementBackend=state.refiner.backend;result.segmentationMask?.close?.();result.image?.close?.();
    };
    const processor=await meetBackgroundProcessor(onResults,isCurrent,state.modelSelection);if(!processor||!isCurrent())return;
-   this.segmenter=processor;state.backend=processor.backend;
+   this.segmenter=processor;state.backend=processor.backend;state.segmentationModel=processor.model||'selfie';state.delegate=processor.delegate||'compatibility';
    const infer=async first=>{
     if(state.processing||!isCurrent())return;state.processing=true;const start=performance.now();
     try{
@@ -1177,9 +1294,11 @@ class MeetMedia {
    const draw=()=>{
     if(!resize())return;const w=output.canvas.width,h=output.canvas.height,ctx=output.ctx;
     if(state.mode==='blur'){
-     const radius={light:1.1,medium:2.4,strong:4.6}[this.settings.blurLevel||'medium']||2.4,bw=blur.canvas.width,bh=blur.canvas.height,pad=Math.ceil(radius*3);
-     const scale=Math.max((bw+pad*2)/this.video.videoWidth,(bh+pad*2)/this.video.videoHeight),dw=this.video.videoWidth*scale,dh=this.video.videoHeight*scale;
-     blur.ctx.fillStyle='#050505';blur.ctx.fillRect(0,0,bw,bh);blur.ctx.filter='blur('+radius+'px)';blur.ctx.drawImage(this.video,(bw-dw)/2,(bh-dh)/2,dw,dh);blur.ctx.filter='none';ctx.drawImage(blur.canvas,0,0,w,h);
+     const radius={light:2.1,medium:4.2,strong:7.8}[this.settings.blurLevel||'strong']||7.8,bw=blur.canvas.width,bh=blur.canvas.height;
+     blur.ctx.filter='none';blur.ctx.drawImage(this.video,0,0,bw,bh);
+     const blurred=state.depthBlur.render(blur.canvas,mask.canvas,state.maskRevision,radius);
+     if(blurred){ctx.drawImage(blurred,0,0,w,h);state.blurBackend='depth';}
+     else{const pad=Math.ceil(radius*3),scale=Math.max((bw+pad*2)/this.video.videoWidth,(bh+pad*2)/this.video.videoHeight),dw=this.video.videoWidth*scale,dh=this.video.videoHeight*scale;blur.ctx.filter='blur('+radius+'px)';blur.ctx.drawImage(this.video,(bw-dw)/2,(bh-dh)/2,dw,dh);blur.ctx.filter='none';ctx.drawImage(blur.canvas,0,0,w,h);state.blurBackend='compatibility';}
     }else{
      if(state.backgroundDirty){
       const bg=background.ctx;bg.fillStyle='#080808';bg.fillRect(0,0,w,h);
@@ -1192,7 +1311,7 @@ class MeetMedia {
    };
    draw();const stream=output.canvas.captureStream(state.fps),track=stream.getVideoTracks()[0];
    this.cameraOutput=stream;track.enabled=this.settings.cameraOn;try{track.contentHint='motion';}catch(_){}
-   this.backgroundCanvas=output.canvas;this.backgroundStatus='Fundo aplicado à sua câmera.';state.startedAt=performance.now();this.onChange();track.requestFrame?.();
+   this.backgroundCanvas=output.canvas;this.backgroundStatus='Fundo aplicado à sua câmera.'+(state.segmentationModel==='multiclass'?' Recorte detalhado ativo.':' Recorte compatível ativo.');state.startedAt=performance.now();this.onChange();track.requestFrame?.();
    let lastFrame=-1;
    const fail=()=>{if(isCurrent()){this.stopEffect();this.settings.background='none';this.backgroundStatus='';this.onChange();this.onError('O efeito de fundo foi interrompido. Escolha o fundo novamente ou use a câmera original.');}};
    const render=now=>{
@@ -1458,7 +1577,7 @@ function NativeMeetingRoom({session,user,isHost=false,onExit,uploadFile}){
  const participants=[me,...approved.filter(member=>member.uid!==uid)],peerFor=id=>peers.find(peer=>peer.uid===id),screenMembers=participants.filter(member=>member.uid===uid?!!state.screen:member.sharing&&peerFor(member.uid)?.screen?.getVideoTracks().length),pinned=pin?participants.find(member=>member.uid===pin):null,screenFeatured=layout==='auto'?screenMembers.find(member=>member.uid===state.room?.hostUid)||screenMembers[0]:null,featured=pinned||screenFeatured||(session.mode==='broadcast'&&layout==='auto'?participants.find(member=>member.uid===state.room?.hostUid):null);
  const tile=member=><MeetTile key={member.uid} member={member} stream={member.uid===uid?state.local:peerFor(member.uid)?.camera} self={member.uid===uid} speaking={member.uid===uid?meter>12:(peerFor(member.uid)?.speaking||0)>12} quality={member.uid===uid?state.quality:peerFor(member.uid)?.quality||state.qualities?.[member.uid]} onPin={()=>setPin(pin===member.uid?'':member.uid)}/>;
  const deviceFields=<div className="nm-form-grid">{[['videoDevice','Câmera / placa de captura','videoinput'],['audioDevice','Microfone','audioinput'],['speakerDevice','Saída de áudio','audiooutput']].map(([key,label,kind])=><label className="nm-field" key={key}>{label}<select aria-label={label} value={settings[key]||''} disabled={busy} onChange={event=>action(async()=>{const value=event.target.value;if(key==='speakerDevice'){engineRef.current.media.settings[key]=value;engineRef.current.emit();}else await engineRef.current.prepare({[key]:value,cameraOn:settings.cameraOn,micOn:settings.micOn});})}><option value="">Dispositivo padrão</option>{devices.filter(device=>device.kind===kind).map((device,index)=><option key={device.deviceId} value={device.deviceId}>{device.label||label+' '+(index+1)}</option>)}</select>{key==='videoDevice'&&<small>Webcam, câmera USB ou placa de captura reconhecida pelo seu computador.</small>}</label>)}<label className="nm-field">Qualidade da câmera<select aria-label="Qualidade da câmera" value={settings.quality||'720'} disabled={busy} onChange={event=>action(()=>engineRef.current.prepare({quality:event.target.value}))}><option value="720">720p · menor consumo</option><option value="1080">1080p · mais detalhes</option></select></label></div>;
- const backgroundFields=<div><p className="nm-panel-title">Fundo da câmera</p><div className="nm-backgrounds">{[['none','Original'],['blur','Desfocar'],['studio','Estúdio'],['blue','Azul']].map(([value,label])=><button type="button" key={value} disabled={busy} aria-pressed={settings.background===value} onClick={()=>background(value)}>{label}</button>)}<label className="nm-file-button">Sua imagem neste dispositivo<input type="file" aria-label="Imagem de fundo" accept="image/jpeg,image/png,image/webp" disabled={busy} onChange={imageBackground}/></label></div>{settings.background==='blur'&&<div style={{marginTop:14}}><p className="nm-panel-title" style={{marginBottom:8}}>Intensidade do desfoque</p><div className="nm-backgrounds" role="group" aria-label="Intensidade do desfoque">{[['light','Leve'],['medium','Médio'],['strong','Forte']].map(([value,label])=><button type="button" key={value} disabled={busy} aria-pressed={(settings.blurLevel||'medium')===value} onClick={()=>engineRef.current?.media.setBlurLevel(value)}>{label}</button>)}</div></div>}<p className="nm-muted" style={{fontSize:10,marginTop:9}}>Recorte refinado para cabelo e contornos, processado no seu dispositivo. A proporção da câmera é preservada; luz de frente ajuda a separar você do fundo.</p>{state.backgroundStatus&&<p className="nm-notice" role="status">{state.backgroundStatus}</p>}<MeetingBackgroundGallery manage={isHost} uploadFile={uploadFile} disabled={busy} selectedUrl={settings.background==='image'?engineRef.current?.media.backgroundImageUrl:''} onSelect={url=>background('image',url)}/></div>;
+ const backgroundFields=<div><p className="nm-panel-title">Fundo da câmera</p><div className="nm-backgrounds">{[['none','Original'],['blur','Desfocar'],['studio','Estúdio'],['blue','Azul']].map(([value,label])=><button type="button" key={value} disabled={busy} aria-pressed={settings.background===value} onClick={()=>background(value)}>{label}</button>)}<label className="nm-file-button">Sua imagem neste dispositivo<input type="file" aria-label="Imagem de fundo" accept="image/jpeg,image/png,image/webp" disabled={busy} onChange={imageBackground}/></label></div>{settings.background==='blur'&&<div style={{marginTop:14}}><p className="nm-panel-title" style={{marginBottom:8}}>Intensidade do desfoque</p><div className="nm-backgrounds" role="group" aria-label="Intensidade do desfoque">{[['light','Leve'],['medium','Médio'],['strong','Forte']].map(([value,label])=><button type="button" key={value} disabled={busy} aria-pressed={(settings.blurLevel||'strong')===value} onClick={()=>engineRef.current?.media.setBlurLevel(value)}>{label}</button>)}</div></div>}<p className="nm-muted" style={{fontSize:10,marginTop:9}}>O desfoque atua no ambiente, preservando rosto, cabelo, roupa e fone. O recorte é processado no seu dispositivo; luz de frente melhora o contorno.</p>{state.backgroundStatus&&<p className="nm-notice" role="status">{state.backgroundStatus}</p>}<MeetingBackgroundGallery manage={isHost} uploadFile={uploadFile} disabled={busy} selectedUrl={settings.background==='image'?engineRef.current?.media.backgroundImageUrl:''} onSelect={url=>background('image',url)}/></div>;
  const startRecord=()=>action(async()=>{if(recording){recorderRef.current?.stop();await updateDoc(engineRef.current.ref,{recording:false});setRecording(false);return;}await updateDoc(engineRef.current.ref,{recording:true});const recorder=new MeetRecorder(engineRef.current,root.current,result=>{const link=document.createElement('a');link.href=result.url;link.download=result.name;document.body.appendChild(link);link.click();link.remove();if(mounted.current){setRecordings(old=>[...old,result]);setRecording(false);}if(!engineRef.current.closed)updateDoc(engineRef.current.ref,{recording:false}).catch(()=>{});});recorderRef.current=recorder;try{await recorder.start(recordQuality);setRecording(true);}catch(value){recorder.stop();await updateDoc(engineRef.current.ref,{recording:false}).catch(()=>{});throw value;}});
  useEffect(()=>{if(state.phase!=='joined'&&recorderRef.current){recorderRef.current.stop();setRecording(false);}},[state.phase]);
  useEffect(()=>{if(state.recording===false&&recorderRef.current?.stopped)setRecording(false);},[state.recording]);
@@ -1659,251 +1778,7 @@ const CourseAccessGate = ({ course, user, ...props }) => {
     };
 
     // --- CHECKOUT MODAL (SUBSTITUIR INTEIRO) ---
-    const CheckoutModal = ({ course, user, onClose, settings, showNotification }) => {
-        const [isLoading, setIsLoading] = useState(true);
-        const [preferenceId, setPreferenceId] = useState(null);
-
-        // Desconto aplicado (Vem da vitrine)
-        const discountInfo = course.appliedDiscount || {};
-    
-        // CORREÇÃO: Garante que o preço final seja sempre um número matemático válido para o Mercado Pago
-        let finalPrice = discountInfo.finalPrice;
-        if (finalPrice === undefined) {
-            const rawPrice = String(course.price || "0");
-            finalPrice = typeof course.price === 'number' 
-                ? course.price 
-                : parseFloat(rawPrice.includes(',') ? rawPrice.replace(/\./g, '').replace(',', '.') : rawPrice);
-            if (isNaN(finalPrice)) finalPrice = 0;
-        }
-
-        const MP_PUBLIC_KEY = settings?.mercadoPagoPublicKey || 'APP_USR-9077f4be-099a-4d5e-80bf-2f156384a515';
-        const MP_ACCESS_TOKEN = settings?.mercadopagoAccessToken || settings?.mercadoPagoAccessToken || 'APP_USR-5078406563096978-100721-63ed85c89b2cb57e85109eb14514462c-336516116';
-
-        useEffect(() => {
-            const createPreference = async () => {
-                if (!MP_ACCESS_TOKEN) return;
-
-                try {
-                   // 👇 LÓGICA DE AFILIADOS: Captura o ID da URL ou da Memória do Navegador
-                const params = new URLSearchParams(window.location.search);
-                const attribution = await resolvePurchaseAttribution(course, 'course', finalPrice);
-                const currentRef = attribution.ref;
-                const affiliateCommission = attribution.affiliateCommission;
-
-                const docRef = await addDoc(collection(db, "transactions"), {
-                    ...attribution,
-                    releasePolicyVersion: 1,
-                    courseId: course.id,
-                    courseTitle: course.title,
-                    userId: user.uid,
-                    userName: user.displayName || 'Aluno',
-                    userEmail: user.email,
-                    valor: finalPrice, // SALVA O PREÇO REAL PAGO
-                    status: 'pendente',
-                    method: 'mercado_pago',
-                    ref: currentRef || null, // 👈 INJETA O CPF/ID DO AFILIADO AQUI
-                    affiliateCommission: affiliateCommission, // 👈 INJETA O VALOR DA COMISSÃO AQUI
-                    createdAt: serverTimestamp(),
-                    updatedAt: serverTimestamp()
-                });
-                    localStorage.setItem('last_transaction_id', docRef.id);
-
-                    // 2. GERA O LINK DE PAGAMENTO
-                    const currentUrl = getPlatformStudentUrl() + "/"; 
-                    
-                    const preferenceData = {
-                        items: [{
-                            id: course.id,
-                            title: course.title,
-                            description: `Curso: ${course.title} ${discountInfo.hasDiscount ? '(Promocional)' : ''}`,
-                            picture_url: course.cover || '',
-                            quantity: 1,
-                            currency_id: 'BRL',
-                            unit_price: Number(finalPrice) // COBRA O PREÇO COM DESCONTO
-                        }],
-                        payer: {
-                            name: user.displayName || 'Aluno',
-                            email: user.email,
-                        },
-                        back_urls: {
-                            success: `${currentUrl}?payment_status=approved`,
-                            failure: `${currentUrl}?payment_status=failure`,
-                            pending: `${currentUrl}?payment_status=pending`
-                        },
-                        auto_return: "approved",
-                        external_reference: docRef.id,
-                        statement_descriptor: "INST MILTON",
-                        binary_mode: true 
-                    };
-
-                    const response = await fetch('https://api.mercadopago.com/checkout/preferences', {
-                        method: 'POST',
-                        headers: { 'Authorization': `Bearer ${MP_ACCESS_TOKEN}`, 'Content-Type': 'application/json' },
-                        body: JSON.stringify(preferenceData)
-                    });
-
-                    const data = await response.json();
-                    if (data.id) setPreferenceId(data.id);
-
-                } catch (error) {
-                    console.error("Erro MP:", error);
-                    if (showNotification) showNotification("Erro ao iniciar pagamento.", "error");
-                } finally {
-                    setIsLoading(false);
-                }
-            };
-
-            // 👇 A MÁGICA ESTÁ AQUI: Só cria a preferência se não existir uma, travando o loop infinito!
-            if (!preferenceId) {
-                createPreference();
-            }
-            
-            // 👇 OUTRA MÁGICA: Dependências travadas em IDs (primitivos) para não recriar a função à toa
-        }, [course.id, user.uid, finalPrice, MP_ACCESS_TOKEN]);
-       useEffect(() => {
-            let brickController; 
-            let isMounted = true; // Controla se o modal ainda está aberto
-
-            const renderBrick = async () => {
-                if (preferenceId) {
-                    const container = document.getElementById('wallet_container');
-                    // Aborta se o React já tiver fechado a tela antes de começar
-                    if(!container || !isMounted) return; 
-
-                    container.innerHTML = '';
-                    const mp = new window.MercadoPago(MP_PUBLIC_KEY, { locale: 'pt-BR' });
-                    const bricksBuilder = mp.bricks();
-                    
-                    try {
-                        // Checa de novo se a div existe antes de criar (caso a internet do aluno demore)
-                        if(document.getElementById('wallet_container') && isMounted) {
-                            brickController = await bricksBuilder.create("wallet", "wallet_container", {
-                                initialization: { preferenceId: preferenceId, redirectMode: 'modal' },
-                                customization: { texts: { action: 'pay' }, visual: { buttonBackground: 'black', borderRadius: '16px' } },
-                            });
-                        }
-                    } catch(err) {
-                        console.warn("Renderização MP abortada:", err);
-                    }
-                }
-            };
-
-            renderBrick();
-
-            return () => {
-                isMounted = false; // Avisa que o modal fechou
-                // Limpeza silenciosa para não quebrar o React
-                try {
-                    if (brickController) {
-                        brickController.unmount();
-                    }
-                } catch (e) {
-                    console.warn("Limpeza silenciosa do MP efetuada.");
-                }
-            };
-        }, [preferenceId, MP_PUBLIC_KEY]);
-            
-
-        if (!course) return null;
-
-        return (
-            <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 sm:p-6 bg-black/80 backdrop-blur-md animate-fade-in overflow-y-auto">
-                <div className="relative w-full max-w-5xl bg-[#0a0a0a] border border-[#333] rounded-3xl shadow-2xl overflow-hidden flex flex-col md:flex-row min-h-[500px] animate-scale-in my-auto">
-                    
-                    <button onClick={onClose} className="absolute top-4 right-4 z-50 p-2.5 bg-black/40 hover:bg-black text-gray-400 hover:text-white rounded-full backdrop-blur-md transition-all border border-white/10">
-                        <X className="w-5 h-5" />
-                    </button>
-
-                    {/* COLUNA ESQUERDA */}
-                    <div className="w-full md:w-3/5 relative bg-[#111] flex flex-col min-h-[300px] md:min-h-full">
-                        <div className="absolute inset-0 h-full w-full">
-                            {course.cover ? (
-                                <img src={course.cover} className="w-full h-full object-cover opacity-70" alt={course.title || course.titulo} />
-                            ) : (
-                                <div className="w-full h-full bg-gradient-to-br from-indigo-900/60 to-black"></div>
-                            )}
-                            <div className="absolute inset-0 bg-gradient-to-t from-[#0a0a0a] via-[#0a0a0a]/90 to-transparent"></div>
-                            <div className="absolute inset-0 bg-gradient-to-r from-transparent via-transparent to-[#0a0a0a] hidden md:block"></div>
-                        </div>
-
-                        <div className="relative z-10 p-8 sm:p-12 flex flex-col h-full justify-end">
-                            {course.badge && (
-                                <span className="w-fit px-3 py-1 bg-indigo-600 text-white text-[10px] font-bold uppercase tracking-widest rounded-full mb-4 shadow-lg shadow-indigo-500/30">
-                                    {course.badge}
-                                </span>
-                            )}
-                            
-                            <h2 className="text-3xl sm:text-4xl font-black text-white mb-2 leading-tight tracking-tight">
-                                {course.title || course.titulo}
-                            </h2>
-                            
-                            {course.subtitle && <p className="text-indigo-400 font-semibold text-sm sm:text-base mb-6">{course.subtitle}</p>}
-                            
-                            <div className="mt-4 border-t border-white/10 pt-6">
-                                <h4 className="text-[11px] font-bold text-gray-400 uppercase tracking-widest mb-4 flex items-center gap-2">
-                                    <BookOpen className="w-4 h-4 text-indigo-500" /> O que você vai receber
-                                </h4>
-                                <div className="text-gray-300 text-sm leading-relaxed max-h-[200px] overflow-y-auto pr-4 whitespace-pre-wrap font-medium custom-scrollbar">
-                                    {course.checkoutDescription || course.description || "Descrição não disponível."}
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-
-                    {/* COLUNA DIREITA */}
-                    <div className="w-full md:w-2/5 bg-[#0a0a0a] p-8 sm:p-10 flex flex-col justify-center relative z-10 border-t md:border-t-0 md:border-l border-[#222]">
-                        <div className="mb-10 text-center md:text-left">
-                            <p className="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-2">Investimento Total</p>
-                            
-                            {/* EXIBIÇÃO DO DESCONTO AQUI */}
-                            {discountInfo.hasDiscount ? (
-                                <div className="flex flex-col items-center md:items-start">
-                                    <span className="text-sm text-gray-500 line-through decoration-red-500/50 decoration-2">De R$ {parseFloat(course.price || 0).toFixed(2).replace('.', ',')}</span>
-                                    <div className="flex items-baseline justify-center md:justify-start gap-1.5 mt-1">
-                                        <span className="text-xl text-emerald-500 font-bold">R$</span>
-                                        <span className="text-5xl font-black text-white tracking-tight">{parseFloat(finalPrice).toFixed(2).replace('.', ',')}</span>
-                                    </div>
-                                    <span className="text-[10px] font-black text-pink-500 mt-2 uppercase tracking-widest bg-pink-500/10 px-2 py-1 rounded border border-pink-500/30">
-                                        {discountInfo.tag} Aplicado!
-                                    </span>
-                                </div>
-                            ) : (
-                                <div className="flex items-baseline justify-center md:justify-start gap-1.5">
-                                    <span className="text-xl text-green-500 font-bold">R$</span>
-                                    <span className="text-5xl font-black text-white tracking-tight">{parseFloat(finalPrice).toFixed(2).replace('.', ',')}</span>
-                                </div>
-                            )}
-
-                            <p className="text-xs text-gray-500 mt-4 font-medium bg-[#111] py-1.5 px-3 rounded-lg inline-block">
-                                Pagamento Único • Acesso Imediato
-                            </p>
-                        </div>
-
-                        <div className="space-y-6 w-full min-h-[100px]">
-                            {isLoading ? (
-                                <div className="flex flex-col items-center justify-center py-8 text-slate-500 gap-3">
-                                    <div className="w-8 h-8 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin"></div>
-                                    <p className="text-sm font-medium">Conectando ao Mercado Pago...</p>
-                                </div>
-                            ) : (
-                                <div className="animate-fade-in w-full">
-                                    <p className="text-xs text-slate-500 mb-3 text-center font-medium uppercase tracking-wide">Escolha como pagar:</p>
-                                    <div id="wallet_container" className="w-full"></div>
-                                    <div className="mt-4 flex justify-center items-center gap-2 text-[10px] text-slate-400">
-                                        <Lock size={10} /> <span>Ambiente Seguro Mercado Pago</span>
-                                    </div>
-                                </div>
-                            )}
-
-                            <div className="pt-6 flex flex-col items-center justify-center gap-4 opacity-70 border-t border-[#222]">
-                                <div className="flex items-center gap-2 text-[10px] font-bold text-gray-400 uppercase tracking-widest"><ShieldCheck className="w-4 h-4 text-green-500" /> Pagamento Seguro</div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        );
-    };
+    const CheckoutModal=({course,...props})=><PlatformCheckout item={course} itemType="course" {...props}/>;
    // --- POPUP MANAGER (VERSÃO CORRIGIDA: FORÇA ATUALIZAÇÃO) ---
     const PopupManager = ({ user }) => {
         const [campaigns, setCampaigns] = useState([]);
@@ -2044,250 +1919,7 @@ const CourseAccessGate = ({ course, user, ...props }) => {
         );
     };
 
-const MarketplaceCheckoutModal = ({ product, user, onClose, settings, showNotification, db }) => {
-    const [isLoading, setIsLoading] = useState(true);
-    const [preferenceId, setPreferenceId] = useState(null);
-    const [initPoint, setInitPoint] = useState(null);
-
-    const discountInfo = product.appliedDiscount || {};
-
-    let finalPrice = discountInfo.finalPrice;
-    if (finalPrice === undefined) {
-        const rawPrice = String(product.price || "0");
-        finalPrice = typeof product.price === 'number'
-            ? product.price
-            : parseFloat(rawPrice.includes(',') ? rawPrice.replace(/\./g, '').replace(',', '.') : rawPrice);
-        if (isNaN(finalPrice)) finalPrice = 0;
-    }
-
-    const MP_PUBLIC_KEY = settings?.mercadoPagoPublicKey || 'APP_USR-9077f4be-099a-4d5e-80bf-2f156384a515';
-    const MP_ACCESS_TOKEN = settings?.mercadopagoAccessToken || settings?.mercadoPagoAccessToken || 'APP_USR-5078406563096978-100721-63ed85c89b2cb57e85109eb14514462c-336516116';
-
-    useEffect(() => {
-        const createPreference = async () => {
-            if (!MP_ACCESS_TOKEN) {
-                if (showNotification) showNotification("Chave de acesso ausente.", "error");
-                setIsLoading(false);
-                return;
-            }
-
-            try {
-                // LÓGICA DE AFILIADOS PARA PRODUTOS: Captura o ID
-                const params = new URLSearchParams(window.location.search);
-                const attribution = await resolvePurchaseAttribution(product, 'product', finalPrice);
-                const currentRef = attribution.ref;
-                const affiliateCommission = attribution.affiliateCommission;
-
-                const docRef = await addDoc(collection(db, "marketplace_orders"), {
-                    ...attribution,
-                    productId: product.id,
-                    productTitle: product.title,
-                    userId: user.uid,
-                    userName: user.displayName || 'Aluno',
-                    userEmail: user.email,
-                    valor: finalPrice,
-                    status: 'pendente',
-                    method: 'mercado_pago',
-                    ref: currentRef || null,
-                    affiliateCommission: affiliateCommission,
-                    createdAt: serverTimestamp(),
-                    updatedAt: serverTimestamp()
-                });
-
-                localStorage.setItem('last_mp_order_id', docRef.id);
-
-                // 2. GERA PREFERÊNCIA COM O VALOR FINAL
-                const currentUrl = getPlatformStudentUrl() + "/"; 
-                const preferenceData = {
-                    items: [{
-                        id: product.id,
-                        title: product.title,
-                        description: `Produto: ${product.title} ${discountInfo.hasDiscount ? '(Promocional)' : ''}`,
-                        picture_url: product.images && product.images.length > 0 ? product.images[0] : '',
-                        quantity: 1,
-                        currency_id: 'BRL',
-                        unit_price: Number(finalPrice)
-                    }],
-                    payer: { name: user.displayName || 'Aluno', email: user.email },
-                    back_urls: { success: `${currentUrl}?mp_order_status=approved`, failure: `${currentUrl}?mp_order_status=failure`, pending: `${currentUrl}?mp_order_status=pending` },
-                    auto_return: "approved",
-                    external_reference: docRef.id,
-                    statement_descriptor: "LOJA ALUNO",
-                    binary_mode: true 
-                };
-
-                const response = await fetch('https://api.mercadopago.com/checkout/preferences', {
-                    method: 'POST',
-                    headers: { 'Authorization': `Bearer ${MP_ACCESS_TOKEN}`, 'Content-Type': 'application/json' },
-                    body: JSON.stringify(preferenceData)
-                });
-
-                const data = await response.json();
-                if (data.id) {
-                    setPreferenceId(data.id);
-                    setInitPoint(data.init_point);
-                }
-
-            } catch (error) {
-                console.error("Erro MP Loja:", error);
-                if (showNotification) showNotification("Erro ao iniciar pagamento.", "error");
-            } finally {
-                setIsLoading(false);
-            }
-        };
-
-        if (!preferenceId) {
-            createPreference();
-        }
-    }, [product.id, user.uid, finalPrice, MP_ACCESS_TOKEN, db]);
-
-    useEffect(() => {
-        let brickController; 
-        let isMounted = true;
-
-        const renderBrick = async () => {
-            if (preferenceId && isMounted) {
-                const container = document.getElementById('mp_wallet_container');
-                if(!container) return;
-
-                container.innerHTML = '';
-                const mp = new window.MercadoPago(MP_PUBLIC_KEY, { locale: 'pt-BR' });
-                const bricksBuilder = mp.bricks();
-                
-                try {
-                    const controller = await bricksBuilder.create("wallet", "mp_wallet_container", {
-                        initialization: { preferenceId: preferenceId, redirectMode: 'modal' },
-                        customization: { texts: { action: 'pay' }, visual: { buttonBackground: 'black', borderRadius: '16px' } }
-                    });
-
-                    if (!isMounted) {
-                        controller.unmount();
-                    } else {
-                        brickController = controller;
-                    }
-                } catch(err) {
-                    if (isMounted) console.warn("Erro MP Loja:", err);
-                }
-            }
-        };
-
-        renderBrick();
-
-        return () => {
-            isMounted = false;
-            try {
-                if (brickController) brickController.unmount();
-            } catch(e) {}
-        };
-    }, [preferenceId, MP_PUBLIC_KEY]);
-
-    if (!product) return null;
-
-    // NOVO LAYOUT: Mesmo padrão imersivo, escuro e em duas colunas do modal de cursos
-    return (
-        <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 sm:p-6 bg-black/80 backdrop-blur-md animate-fade-in overflow-y-auto">
-            <div className="relative w-full max-w-5xl bg-[#0a0a0a] border border-[#333] rounded-3xl shadow-2xl overflow-hidden flex flex-col md:flex-row min-h-[500px] animate-scale-in my-auto">
-                
-                <button onClick={onClose} className="absolute top-4 right-4 z-50 p-2.5 bg-black/40 hover:bg-black text-gray-400 hover:text-white rounded-full backdrop-blur-md transition-all border border-white/10">
-                    <X className="w-5 h-5" />
-                </button>
-
-                {/* COLUNA ESQUERDA - DETALHES DO PRODUTO */}
-                <div className="w-full md:w-3/5 relative bg-[#111] flex flex-col min-h-[300px] md:min-h-full">
-                    <div className="absolute inset-0 h-full w-full">
-                        {product.images && product.images.length > 0 ? (
-                            <img src={product.images[0]} className="w-full h-full object-cover opacity-70" alt={product.title} />
-                        ) : (
-                            <div className="w-full h-full bg-gradient-to-br from-indigo-900/60 to-black flex items-center justify-center">
-                                <ShoppingBag size={64} className="text-white/10" />
-                            </div>
-                        )}
-                        <div className="absolute inset-0 bg-gradient-to-t from-[#0a0a0a] via-[#0a0a0a]/90 to-transparent"></div>
-                        <div className="absolute inset-0 bg-gradient-to-r from-transparent via-transparent to-[#0a0a0a] hidden md:block"></div>
-                    </div>
-
-                    <div className="relative z-10 p-8 sm:p-12 flex flex-col h-full justify-end">
-                        {product.category && (
-                            <span className="w-fit px-3 py-1 bg-indigo-600 text-white text-[10px] font-bold uppercase tracking-widest rounded-full mb-4 shadow-lg shadow-indigo-500/30">
-                                {product.category}
-                            </span>
-                        )}
-                        
-                        <h2 className="text-3xl sm:text-4xl font-black text-white mb-2 leading-tight tracking-tight">
-                            {product.title}
-                        </h2>
-                        
-                        <div className="mt-4 border-t border-white/10 pt-6">
-                            <h4 className="text-[11px] font-bold text-gray-400 uppercase tracking-widest mb-4 flex items-center gap-2">
-                                <ShoppingBag className="w-4 h-4 text-indigo-500" /> Detalhes do Produto
-                            </h4>
-                            <div className="text-gray-300 text-sm leading-relaxed max-h-[200px] overflow-y-auto pr-4 whitespace-pre-wrap font-medium custom-scrollbar">
-                                {product.description || "Descrição do produto não disponível."}
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                {/* COLUNA DIREITA - CHECKOUT MERCADO PAGO */}
-                <div className="w-full md:w-2/5 bg-[#0a0a0a] p-8 sm:p-10 flex flex-col justify-center relative z-10 border-t md:border-t-0 md:border-l border-[#222]">
-                    <div className="mb-10 text-center md:text-left">
-                        <p className="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-2">Investimento Total</p>
-                        
-                        {discountInfo.hasDiscount ? (
-                            <div className="flex flex-col items-center md:items-start">
-                                <span className="text-sm text-gray-500 line-through decoration-red-500/50 decoration-2">De R$ {parseFloat(product.price || 0).toFixed(2).replace('.', ',')}</span>
-                                <div className="flex items-baseline justify-center md:justify-start gap-1.5 mt-1">
-                                    <span className="text-xl text-emerald-500 font-bold">R$</span>
-                                    <span className="text-5xl font-black text-white tracking-tight">{parseFloat(finalPrice).toFixed(2).replace('.', ',')}</span>
-                                </div>
-                                <span className="text-[10px] font-black text-pink-500 mt-2 uppercase tracking-widest bg-pink-500/10 px-2 py-1 rounded border border-pink-500/30">
-                                    {discountInfo.tag} Aplicado!
-                                </span>
-                            </div>
-                        ) : (
-                            <div className="flex items-baseline justify-center md:justify-start gap-1.5">
-                                <span className="text-xl text-green-500 font-bold">R$</span>
-                                <span className="text-5xl font-black text-white tracking-tight">{parseFloat(finalPrice).toFixed(2).replace('.', ',')}</span>
-                            </div>
-                        )}
-
-                        <p className="text-xs text-gray-500 mt-4 font-medium bg-[#111] py-1.5 px-3 rounded-lg inline-block">
-                            Pagamento Seguro • Acesso Imediato
-                        </p>
-                    </div>
-
-                    <div className="space-y-6 w-full min-h-[100px]">
-                        {isLoading ? (
-                            <div className="flex flex-col items-center justify-center py-8 text-slate-500 gap-3">
-                                <div className="w-8 h-8 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin"></div>
-                                <p className="text-sm font-medium">Conectando ao Mercado Pago...</p>
-                            </div>
-                        ) : (
-                            <div className="animate-fade-in w-full">
-                                <p className="text-xs text-slate-500 mb-3 text-center font-medium uppercase tracking-wide">Escolha como pagar:</p>
-                                <div id="mp_wallet_container" className="w-full"></div>
-                                {initPoint && (
-                                    <a href={initPoint} className="mt-4 flex w-full py-4 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl text-center text-sm shadow-md transition-colors justify-center items-center gap-2">
-                                        Pagar via Link Seguro
-                                    </a>
-                                )}
-                                <div className="mt-4 flex justify-center items-center gap-2 text-[10px] text-slate-400">
-                                    <Lock size={10} /> <span>Ambiente Seguro Mercado Pago</span>
-                                </div>
-                            </div>
-                        )}
-
-                        <div className="pt-6 flex flex-col items-center justify-center gap-4 opacity-70 border-t border-[#222]">
-                            <div className="flex items-center gap-2 text-[10px] font-bold text-gray-400 uppercase tracking-widest">
-                                <ShieldCheck className="w-4 h-4 text-green-500" /> Compra Garantida
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-    );
-};
+const MarketplaceCheckoutModal=({product,...props})=><PlatformCheckout item={product} itemType="product" {...props}/>;
 
 
 
@@ -2429,7 +2061,7 @@ const StudentMarketplace = ({ db, user, settings, showNotification, promotions =
 
     const handleForceDownload = async (url, fileName) => {
             if (!url) return;
-            setDownloadingUrl(url);
+            setIsDownloading(true);
             if (showNotification) showNotification("Iniciando o download...", "info");
             
             const am = String.fromCharCode(38);
@@ -2626,143 +2258,14 @@ const StudentMarketplace = ({ db, user, settings, showNotification, promotions =
         }
     };
 
-    const verifyPendingPayments = async () => {
-        if (isCheckingRef.current || pendingOrders.length === 0) return;
-        const mpToken = settings?.mercadoPagoAccessToken || settings?.mercadopagoAccessToken || 'APP_USR-5078406563096978-100721-63ed85c89b2cb57e85109eb14514462c-336516116';
-        if (!mpToken) return;
-
-        isCheckingRef.current = true;
-
-        try {
-            const am = "\u0026";
-            for (let order of pendingOrders) {
-                let mpStatus = null;
-                let mpData = null;
-
-                const mpId = order.mpPaymentId || order.paymentId || order.payment_id;
-                
-                if (mpId && mpId !== 'N/A') {
-                    const resId = await fetch(`https://api.mercadopago.com/v1/payments/${String(mpId).trim()}`, { 
-                        headers: { 'Authorization': `Bearer ${mpToken}` } 
-                    });
-                    if (resId.ok) { 
-                        mpData = await resId.json(); 
-                        mpStatus = String(mpData.status).toLowerCase(); 
-                    }
-                }
-
-                if (!mpStatus) {
-                    const searchUrl = "https://api.mercadopago.com/v1/payments/search?sort=date_created" + am + "criteria=desc" + am + "external_reference=" + order.id;
-                    const resSearch = await fetch(searchUrl, { 
-                        headers: { 'Authorization': `Bearer ${mpToken}` } 
-                    });
-                    if (resSearch.ok) {
-                        const searchData = await resSearch.json();
-                        if (searchData.results && searchData.results.length > 0) { 
-                            mpData = searchData.results[0]; 
-                            mpStatus = String(mpData.status).toLowerCase(); 
-                        }
-                    }
-                }
-
-                if (mpStatus) {
-                    let novoStatus = order.status;
-                    if (['approved', 'accredited'].includes(mpStatus)) novoStatus = 'pago'; 
-                    else if (['rejected', 'cancelled', 'refunded', 'charged_back'].includes(mpStatus)) novoStatus = 'cancelado'; 
-                    
-                    if (novoStatus !== order.status) {
-                        await updateDoc(doc(db, "marketplace_orders", order.id), { 
-                            status: novoStatus, 
-                            mpPaymentId: mpData ? String(mpData.id) : order.mpPaymentId, 
-                            updatedAt: serverTimestamp() 
-                        });
-                        
-                        if (novoStatus === 'pago') {
-                            let nomeDoProduto = order.productTitle || "Produto VIP";
-                            let capaDoProduto = "https://images.unsplash.com/photo-1616469829941-c7200edec809?q=80&w=600";
-                            let precoDoProduto = order.valor || "0,00";
-
-                            try {
-                                const prodInfo = products.find(p => p.id === order.productId);
-                                if (prodInfo) {
-                                    if (prodInfo.images && prodInfo.images.length > 0) capaDoProduto = prodInfo.images[0];
-                                    if (prodInfo.title) nomeDoProduto = prodInfo.title;
-                                }
-                            } catch(e){}
-
-                            if (showNotification) showNotification(`O pagamento do produto "${nomeDoProduto}" foi aprovado e liberado!`, "success");
-
-                            const platformName = settings?.siteName || "Nossa Plataforma";
-                            const linkPlataforma = getPlatformStudentUrl(); 
-                            const logoUrl = settings?.siteLogoUrl || settings?.logoUrl || ""; 
-
-                            const compraBodyHTML = `
-                                <div style="background-color: #030303; padding: 40px 20px; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;">
-                                    <div style="max-width: 600px; margin: 0 auto; background: linear-gradient(145deg, #111111, #0a0a0f); padding: 40px; border-radius: 24px; box-shadow: 0 20px 50px rgba(79,70,229,0.2); border: 1px solid #333333;">
-                                        
-                                        <!-- Logo do Site -->
-                                        ${logoUrl ? `<div style="text-align: center; margin-bottom: 30px;"><img src="${logoUrl}" alt="${platformName}" style="max-height: 80px; max-width: 250px; object-fit: contain;"></div>` : ''}
-
-                                        <!-- GIF Animado de Celebração -->
-                                        <div style="text-align: center; margin-bottom: 25px;">
-                                            <img src="https://media.giphy.com/media/v1.Y2lkPTc5MGI3NjExODg3c2MwYnd1ajMwOXh3ZmV1eHN2NmhjdWV1OG12eXB2dTRudHltaSZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/artj92V8o75VPL7AeQ/giphy.gif" alt="Festa" style="width: 100px; border-radius: 50%; box-shadow: 0 0 25px rgba(16, 185, 129, 0.3);">
-                                        </div>
-
-                                        <h1 style="color: #34d399; margin: 0 0 15px 0; font-size: 28px; font-weight: 900; text-align: center; text-transform: uppercase; letter-spacing: 1px;">Pagamento Aprovado! 🎉</h1>
-                           
-                                        
-                                        <p style="color: #cbd5e1; font-size: 16px; margin-bottom: 30px; text-align: center;">Olá, <strong style="color: #ffffff;">${order.userName || 'Aluno'}</strong>! Que incrível ter você com a gente.</p>
-                                        
-                                        <!-- Card do Produto com Borda Gradiente -->
-                                        <div style="background: linear-gradient(to right, #4f46e5, #9333ea); padding: 3px; border-radius: 16px; margin-bottom: 30px;">
-                                            <div style="background-color: #0f0f13; padding: 25px; border-radius: 14px; text-align: center;">
-                                                <img src="${capaDoProduto}" alt="Capa do Produto" style="width: 100%; max-height: 250px; object-fit: cover; border-radius: 10px; margin-bottom: 15px; border: 1px solid rgba(255,255,255,0.1);">
-                                                <h2 style="color: #ffffff; margin: 0 0 10px 0; font-size: 22px;">${nomeDoProduto}</h2>
-                                                <span style="display: inline-block; background-color: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16, 185, 129, 0.3); color: #34d399; padding: 5px 15px; border-radius: 50px; font-size: 14px; font-weight: bold;">R$ ${precoDoProduto}</span>
-                                            </div>
-                                        </div>
-                                        
-                                        <p style="color: #94a3b8; font-size: 15px; line-height: 1.6; margin-bottom: 35px; text-align: center;">Seu produto exclusivo já foi liberado no sistema. Clique no botão abaixo para ir direto para a sua área de membros e começar a aproveitar agora mesmo!</p>
-                                        
-                                        <!-- Botão de Acesso Estilizado -->
-                                        <div style="text-align: center;">
-                                            <a href="${linkPlataforma}" style="display: inline-block; background: linear-gradient(to right, #4f46e5, #7e22ce); color: #ffffff; text-decoration: none; font-size: 16px; font-weight: 900; padding: 18px 40px; border-radius: 50px; box-shadow: 0 10px 20px rgba(126, 34, 206, 0.4); text-transform: uppercase; letter-spacing: 1px;">Acessar Plataforma 🚀</a>
-                                        </div>
-                                        
-                                        <p style="color: #475569; font-size: 12px; margin-top: 40px; text-align: center;">Equipe ${platformName}</p>
-                                    </div>
-                                </div>
-                            `;
-
-                            fetch("https://script.google.com/macros/s/AKfycbzyuxuOw0fx5YiAWuE_PaN8JE9VrupAStYQfKk6fFDMiLMn7BARtbLagoF3sPbhg9A/exec", {
-                                method: "POST", 
-                                mode: "no-cors", 
-                                headers: { "Content-Type": "text/plain;charset=utf-8" },
-                                body: JSON.stringify({
-                                    type: "transactional",
-                                    to: order.userEmail,
-                                    subject: `Pagamento Aprovado: ${nomeDoProduto} 🎉`,
-                                    body: compraBodyHTML,
-                                    senderName: `Equipe ${platformName}`
-                                })
-                            }).catch(e => console.log("Erro no e-mail de Produto: ", e));
-                        }
-                    }
-                }
-            }
-        } catch (error) {
-            console.error("Erro na verificação automática do aluno:", error);
-        } finally {
-            isCheckingRef.current = false;
-        }
-    };
+    const verifyPendingPayments = async()=>{if(isCheckingRef.current||!pendingOrders.length||document.visibilityState==='hidden')return;isCheckingRef.current=true;try{for(const order of pendingOrders.slice(0,20)){const data=await platformBackendRequest('payments',{action:'status',itemType:'product',orderId:order.id},settings);if(data.status==='pago')showNotification?.('Pagamento confirmado. Seu produto foi liberado.','success');}}catch(e){console.warn(e.message);}finally{isCheckingRef.current=false;}};
 
     useEffect(() => {
         let interval;
         if (pendingOrders.length > 0) {
             interval = setInterval(() => {
                 verifyPendingPayments();
-            }, 5000);
+            }, 15000);
         }
         return () => clearInterval(interval);
     }, [pendingOrders, settings]);
@@ -4462,7 +3965,7 @@ const YouTubeTabTranscription = ({ controller, stopRef, modelRef, onText, onActi
             try {
                 const prompt = `Corrija a gramática, ortografia e pontuação do texto. Mantenha o sentido e as quebras de linha. Retorne APENAS o texto corrigido, sem introduções:\n\n${rawText}`;
                 
-                const response = await fetch("https://meu-backend-ia.vercel.app/api/chat", {
+                const response = await fetch(platformAIEndpoint(), {
                     method: "POST", headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({ message: prompt })
                 });
@@ -5270,7 +4773,7 @@ const YouTubeTabTranscription = ({ controller, stopRef, modelRef, onText, onActi
                                                         
                                                         RETORNE APENAS O TEXTO FINAL POLIDO:\n\n${rawText}`;
                                                         
-                                                        const aiRes = await fetch("https://meu-backend-ia.vercel.app/api/chat", {
+                                                        const aiRes = await fetch(platformAIEndpoint(), {
                                                             method: "POST", headers: { "Content-Type": "application/json" },
                                                             body: JSON.stringify({ message: prompt })
                                                         });
@@ -5353,7 +4856,7 @@ const YouTubeTabTranscription = ({ controller, stopRef, modelRef, onText, onActi
                                                                             4. Estruture com Introdução Conceitual, Pontos de Análise e Síntese Executiva.
                                                                             TEXTO:\n\n${transcriptionText}`;
                                                                             
-                                                                            const response = await fetch("https://meu-backend-ia.vercel.app/api/chat", {
+                                                                            const response = await fetch(platformAIEndpoint(), {
                                                                                 method: "POST", headers: { "Content-Type": "application/json" },
                                                                                 body: JSON.stringify({ message: prompt })
                                                                             });
@@ -5390,7 +4893,7 @@ const YouTubeTabTranscription = ({ controller, stopRef, modelRef, onText, onActi
                                                                             onClick={async () => {
                                                                                 setIsSummarizing(true);
                                                                                 try {
-                                                                                    const response = await fetch("https://meu-backend-ia.vercel.app/api/chat", {
+                                                                                    const response = await fetch(platformAIEndpoint(), {
                                                                                         method: "POST", headers: { "Content-Type": "application/json" },
                                                                                         body: JSON.stringify({ message: `AÇÃO ACADÊMICA: ${opt.prompt}\n\nCONTEÚDO BASE PARA ANÁLISE:\n${transcriptionText}` })
                                                                                     });
@@ -5582,104 +5085,7 @@ const YouTubeTabTranscription = ({ controller, stopRef, modelRef, onText, onActi
 // =================================================================================
 // COMPONENTE COMPARTILHADO: RENDERIZADOR DE CERTIFICADO UNIFICADO (ADMIN E ALUNO)
 // =================================================================================
-const CertificateRenderer = ({ 
-    bgUrl, 
-    fields = [], 
-    containerRef, 
-    onMouseDown, 
-    selectedFieldId = null, 
-    previewMode = true,
-    studentData = {},
-    scale = 1
-}) => {
-    
-    const BASE_WIDTH = 1123;
-    const BASE_HEIGHT = 794;
-
-    const resolveMacro = (field) => {
-        if (!previewMode && studentData) {
-            if (field.type === 'macro_studentName' || field.type === 'studentName') return studentData.nome || 'NOME DO ALUNO';
-            if (field.type === 'macro_courseName' || field.type === 'courseName') return studentData.curso || 'NOME DO CURSO';
-            if (field.type === 'macro_date' || field.type === 'date') return studentData.dataConclusao || 'DD/MM/AAAA';
-            if (field.type === 'macro_workload') return studentData.cargaHoraria || 'X Horas';
-            if (field.type === 'macro_cpf' || field.type === 'cpf') return studentData.custom?.CPF || '000.000.000-00';
-            if (field.type === 'custom_macro' && studentData.custom) return studentData.custom[field.label] || field.label;
-            if (field.type === 'fixedText' || field.type === 'customText') return field.label;
-            if (field.type === 'macro_completionText') return `Certificamos que o aluno(a) ${studentData.nome || 'NOME DO ALUNO'} concluiu com êxito o curso ${studentData.curso || 'NOME DO CURSO'} no dia ${studentData.dataConclusao || 'DD/MM/AAAA'}.`;
-            if (field.type === 'macro_signature' || field.type === 'signature') return studentData.nome || 'NOME DO ALUNO';
-        }
-        if (field.type === 'macro_completionText') return 'Certificamos que o aluno(a) NOME COMPLETO DO ALUNO DA SILVA concluiu com êxito o curso TÍTULO DO CURSO DE EXEMPLO no dia 31/12/2026.';
-        if (field.type === 'macro_signature') return 'Assinatura do Aluno';
-        return field.label || 'Texto';
-    };
-
-    return (
-        <div style={{ width: '100%', display: 'flex', justifyContent: 'center', overflow: 'hidden', padding: '20px 0' }}>
-            <div 
-                ref={containerRef}
-                style={{
-                    position: 'relative', width: `${BASE_WIDTH}px`, height: `${BASE_HEIGHT}px`,
-                    backgroundImage: bgUrl ? `url(${bgUrl})` : 'none', backgroundSize: '100% 100%',
-                    backgroundPosition: 'center', backgroundRepeat: 'no-repeat', backgroundColor: '#fff',
-                    boxShadow: '0 10px 30px rgba(0,0,0,0.15)', transform: `scale(${scale})`,
-                    transformOrigin: 'top center', marginBottom: `-${BASE_HEIGHT * (1 - scale)}px`
-                }}
-            >
-                {fields.map(field => {
-                    const isSelected = selectedFieldId === field.id;
-                    const isDescription = field.type === 'macro_completionText';
-                    
-                    if (field.type === 'image') {
-                        return (
-                            <img 
-                                key={field.id} src={field.url} onMouseDown={(e) => onMouseDown && onMouseDown(e, field.id)}
-                                style={{
-                                    position: 'absolute', left: `${field.x}%`, top: `${field.y}%`, width: `${field.width || 150}px`,
-                                    transform: `translate(-50%, -50%) rotate(${field.rotation || 0}deg)`,
-                                    cursor: onMouseDown ? 'move' : 'default', border: isSelected ? '2px dashed #4f46e5' : 'none',
-                                    userSelect: 'none', WebkitUserDrag: 'none', zIndex: isSelected ? 30 : 20
-                                }}
-                                draggable="false" alt="Elemento"
-                            />
-                        );
-                    }
-
-                    if (field.type === 'line') {
-                        return (
-                            <div key={field.id} onMouseDown={(e) => onMouseDown && onMouseDown(e, field.id)}
-                                style={{
-                                    position: 'absolute', left: `${field.x}%`, top: `${field.y}%`,
-                                    width: `${field.width || 300}px`, height: `${field.height || 2}px`, backgroundColor: field.color || '#000000',
-                                    transform: `translate(-50%, -50%) rotate(${field.rotation || 0}deg)`,
-                                    cursor: onMouseDown ? 'move' : 'default', border: isSelected ? '2px dashed #4f46e5' : 'none',
-                                    zIndex: isSelected ? 30 : 20, borderRadius: '2px'
-                                }}
-                            />
-                        );
-                    }
-
-                    return (
-                        <div key={field.id} onMouseDown={(e) => onMouseDown && onMouseDown(e, field.id)}
-                            style={{
-                                position: 'absolute', left: `${field.x}%`, top: `${field.y}%`, 
-                                transform: `translate(-50%, -50%) rotate(${field.rotation || 0}deg)`, 
-                                color: field.color || '#000', opacity: 0.92, mixBlendMode: 'multiply', 
-                                textShadow: `0px 0px 0.5px ${field.color || '#000'}`,
-                                fontSize: `${field.fontSize || 30}px`, fontFamily: field.fontFamily || 'Arial',
-                                fontWeight: field.fontWeight || 'normal', textAlign: field.textAlign || 'center',
-                                width: isDescription ? '85%' : '100%', whiteSpace: isDescription ? 'normal' : 'nowrap',
-                                cursor: onMouseDown ? 'move' : 'default', border: isSelected ? '2px dashed #4f46e5' : '2px solid transparent',
-                                padding: '4px', userSelect: 'none', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: isSelected ? 30 : 20
-                            }}
-                        >
-                            {resolveMacro(field)}
-                        </div>
-                    );
-                })}
-            </div>
-        </div>
-    );
-};
+const CertificateRenderer=({bgUrl,fields=[],containerRef,onMouseDown,selectedFieldId=null,previewMode=true,studentData={},scale=1})=><div style={{width:1123*scale}}><CertificatePreview bgUrl={bgUrl} fields={fields} data={studentData} canvasRef={containerRef} selectedId={selectedFieldId} onPointerDown={onMouseDown} showLabels={previewMode}/></div>;
 
     
     
@@ -5789,213 +5195,7 @@ const CertificatesSection = ({ user, courses, userProgress, certificates, custom
     const [expandedCert, setExpandedCert] = React.useState(null); 
     const [previewHighRes, setPreviewHighRes] = React.useState(null);
 
-    React.useEffect(() => {
-        if (!expandedCert) return;
-        setPreviewHighRes(null);
-
-        const { course, template, progressInfo, customPdf } = expandedCert;
-        
-        // Se for um arquivo PDF ou Imagem direto (customizado), não usamos Canvas
-        if (customPdf) {
-            setPreviewHighRes('custom_ready');
-            return;
-        }
-        
-        if (!template?.bgUrl) {
-            setPreviewHighRes('erro_cors');
-            return;
-        }
-
-        // Função vital para lidar com domínios e evitar bloqueios
-        const fixUrl = (url) => {
-            if (!url) return null;
-            const wrongDomain = "https://pub-2ece542306d80259e71a793d20f91a60.r2.dev";
-            const rightDomain = "https://pub-263c6a7252164111a104a68e6835cfc4.r2.dev";
-            let safeUrl = url.includes(wrongDomain) ? url.replace(wrongDomain, rightDomain) : url;
-            
-            // TRUQUE MÁGICO DO CACHE BUSTER: Impede o navegador de usar a imagem bugada do cache
-            return safeUrl + (safeUrl.includes('?') ? '&' : '?') + 'cb=' + new Date().getTime();
-        };
-
-        const canvas = document.createElement('canvas');
-        const ctx = canvas.getContext('2d');
-        const img = new Image();
-        img.crossOrigin = "Anonymous"; // Essencial para exportar o certificado depois
-        img.src = fixUrl(template.bgUrl);
-
-        // Proteção contra loop infinito de carregamento
-        img.onerror = () => {
-            console.error("Erro ao carregar a imagem do certificado. Verifique as configurações de CORS.");
-            setPreviewHighRes('erro_cors');
-        };
-
-        img.onload = async () => {
-            let finalUser = user;
-            try {
-                if (typeof db !== 'undefined') {
-                    const docSnap = await getDoc(doc(db, "users", user.uid));
-                    if (docSnap.exists()) finalUser = { ...user, ...docSnap.data() };
-                }
-            } catch(e) {}
-
-            canvas.width = img.width;
-            canvas.height = img.height;
-            const w = canvas.width;
-            const h = canvas.height;
-            
-            ctx.drawImage(img, 0, 0);
-
-            if (template.fields && template.fields.length > 0) {
-                const ratio = w / 1000; 
-                
-                // 1. IMAGENS LOGOS E SELOS (COM ROTAÇÃO)
-                const imageFields = template.fields.filter(f => f.type === 'image');
-                for (let field of imageFields) {
-                    if (!field.url) continue;
-                    try {
-                        const imgMacro = new Image();
-                        imgMacro.crossOrigin = "Anonymous";
-                        imgMacro.src = fixUrl(field.url);
-                        await new Promise((resolve, reject) => { imgMacro.onload = resolve; imgMacro.onerror = reject; });
-                        
-                        let pxX = (parseFloat(field.x) / 100) * w;
-                        let pxY = (parseFloat(field.y) / 100) * h;
-                        let targetW = (parseFloat(field.width) || 150) * ratio;
-                        let targetH = imgMacro.height * (targetW / imgMacro.width);
-                        
-                        ctx.save();
-                        ctx.translate(pxX, pxY);
-                        ctx.rotate((field.rotation || 0) * Math.PI / 180);
-                        ctx.drawImage(imgMacro, -targetW / 2, -targetH / 2, targetW, targetH);
-                        ctx.restore();
-                    } catch(e) { console.warn("Aviso: Falha ao carregar macro de imagem.", e); }
-                }
-
-                // 2. LINHAS GEOMÉTRICAS
-                const lineFields = template.fields.filter(f => f.type === 'line');
-                for (let field of lineFields) {
-                    const pxX = (parseFloat(field.x) / 100) * w;
-                    const pxY = (parseFloat(field.y) / 100) * h;
-                    const targetW = (parseFloat(field.width) || 300) * ratio;
-                    const targetH = (parseFloat(field.height) || 2) * ratio;
-
-                    ctx.save();
-                    ctx.translate(pxX, pxY);
-                    ctx.rotate((field.rotation || 0) * Math.PI / 180);
-                    ctx.fillStyle = field.color || "#000000";
-                    ctx.fillRect(-targetW / 2, -targetH / 2, targetW, targetH);
-                    ctx.restore();
-                }
-
-                // 3. TEXTOS E MACROS AUTOMÁTICAS
-                const textFields = template.fields.filter(f => f.type !== 'image' && f.type !== 'line');
-                for (let field of textFields) {
-                    let pxX = (parseFloat(field.x) / 100) * w;
-                    let pxY = (parseFloat(field.y) / 100) * h;
-                    const fontSizePx = (parseFloat(field.fontSize) || 30) * ratio;
-
-                    let type = field.type || "";
-                    let originalText = String(field.label || field.text || "");
-                    let cleanText = originalText.toUpperCase().trim();
-
-                    let isName = type.includes('studentName') || cleanText.includes("NOME DO ALUNO") || cleanText === "NOME" || cleanText.includes("MACRO_NOME");
-                    let isCPF = type.includes('cpf') || cleanText.includes("CPF");
-                    let isCourse = type.includes('courseName') || cleanText.includes("NOME DO CURSO");
-                    let isDate = type.includes('date') || cleanText.includes("DATA");
-                    let isSignature = type.includes('signature') || cleanText.includes("ASSINATURA");
-                    let isDescription = type.includes('completionText') || cleanText.includes("TEXTO CONCLUS");
-                    
-                    let fontWeight = isSignature ? 'normal' : (field.fontWeight || 'bold');
-                    let fontStyle = isSignature ? 'italic' : 'normal';
-                    let fontFamily = isSignature ? "'Brush Script MT', 'Dancing Script', 'Great Vibes', cursive" : (field.fontFamily || 'Arial');
-                    
-                    ctx.textAlign = "center";
-                    ctx.textBaseline = "middle"; 
-                    ctx.fillStyle = field.color || "#000000";
-                    ctx.globalCompositeOperation = "multiply"; 
-                    ctx.globalAlpha = 0.92; 
-                    ctx.shadowColor = field.color || "#000000"; 
-                    ctx.shadowBlur = 1.5; 
-                    
-                    const alunoData = finalUser || user || {};
-                    const nomeAluno = alunoData.name || alunoData.displayName || user.displayName || "Aluno";
-                    const cpfStr = alunoData.cpf || "CPF não cadastrado";
-                    const cName = course.title || course.titulo || "Curso sem título";
-                    
-                    let dateStr = new Date().toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' });
-                    if (progressInfo?.completedAt) {
-                        const d = progressInfo.completedAt.seconds ? new Date(progressInfo.completedAt.seconds * 1000) : new Date(progressInfo.completedAt);
-                        if (!isNaN(d.getTime())) dateStr = d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' });
-                    }
-
-                    let textoFinal = originalText;
-                    if (isName) textoFinal = nomeAluno;
-                    else if (isCPF) textoFinal = `CPF: ${cpfStr}`;
-                    else if (isCourse) textoFinal = cName;
-                    else if (isDate) textoFinal = `Conclusão: ${dateStr}`;
-                    else if (isSignature) textoFinal = nomeAluno; 
-                    else if (isDescription) textoFinal = `Certificamos que o aluno(a) ${nomeAluno} concluiu com êxito o curso ${cName} no dia ${dateStr}.`;
-                    else if (field.type === 'custom_macro') {
-                        const macroName = field.label.trim();
-                        textoFinal = course[macroName] || alunoData[macroName] || ""; 
-                    } else if (field.type === 'fixedText' || field.type === 'customText') {
-                        textoFinal = field.label;
-                    }
-
-                    if (!textoFinal || String(textoFinal).trim() === "") continue;
-
-                    let maxAvailableWidth = Math.min(pxX, w - pxX) * 2 * 0.90; 
-
-                    ctx.save();
-                    ctx.translate(pxX, pxY);
-                    ctx.rotate((field.rotation || 0) * Math.PI / 180);
-
-                    if (isDescription || textoFinal.length > 50) {
-                        ctx.font = `${fontStyle} ${fontWeight} ${fontSizePx}px ${fontFamily}`;
-                        const words = textoFinal.split(' ');
-                        let line = ''; const lines = [];
-
-                        for(let n = 0; n < words.length; n++) {
-                            const testLine = line + words[n] + ' ';
-                            const metrics = ctx.measureText(testLine);
-                            if (metrics.width > maxAvailableWidth && n > 0) { 
-                                lines.push(line.trim()); line = words[n] + ' '; 
-                            } else { line = testLine; }
-                        }
-                        lines.push(line.trim());
-                        
-                        let currentY = 0 - (((lines.length - 1) * (fontSizePx * 1.5)) / 2);
-                        for(let i = 0; i < lines.length; i++) {
-                            ctx.fillText(lines[i], 0, currentY);
-                            currentY += (fontSizePx * 1.5);
-                        }
-                    } else {
-                        let currentFontSize = fontSizePx;
-                        ctx.font = `${fontStyle} ${fontWeight} ${currentFontSize}px ${fontFamily}`;
-                        let metrics = ctx.measureText(textoFinal);
-                        
-                        while (metrics.width > maxAvailableWidth && currentFontSize > 10) {
-                            currentFontSize -= 1;
-                            ctx.font = `${fontStyle} ${fontWeight} ${currentFontSize}px ${fontFamily}`;
-                            metrics = ctx.measureText(textoFinal);
-                        }
-                        ctx.fillText(textoFinal, 0, 0);
-                    }
-                    ctx.restore();
-                }
-                ctx.globalCompositeOperation = "source-over";
-                ctx.globalAlpha = 1.0;
-                ctx.shadowBlur = 0;
-            }
-
-            try {
-                setPreviewHighRes(canvas.toDataURL('image/jpeg', 1.0));
-            } catch(err) {
-                console.error("Falha ao exportar o Canvas. Ocorreu bloqueio de CORS:", err);
-                setPreviewHighRes('erro_cors');
-            }
-        };
-    }, [expandedCert, user]);
+    React.useEffect(()=>{if(!expandedCert)return;let active=true;setPreviewHighRes(null);if(expandedCert.customPdf){setPreviewHighRes('custom_ready');return;}certificateRenderCanvas(expandedCert.template,certificateStudentData(user,expandedCert.course,expandedCert.progressInfo?.completedAt)).then(canvas=>{if(active)setPreviewHighRes(canvas.toDataURL('image/jpeg',1));}).catch(e=>{console.warn(e.message);if(active)setPreviewHighRes('erro_cors');});return()=>{active=false;};},[expandedCert,user]);
 
     const handleExpand = (course, template, customPdf, progressInfo) => setExpandedCert({ course, template, customPdf, progressInfo });
     const handleClose = () => { setExpandedCert(null); setPreviewHighRes(null); };
@@ -6003,7 +5203,7 @@ const CertificatesSection = ({ user, courses, userProgress, certificates, custom
     const handleDownloadGeneratedCertificate = () => {
         if (!previewHighRes || previewHighRes === 'erro_cors') return;
         const link = document.createElement('a');
-        link.download = `Certificado_${user.displayName || 'Aluno'}_${expandedCert.course.title.replace(/\s+/g, '_')}.jpg`;
+        link.download = `Certificado_${user.displayName || 'Aluno'}_${(expandedCert.course.title||expandedCert.course.titulo||'Curso').replace(/\s+/g, '_')}.jpg`;
         link.href = previewHighRes;
         document.body.appendChild(link);
         link.click();
@@ -6048,7 +5248,7 @@ const CertificatesSection = ({ user, courses, userProgress, certificates, custom
            ) : (
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
                     {availableCertificates.map(course => {
-                        const template = certificates.find(c => c.courseId === course.id);
+                        const template = certificateTemplateFor(certificates,course.id);
                         const customPdf = customCerts ? customCerts[course.id] : null; 
                         return (
                             <CertificateCard 
@@ -6414,125 +5614,12 @@ const CertificatesSection = ({ user, courses, userProgress, certificates, custom
 // ======================================================
     // 1. CONFIGURAÇÃO DE UPLOAD (DADOS DO ADMIN)
     // ======================================================
-    const getS3Client = () => {
-        if (typeof AWS === 'undefined') {
-            console.error("ERRO CRÍTICO: AWS SDK não foi carregado.");
-            return null;
-        }
-
-        // DADOS DO ADMIN (Conexão Unificada)
-        const accountId = '2ece542306d80259e71a793d20f91a60';
-        const accessKeyId = '5365b5ba42a26381492e9869e322d27a';
-        const secretAccessKey = '9c1257268d4892c92f9f43f7fd3a9eb5b0dcb6e29224c00a898c4cbffb1cc059';
-
-        return new AWS.S3({
-            endpoint: `https://${accountId}.r2.cloudflarestorage.com`,
-            accessKeyId: accessKeyId,
-            secretAccessKey: secretAccessKey,
-            signatureVersion: 'v4',
-            region: 'auto',
-            s3ForcePathStyle: true,
-            httpOptions: { timeout: 300000 } // 5 minutos de timeout
-        });
-    };
+    
 
     // ======================================================
     // 2. FUNÇÃO DE UPLOAD CONECTADA (CONFIGURAÇÃO DEFINITIVA)
     // ======================================================
-    const uploadToCustomDrive = async (file, folder = 'Community/') => {
-        if (file && isConversationUpload(folder)) await assertConversationUploads();
-        if (!file) return null;
-        
-        const s3 = getS3Client(); // Usa as credenciais do Admin
-        if (!s3) {
-            window.platformAlert("Erro: Biblioteca de upload não carregou.");
-            return null;
-        }
-
-        const bucketName = 'test03'; 
-        
-        // ---------------------------------------------------------
-        // ⚠️ ATENÇÃO: A CONEXÃO ESTÁ AQUI
-        // ---------------------------------------------------------
-        // Cole o link que você pegou no Cloudflare (Public Access) entre as aspas.
-        // NÃO coloque a barra "/" no final.
-        
-        const publicDomain = "https://pub-263c6a7252164111a104a68e6835cfc4.r2.dev"; 
-        
-        // ---------------------------------------------------------
-
-        // 👇 NOVO: Proteção para fotos do celular que vêm sem nome 👇
-        const safeFileName = file.name || "mobile_upload.jpg";
-        const parts = safeFileName.split('.');
-        const extension = parts.length > 1 ? parts.pop().toLowerCase() : (file.type.split('/')[1] || 'jpg');
-        const timestamp = Date.now();
-        
-        // Limpeza de nome segura
-        const cleanName = parts[0]
-            ? parts[0].normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-zA-Z0-9]/g, "")
-            : "media"; 
-        
-        const uniqueFileName = `${timestamp}_${cleanName}.${extension}`;
-        // 👆 FIM DO BLOCO NOVO 👆
-        const key = `${folder}${uniqueFileName}`;
-
-        // Define o tipo de arquivo corretamente
-        let contentType = file.type;
-        if (!contentType || contentType === '') {
-            if(extension === 'png') contentType = 'image/png';
-            else if(extension === 'jpg' || extension === 'jpeg') contentType = 'image/jpeg';
-            else if(extension === 'mp4') contentType = 'video/mp4';
-            else if(extension === 'pdf') contentType = 'application/pdf';
-        }
-
-        let detectedType = 'image';
-        if (contentType.includes('video') || ['mp4', 'webm', 'mov', 'avi'].includes(extension)) {
-            detectedType = 'video';
-        } else if (contentType.includes('audio') || ['mp3', 'wav', 'ogg'].includes(extension)) {
-            detectedType = 'audio';
-        } else if (contentType.includes('pdf') || contentType.includes('application')) {
-            detectedType = 'file';
-        }
-
-        const params = {
-            Bucket: bucketName,
-            Key: key,
-            Body: file,
-            ContentType: contentType
-            // ACL removido pois R2 gerencia isso pelo Public Access
-        };
-
-        console.log(`[Upload R2] Iniciando envio para: ${publicDomain}/${key}`);
-
-        return new Promise((resolve, reject) => {
-            const upload = s3.upload(params);
-            const stopWatchingUpload = watchConversationUpload(upload, folder);
-
-            upload.on('httpUploadProgress', (evt) => {
-                const percent = parseInt((evt.loaded * 100) / evt.total);
-                console.log(`Progresso: ${percent}%`);
-            });
-
-            upload.send((err, data) => {
-                stopWatchingUpload();
-                if (err) {
-                    console.error("❌ ERRO NO UPLOAD R2:", err);
-                    window.platformAlert(`Falha no upload. Verifique o Console.`);
-                    reject(err);
-                } else {
-                    // Monta o Link Final que vai aparecer no site
-                    const finalUrl = `${publicDomain}/${key}`;
-                    console.log("✅ Upload Sucesso! Link Público:", finalUrl);
-                    
-                    resolve({
-                        url: finalUrl, 
-                        type: detectedType,
-                        name: uniqueFileName
-                    });
-                }
-            });
-        });
-    };
+    const uploadToCustomDrive=async(file,folderPath='Community/')=>platformSignedUpload(file,folderPath);
 
     // --- MINI PLAYER DE ÁUDIO (DESIGN CLONE PIXEL PERFECT DA IMAGEM) ---
     const MiniAudioPlayer = ({ src, isMe }) => {
@@ -6681,6 +5768,7 @@ const NotificationBell = ({ db, user }) => {
         return () => document.removeEventListener("mousedown", handleClickOutside);
     }, []);
 
+    const markAsRead=async(id)=>{if(!user?.uid)return;try{await updateDoc(doc(db,'system_notifications',id),{readBy:arrayUnion(user.uid)});setNotifications(old=>old.map(n=>n.id===id?{...n,readBy:[...new Set([...(n.readBy||[]),user.uid])]}:n));}catch(e){console.warn('Não foi possível marcar a notificação:',e.message);}};
     // Nova função: Marca todas as notificações visíveis como lidas de uma vez
     const markAllAsRead = async () => {
         const unreadNotifs = notifications.filter(n => !(n.readBy || []).includes(user.uid));
@@ -8471,7 +7559,7 @@ const HomeSection = ({ user, courses, purchasedIds, userProgress, db, setView, o
         setIsIaTyping(true);
 
         try {
-            const backendUrl = "https://meu-backend-ia.vercel.app";
+            const backendUrl=platformAIEndpoint();
             const baseDeConhecimento = window.AemIaSystemPrompt || "";
             const enrolledCourses = myActiveCourses.map(c => c.title).join(', ');
             
@@ -8495,7 +7583,7 @@ const HomeSection = ({ user, courses, purchasedIds, userProgress, db, setView, o
             - Postar Comunidade: {"action": "post_community", "text": "MENSAGEM"}
             - Anotação Inteligente: {"action": "take_notes", "courseName": "NOME", "notes": "Resumo em HTML"}`;
 
-            const response = await fetch(`${backendUrl}/api/chat`, {
+            const response = await fetch(backendUrl, {
                 method: "POST", headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ message: `${context}\n\n[ALUNO]: ${textToSend}` })
             });
@@ -8591,8 +7679,8 @@ Retorne APENAS um array JSON puro (SEM crases, SEM formatação markdown), com e
   { "pergunta": "Texto da pergunta", "opcoes": ["Opção 1", "Opção 2", "Opção 3", "Opção 4"], "respostaCorreta": 0 }
 ]`;
 
-            const backendUrl = "https://meu-backend-ia.vercel.app";
-            const response = await fetch(`${backendUrl}/api/chat`, {
+            const backendUrl=platformAIEndpoint();
+            const response = await fetch(backendUrl, {
                 method: "POST", headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ message: prompt })
             });
@@ -8952,7 +8040,7 @@ Retorne APENAS um array JSON puro (SEM crases, SEM formatação markdown), com e
                                 </div>
                             </div>
                             <div className="grid grid-cols-7 gap-1 text-center mb-2">
-                                {['D','S','T','Q','Q','S','S'].map(d=><div key={d} className="text-[10px] text-slate-500 font-bold">{d}</div>)}
+                                {['D','S','T','Q','Q','S','S'].map((d,index)=><div key={index} className="text-[10px] text-slate-500 font-bold">{d}</div>)}
                             </div>
                             <div className="grid grid-cols-7 gap-1 text-center text-xs font-medium text-slate-300">
                                 {Array.from({length: 28}).map((_, i) => {
@@ -9271,14 +8359,14 @@ const CatalogSection = ({ onSelectCourse, onBuyCourse, purchasedIds = [], allCou
     }, [db, activeUser]);
 
     const getDiscountInfo = (itemId, itemType, originalPrice) => {
-        let price = typeof originalPrice === 'number' ? originalPrice : parseFloat(String(originalPrice || "0").replace(/\./g, '').replace(',', '.'));
+        let price = platformMoney(originalPrice);
         if (isNaN(price) || price <= 0) return { hasDiscount: false, originalPrice: price || 0, finalPrice: price || 0 };
 
         const promo = promotions.find(p => p.discountTargetId === itemId && p.discountTargetType === itemType);
         if (!promo) return { hasDiscount: false, originalPrice: price, finalPrice: price };
 
         if (promo.conditionType === 'buy_other') {
-            if (promo.conditionTargetType === 'course' && !purchasedCourses.includes(promo.conditionTargetId)) return { hasDiscount: false, originalPrice: price, finalPrice: price };
+            if (promo.conditionTargetType === 'course' && !purchasedIds.includes(promo.conditionTargetId)) return { hasDiscount: false, originalPrice: price, finalPrice: price };
             if (promo.conditionTargetType === 'product' && !purchasedProducts.includes(promo.conditionTargetId)) return { hasDiscount: false, originalPrice: price, finalPrice: price };
         }
 
@@ -11650,7 +10738,7 @@ function tabParseQuizReply(reply) {
 }
 async function tabGenerateQuiz(source, count=6, endpoint='') {
     if (String(source || '').trim().length < 60) throw Error('Adicione um texto de referência com pelo menos 60 caracteres.');
-    const url = endpoint || (typeof programmerValue === 'function' ? programmerValue('aiBackendUrl','https://meu-backend-ia.vercel.app/api/chat') : 'https://meu-backend-ia.vercel.app/api/chat');
+    const url = endpoint || (typeof programmerValue === 'function' ? programmerValue('aiBackendUrl',platformAIEndpoint()) : platformAIEndpoint());
     if (!tabSafeUrl(url)) throw Error('Configure o endereço HTTPS da IA.');
     const controller = new AbortController(), timeout = setTimeout(() => controller.abort(),90000);
     try {
@@ -11886,25 +10974,7 @@ function useCustomStudentTabs(user,purchasedIds=[],groups=[]){
             window.addEventListener('platform-pwa-state', update); displayMode.addEventListener('change', update); update();
             return () => { window.removeEventListener('platform-pwa-state', update); displayMode.removeEventListener('change', update); };
         }, []);
-        const handleInstallApp = async () => {
-            if (installBusy.current || installState === 'installed') return;
-            setInstallMessage('');
-            const promptEvent = window.deferredPrompt;
-            if (!promptEvent) {
-                const apple = /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
-                setInstallMessage(apple ? 'O iPhone/iPad não permite abrir a instalação por um botão do site.' : !window.isSecureContext ? 'A instalação precisa do endereço HTTPS da plataforma.' : 'O navegador ainda não disponibilizou a instalação. O app pode já estar instalado ou este navegador não oferecer a solicitação direta.');
-                return;
-            }
-            installBusy.current = true;
-            window.deferredPrompt = null;
-            setInstallState('prompting');
-            try {
-                await promptEvent.prompt();
-                const choice = await promptEvent.userChoice;
-                setInstallMessage(choice.outcome === 'accepted' ? 'Solicitação aceita. O navegador está concluindo a instalação.' : 'Instalação cancelada. Você pode continuar usando a plataforma normalmente.');
-            } catch (_) { setInstallMessage('Não foi possível abrir a instalação agora. Tente novamente quando o navegador disponibilizar.'); }
-            finally { installBusy.current = false; window.dispatchEvent(new Event('platform-pwa-state')); }
-        };
+        const handleInstallApp = async()=>{if(installBusy.current||installState==='installed')return;installBusy.current=true;setInstallMessage('');try{const result=await window.platformInstallApp();setInstallMessage(result.message);if(result.state==='installed')setInstallState('installed');}catch(e){setInstallMessage(e.message);}finally{installBusy.current=false;window.dispatchEvent(new Event('platform-pwa-state'));}};
        const [view, setView] = useState('home');
 
        const [selectedCourse, setSelectedCourse] = useState(null);
@@ -11954,7 +11024,7 @@ function useCustomStudentTabs(user,purchasedIds=[],groups=[]){
            pointsBalance: 0
        });
 
-       const BACKUP_ACCESS_TOKEN = "APP_USR-5078406563096978-100721-63ed85c89b2cb57e85109eb14514462c-336516116"; 
+        
        const [courseRecords, setAllCourses] = useState([]);
        const [purchasedIds, setPurchasedIds] = useState([]);
  const audienceState=useAudienceGroups();
@@ -11975,7 +11045,7 @@ function useCustomStudentTabs(user,purchasedIds=[],groups=[]){
            ...customTabState.tabs.map(tab=>({id:'custom:'+tab.id,label:tab.title,icon:LayoutGrid,badge:0}))
        ];
        const [loadingData, setLoadingData] = useState(true);
-       const [currentSettings, setCurrentSettings] = useState(settings || { mercadopagoAccessToken: BACKUP_ACCESS_TOKEN });
+       const [currentSettings, setCurrentSettings] = useState(settings || {});
 
 
        // =======================================================================
@@ -11997,108 +11067,14 @@ function useCustomStudentTabs(user,purchasedIds=[],groups=[]){
                return () => unsubPending();
            }, [db, user]);
 
-           const verifyPendingCoursePayments = async () => {
-               if (isCheckingCoursesRef.current || pendingCourseOrders.length === 0) return;
-               
-               const mpToken = currentSettings?.mercadoPagoAccessToken || currentSettings?.mercadopagoAccessToken || 'APP_USR-5078406563096978-100721-63ed85c89b2cb57e85109eb14514462c-336516116';
-               if (!mpToken) return;
-
-               isCheckingCoursesRef.current = true;
-
-               try {
-                   for (let order of pendingCourseOrders) {
-                       let mpStatus = null;
-                       let mpData = null;
-                       const mpId = order.mpPaymentId || order.paymentId || order.payment_id;
-                       
-                       if (mpId && mpId !== 'N/A') {
-                           const resId = await fetch(`https://api.mercadopago.com/v1/payments/${String(mpId).trim()}`, { 
-                               headers: { 'Authorization': `Bearer ${mpToken}` } 
-                           });
-                           if (resId.ok) { 
-                               mpData = await resId.json(); 
-                               mpStatus = String(mpData.status).toLowerCase(); 
-                           }
-                       }
-
-                       if (!mpStatus) {
-                           const am = String.fromCharCode(38);
-                           const searchUrl = `https://api.mercadopago.com/v1/payments/search?sort=date_created${am}criteria=desc${am}external_reference=${order.id}`;
-                           const resSearch = await fetch(searchUrl, { 
-                               headers: { 'Authorization': `Bearer ${mpToken}` } 
-                           });
-                           if (resSearch.ok) {
-                               const searchData = await resSearch.json();
-                               if (searchData.results && searchData.results.length > 0) { 
-                                   mpData = searchData.results[0]; 
-                                   mpStatus = String(mpData.status).toLowerCase(); 
-                               }
-                           }
-                       }
-
-                       if (mpStatus) {
-                           let novoStatus = order.status;
-                           if (['approved', 'accredited'].includes(mpStatus)) novoStatus = 'pago'; 
-                           else if (['rejected', 'cancelled', 'refunded', 'charged_back'].includes(mpStatus)) novoStatus = 'cancelado'; 
-                           
-                           if (novoStatus !== order.status) {
-                               let capaDoCurso = "https://images.unsplash.com/photo-1616469829941-c7200edec809?q=80&w=600";
-                               let precoDoCurso = order.valor || "0,00";
-                               let tituloDoCurso = order.courseTitle || "Seu Curso";
-
-                               try {
-                                   const cursoInfo = allCourses.find(c => c.id === order.courseId);
-                                   if (cursoInfo) {
-                                       if (cursoInfo.cover || cursoInfo.thumbnailUrl) capaDoCurso = cursoInfo.cover || cursoInfo.thumbnailUrl;
-                                       if (cursoInfo.title || cursoInfo.titulo) tituloDoCurso = cursoInfo.title || cursoInfo.titulo;
-                                   }
-                               } catch(e){}
-
-                               await updateDoc(doc(db, "transactions", order.id), { 
-                                   ...(novoStatus === 'pago' ? { paidAt: order.paidAt || mpData?.date_approved || serverTimestamp() } : {}),
-                                status: novoStatus, 
-                                   mpPaymentId: mpData ? String(mpData.id) : order.mpPaymentId, 
-                                   updatedAt: serverTimestamp() 
-                               });
-                               
-                               if (novoStatus === 'pago') {
-                                   if(showNotification) showNotification(`🎉 Pagamento aprovado! O curso "${tituloDoCurso}" já está liberado.`, "success");
-                                   
-                                   fetch("https://script.google.com/macros/s/AKfycbzyuxuOw0fx5YiAWuE_PaN8JE9VrupAStYQfKk6fFDMiLMn7BARtbLagoF3sPbhg9A/exec", {
-                                       method: "POST", mode: "no-cors", headers: { "Content-Type": "text/plain;charset=utf-8" },
-                                       body: JSON.stringify({
-                                           to: order.userEmail,
-                                           userName: order.userName || 'Aluno',
-                                           itemName: tituloDoCurso,
-                                           itemImage: capaDoCurso,
-                                           itemType: "course",
-                                           subject: "Seu Acesso foi Liberado!",
-                                           titleHeader: "ACESSO LIBERADO",
-                                           itemPrice: precoDoCurso,
-                                           message: `Parabéns, ${order.userName || 'Aluno'}! Seu acesso ao curso "${tituloDoCurso}" foi liberado com sucesso. O valor de R$ ${precoDoCurso} foi confirmado e você já pode iniciar sua jornada agora mesmo na plataforma.`
-                                       })
-                                   }).catch(e => console.log("Erro no e-mail: ", e));
-                                   
-                                   const qTrans = query(collection(db, "transactions"), where("userEmail", "==", user.email), where("status", "in", ["aprovado", "pago", "approved", "concluido", "concluído", "liberado"]));
-                                   const transSnapList = await getDocs(qTrans);
-                                   setPurchasedIds(transSnapList.docs.map(d => d.data().courseId));
-                               }
-                           }
-                       }
-                   }
-               } catch (error) {
-                   console.error("Erro na verificação automática de Cursos:", error);
-               } finally {
-                   isCheckingCoursesRef.current = false;
-               }
-           };
+           const verifyPendingCoursePayments = async()=>{if(isCheckingCoursesRef.current||!pendingCourseOrders.length||document.visibilityState==='hidden')return;isCheckingCoursesRef.current=true;try{for(const order of pendingCourseOrders.slice(0,20)){const data=await platformBackendRequest('payments',{action:'status',itemType:'course',orderId:order.id},currentSettings);if(data.status==='pago')showNotification('Pagamento confirmado. Seu curso foi liberado.','success');}}catch(e){console.warn('Não foi possível confirmar o pagamento:',e.message);}finally{isCheckingCoursesRef.current=false;}};
 
            useEffect(() => {
                let interval;
                if (pendingCourseOrders.length > 0) {
                    interval = setInterval(() => {
                        verifyPendingCoursePayments();
-                   }, 5000);
+                   }, 15000);
                }
                return () => clearInterval(interval);
            }, [pendingCourseOrders, currentSettings]);
@@ -12221,343 +11197,9 @@ function useCustomStudentTabs(user,purchasedIds=[],groups=[]){
            document.documentElement.setAttribute('data-theme', 'dark');
        }, []);
 
-      const generateCertificate = async (courseId, courseName, courseObj, progressInfo) => {
-        const modelo = certificados.find(c => c.courseId === courseId);
-        if (!modelo || !modelo.bgUrl) return showNotification("Erro: Modelo de certificado não encontrado.", "error");
+      const generateCertificate = async(courseId,courseName,courseObj,progressInfo)=>{try{const template=certificateTemplateFor(certificates,courseId),canvas=await certificateRenderCanvas(template,certificateStudentData(updatedUser||user,courseObj||{title:courseName},progressInfo?.completedAt));certificateDownload(canvas.toDataURL('image/jpeg',1),'Certificado_'+courseName);showNotification('Certificado gerado.','success');}catch(e){showNotification(e.message,'error');}};
 
-        showNotification("Gerando arquivo de alta definição...", "info");
-        const canvas = document.createElement('canvas');
-        const ctx = canvas.getContext('2d');
-        const img = new Image();
-        img.crossOrigin = "Anonymous";
-        img.src = modelo.bgUrl;
-
-        img.onload = async () => {
-            let finalUser = user;
-            try {
-                if (typeof db !== 'undefined') {
-                    const docSnap = await getDoc(doc(db, "users", user.uid));
-                    if (docSnap.exists()) finalUser = { ...user, ...docSnap.data() };
-                }
-            } catch(e) {}
-
-            canvas.width = img.width;
-            canvas.height = img.height;
-            const w = canvas.width;
-            const h = canvas.height;
-            
-            ctx.drawImage(img, 0, 0);
-
-            if (modelo.fields && modelo.fields.length > 0) {
-                const ratio = w / 1000; 
-                
-                // 1. IMAGENS (LOGOS/SELOS)
-                const imageFields = modelo.fields.filter(f => f.type === 'image');
-                for (let field of imageFields) {
-                    if (!field.url) continue;
-                    try {
-                        const imgMacro = new Image();
-                        imgMacro.crossOrigin = "Anonymous";
-                        imgMacro.src = field.url;
-                        await new Promise((resolve) => { imgMacro.onload = resolve; imgMacro.onerror = resolve; });
-                        
-                        let pxX = (parseFloat(field.x) / 100) * w;
-                        let pxY = (parseFloat(field.y) / 100) * h;
-                        let targetW = (parseFloat(field.width) || 150) * ratio;
-                        let targetH = imgMacro.height * (targetW / imgMacro.width);
-                        
-                        ctx.save();
-                        ctx.translate(pxX, pxY);
-                        ctx.rotate((field.rotation || 0) * Math.PI / 180);
-                        ctx.drawImage(imgMacro, -targetW / 2, -targetH / 2, targetW, targetH);
-                        ctx.restore();
-                    } catch(e) {}
-                }
-
-                // 2. LINHAS GEOMÉTRICAS (NOVO)
-                const lineFields = modelo.fields.filter(f => f.type === 'line');
-                for (let field of lineFields) {
-                    const pxX = (parseFloat(field.x) / 100) * w;
-                    const pxY = (parseFloat(field.y) / 100) * h;
-                    const targetW = (parseFloat(field.width) || 300) * ratio;
-                    const targetH = (parseFloat(field.height) || 2) * ratio;
-
-                    ctx.save();
-                    ctx.translate(pxX, pxY);
-                    ctx.rotate((field.rotation || 0) * Math.PI / 180);
-                    ctx.fillStyle = field.color || "#000000";
-                    ctx.fillRect(-targetW / 2, -targetH / 2, targetW, targetH);
-                    ctx.restore();
-                }
-
-                // 3. TEXTOS
-                const textFields = modelo.fields.filter(f => f.type !== 'image' && f.type !== 'line');
-                for (let field of textFields) {
-                    let pxX = (parseFloat(field.x) / 100) * w;
-                    let pxY = (parseFloat(field.y) / 100) * h;
-                    const fontSizePx = (parseFloat(field.fontSize) || 30) * ratio;
-
-                    let type = field.type || "";
-                    let originalText = String(field.label || field.text || "");
-                    let cleanText = originalText.toUpperCase().trim();
-
-                    let isName = type.includes('studentName') || cleanText.includes("NOME DO ALUNO") || cleanText === "NOME" || cleanText.includes("MACRO_NOME");
-                    let isCPF = type.includes('cpf') || cleanText.includes("CPF");
-                    let isCourse = type.includes('courseName') || cleanText.includes("NOME DO CURSO");
-                    let isDate = type.includes('date') || cleanText.includes("DATA");
-                    let isSignature = type.includes('signature') || cleanText.includes("ASSINATURA");
-                    let isDescription = type.includes('completionText') || cleanText.includes("TEXTO CONCLUS");
-                    
-                    let fontWeight = isSignature ? 'normal' : (field.fontWeight || 'bold');
-                    let fontStyle = isSignature ? 'italic' : 'normal';
-                    let fontFamily = isSignature ? "'Brush Script MT', 'Dancing Script', 'Great Vibes', cursive" : (field.fontFamily || 'Arial');
-                    
-                    ctx.textAlign = "center";
-                    ctx.textBaseline = "middle"; 
-                    ctx.fillStyle = field.color || "#000000";
-                    ctx.globalCompositeOperation = "multiply"; 
-                    ctx.globalAlpha = 0.92; 
-                    ctx.shadowColor = field.color || "#000000"; 
-                    ctx.shadowBlur = 1.5; 
-                    
-                    const alunoData = finalUser || user || {};
-                    const nomeAluno = alunoData.name || alunoData.displayName || user.displayName || "Aluno";
-                    const cpfStr = alunoData.cpf || "CPF não cadastrado";
-                    const cName = courseName || "Curso sem título";
-                    
-                    let dateStr = new Date().toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' });
-                    if (progressInfo?.completedAt) {
-                        const d = progressInfo.completedAt.seconds ? new Date(progressInfo.completedAt.seconds * 1000) : new Date(progressInfo.completedAt);
-                        if (!isNaN(d.getTime())) dateStr = d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' });
-                    }
-
-                    let textoFinal = originalText;
-                    if (isName) textoFinal = nomeAluno;
-                    else if (isCPF) textoFinal = `CPF: ${cpfStr}`;
-                    else if (isCourse) textoFinal = cName;
-                    else if (isDate) textoFinal = `Conclusão: ${dateStr}`;
-                    else if (isSignature) textoFinal = nomeAluno; 
-                    else if (isDescription) textoFinal = `Certificamos que o aluno(a) ${nomeAluno} concluiu com êxito o curso ${cName} no dia ${dateStr}.`;
-                    else if (field.type === 'custom_macro') {
-                        const macroName = field.label.trim();
-                        textoFinal = courseObj && courseObj[macroName] ? courseObj[macroName] : (alunoData && alunoData[macroName] ? alunoData[macroName] : ""); 
-                    } else if (field.type === 'fixedText' || field.type === 'customText') {
-                        textoFinal = field.label;
-                    }
-
-                    if (!textoFinal || String(textoFinal).trim() === "") continue;
-
-                    let maxAvailableWidth = Math.min(pxX, w - pxX) * 2 * 0.90; 
-
-                    ctx.save();
-                    ctx.translate(pxX, pxY);
-                    ctx.rotate((field.rotation || 0) * Math.PI / 180);
-
-                    if (isDescription || textoFinal.length > 50) {
-                        ctx.font = `${fontStyle} ${fontWeight} ${fontSizePx}px ${fontFamily}`;
-                        const words = textoFinal.split(' ');
-                        let line = ''; const lines = [];
-
-                        for(let n = 0; n < words.length; n++) {
-                            const testLine = line + words[n] + ' ';
-                            const metrics = ctx.measureText(testLine);
-                            if (metrics.width > maxAvailableWidth && n > 0) { 
-                                lines.push(line.trim()); line = words[n] + ' '; 
-                            } else { line = testLine; }
-                        }
-                        lines.push(line.trim());
-                        
-                        let currentY = 0 - (((lines.length - 1) * (fontSizePx * 1.5)) / 2);
-                        for(let i = 0; i < lines.length; i++) {
-                            ctx.fillText(lines[i], 0, currentY);
-                            currentY += (fontSizePx * 1.5);
-                        }
-                    } else {
-                        let currentFontSize = fontSizePx;
-                        ctx.font = `${fontStyle} ${fontWeight} ${currentFontSize}px ${fontFamily}`;
-                        let metrics = ctx.measureText(textoFinal);
-                        
-                        while (metrics.width > maxAvailableWidth && currentFontSize > 10) {
-                            currentFontSize -= 1;
-                            ctx.font = `${fontStyle} ${fontWeight} ${currentFontSize}px ${fontFamily}`;
-                            metrics = ctx.measureText(textoFinal);
-                        }
-                        ctx.fillText(textoFinal, 0, 0);
-                    }
-                    ctx.restore();
-                }
-                ctx.globalCompositeOperation = "source-over";
-                ctx.globalAlpha = 1.0;
-                ctx.shadowBlur = 0;
-            }
-
-            try {
-                const dataUrl = canvas.toDataURL('image/jpeg', 1.0); 
-                const link = document.createElement('a');
-                link.download = `Certificado_${courseName.replace(/\s+/g, '_')}.jpg`;
-                link.href = dataUrl;
-                document.body.appendChild(link);
-                link.click();
-                document.body.removeChild(link);
-                showNotification("Certificado baixado!", "success");
-            } catch (err) {
-                console.error(err);
-            }
-        };
-    };
-
-       useEffect(() => {
-            const checkPaymentReturn = async () => {
-                const params = new URLSearchParams(window.location.search);
-                
-                // 1. CAPTURA OS DADOS QUE O MERCADO PAGO ENVIA NA URL
-                const paymentStatus = params.get('payment_status');
-                const mpOrderStatus = params.get('mp_order_status');
-                const paymentId = params.get('payment_id') || params.get('collection_id');
-
-                // =========================================================
-                // 2. VERIFICA COMPRA DE CURSOS
-                // =========================================================
-                if (paymentStatus === 'approved') {
-                    const lastTransId = localStorage.getItem('last_transaction_id');
-                    if (lastTransId && db) {
-                        try {
-                            const transRef = doc(db, "transactions", lastTransId);
-                            const transSnap = await getDoc(transRef);
-                            
-                            // 👇 A MÁGICA AQUI: Lê o documento do banco de dados primeiro
-                            if(transSnap.exists()) {
-                                const transData = transSnap.data();
-                                
-                                // 👇 VERIFICA SE O STATUS NO BANCO AINDA É PENDENTE 👇
-                                // Só executa o e-mail e atualiza se ainda não estiver "pago"
-                                if (transData.status !== 'pago' && transData.status !== 'approved' && transData.status !== 'liberado') {
-                                    
-                                    let nomeDoCurso = transData.courseTitle || "Seu Curso";
-                                    let capaDoCurso = "https://images.unsplash.com/photo-1616469829941-c7200edec809?q=80&w=600";
-                                    
-                                    const cursoInfo = allCourses.find(c => c.id === transData.courseId);
-                                    if (cursoInfo && (cursoInfo.cover || cursoInfo.thumbnailUrl)) {
-                                        capaDoCurso = cursoInfo.cover || cursoInfo.thumbnailUrl;
-                                    }
-
-                                    // Confirma o pagamento com o provedor antes de liberar a compra.
-                                    if (!paymentId || transData.userId !== user.uid) throw new Error('Pagamento ainda não confirmado.');
-                                    const approvalResponse = await fetch(`https://api.mercadopago.com/v1/payments/${encodeURIComponent(paymentId)}`, { headers: { Authorization: `Bearer ${currentSettings.mercadopagoAccessToken || currentSettings.mercadoPagoAccessToken || BACKUP_ACCESS_TOKEN}` } });
-                                    const approvedPayment = await approvalResponse.json();
-                                    if (!approvalResponse.ok || approvedPayment.status !== 'approved' || String(approvedPayment.external_reference) !== String(lastTransId) || Math.abs(Number(approvedPayment.transaction_amount) - Number(transData.valor)) > 0.01) throw new Error('Aguardando confirmação do pagamento.');
-                                    await updateDoc(transRef, {
-                                        paidAt: transData.paidAt || approvedPayment.date_approved || serverTimestamp(), 
-                                        status: 'pago',
-                                        mpPaymentId: paymentId || 'N/A', 
-                                        updatedAt: serverTimestamp() 
-                                    });
-                                    
-                                    if(showNotification) showNotification("Pagamento do curso confirmado com sucesso!", "success");
-                                    
-                                    // Atualiza a tela
-                                    const qTrans = query(collection(db, "transactions"), where("userEmail", "==", user.email), where("status", "in", ["aprovado", "pago", "approved", "concluido", "concluído", "liberado"]));
-                                    const transSnapList = await getDocs(qTrans);
-                                    setPurchasedIds(transSnapList.docs.map(d => d.data().courseId));
-
-                                   // 👇 DISPARA O E-MAIL DE ACESSO LIBERADO (CURSO) 👇
-                                    fetch("https://script.google.com/macros/s/AKfycbzyuxuOw0fx5YiAWuE_PaN8JE9VrupAStYQfKk6fFDMiLMn7BARtbLagoF3sPbhg9A/exec", {
-                                        method: "POST",
-                                        mode: "no-cors", 
-                                        headers: { "Content-Type": "text/plain;charset=utf-8" },
-                                        body: JSON.stringify({
-                                            to: user.email,
-                                            userName: user.displayName || 'Aluno',
-                                            itemName: nomeDoCurso,
-                                            itemImage: capaDoCurso,
-                                            itemType: "course",
-                                            subject: "Seu Acesso foi Liberado!",
-                                            titleHeader: "ACESSO LIBERADO",
-                                            itemPrice: transData.valor || "0,00",
-                                            message: `Parabéns, seu acesso ao curso "${nomeDoCurso}" foi liberado com sucesso! Você já pode iniciar sua jornada agora mesmo na plataforma.`
-                                        })
-                                    }).catch(e => console.log("E-mail Curso disparado: ", e));
-                                }
-                            }
-                            
-                            // Limpa o cache e remove os parâmetros feios da URL
-                            localStorage.removeItem('last_transaction_id');
-                            window.history.replaceState({}, document.title, window.location.pathname);
-                            
-                        } catch (e) { console.error("Erro ao aprovar curso:", e); }
-                    }
-                }
-
-                // =========================================================
-                // 3. VERIFICA COMPRA DO MARKETPLACE (LOJA DE PRODUTOS)
-                // =========================================================
-                if (mpOrderStatus === 'approved') {
-                    const lastOrderId = localStorage.getItem('last_mp_order_id');
-                    if (lastOrderId && db) {
-                        try {
-                            const orderRef = doc(db, "marketplace_orders", lastOrderId);
-                            const orderSnap = await getDoc(orderRef);
-                            
-                            // 👇 LÊ O BANCO DA LOJA PRIMEIRO 👇
-                            if(orderSnap.exists()) {
-                                const orderData = orderSnap.data();
-                                
-                                // 👇 VERIFICA SE O PRODUTO AINDA É PENDENTE ANTES DE ENVIAR E-MAIL 👇
-                                if (orderData.status !== 'pago' && orderData.status !== 'approved' && orderData.status !== 'liberado') {
-                                    
-                                    let nomeDoProduto = orderData.productTitle || "Seu Produto";
-                                    let capaDoProduto = "https://images.unsplash.com/photo-1616469829941-c7200edec809?q=80&w=600";
-
-                                    // BUSCA INFO ADICIONAL DO PRODUTO PARA O E-MAIL
-                                    try {
-                                        const prodSnap = await getDoc(doc(db, "marketplace_products", orderData.productId));
-                                        if (prodSnap.exists()) {
-                                            const pData = prodSnap.data();
-                                            if (pData.images && pData.images.length > 0) capaDoProduto = pData.images[0];
-                                            if (pData.title) nomeDoProduto = pData.title;
-                                        }
-                                    } catch(e){}
-
-                                    // ATUALIZA NO BANCO COMO LIBERADO
-                                    await updateDoc(orderRef, { 
-                                        status: 'pago',
-                                        mpPaymentId: paymentId || 'N/A', 
-                                        updatedAt: serverTimestamp() 
-                                    });
-                                    
-                                    if(showNotification) showNotification("Sua compra na Loja foi confirmada!", "success");
-
-                                    // 👇 DISPARA O E-MAIL DE ACESSO LIBERADO (PRODUTO LOJA) 👇
-                                    fetch("https://script.google.com/macros/s/AKfycbzyuxuOw0fx5YiAWuE_PaN8JE9VrupAStYQfKk6fFDMiLMn7BARtbLagoF3sPbhg9A/exec", {
-                                        method: "POST",
-                                        mode: "no-cors",
-                                        headers: { "Content-Type": "text/plain;charset=utf-8" },
-                                        body: JSON.stringify({
-                                            to: user.email,
-                                            userName: user.displayName || 'Aluno',
-                                            itemName: nomeDoProduto,
-                                            itemImage: capaDoProduto,
-                                            itemType: "product",
-                                            subject: "Sua Compra foi Liberada!",
-                                            titleHeader: "PRODUTO LIBERADO",
-                                            itemPrice: orderData.valor || "0,00",
-                                            message: `Olá, ${user.displayName || 'Aluno'}! Seu produto "${nomeDoProduto}" adquirido em nossa loja oficial já está disponível para acesso na sua área do aluno. O valor de R$ ${orderData.valor || '---'} foi confirmado.`
-                                        })
-                                    }).catch(e => console.log("E-mail Loja disparado: ", e));
-                                }
-                            }
-                            
-                            // Limpa o cache e remove os parâmetros feios da URL
-                            localStorage.removeItem('last_mp_order_id');
-                            window.history.replaceState({}, document.title, window.location.pathname);
-
-                        } catch (e) { console.error("Erro ao aprovar produto:", e); }
-                    }
-                }
-            };
-            
-            checkPaymentReturn();
-        }, [user, db, allCourses]);
+       useEffect(()=>{const params=new URLSearchParams(location.search);const course=params.get('payment_status'),product=params.get('mp_order_status');if(!course&&!product)return;const itemType=product?'product':'course',key=product?'last_mp_order_id':'last_transaction_id',orderId=localStorage.getItem(key);if(!orderId)return;platformBackendRequest('payments',{action:'status',itemType,orderId},currentSettings).then(data=>{showNotification(data.status==='pago'?'Pagamento confirmado. Acesso liberado.':'O pagamento continua em confirmação.',data.status==='pago'?'success':'info');if(data.status==='pago')localStorage.removeItem(key);}).catch(e=>showNotification(e.message,'error'));for(const key of ['payment_status','mp_order_status','payment_id','collection_id','status','external_reference','preference_id','merchant_order_id','site_id','processing_mode','merchant_account_id'])params.delete(key);history.replaceState({},document.title,location.pathname+(params.size?'?'+params.toString():''));},[user.uid]);
 
        useEffect(() => {
            if(!db || !user) return;
@@ -13215,174 +11857,6 @@ function InactivityGate({user,children}) {
 // =======================================================================
     // MOTOR DE VERIFICAÇÃO AUTOMÁTICA DE CURSOS (RODANDO NO ALUNO)
     // =======================================================================
-    const [pendingCourseOrders, setPendingCourseOrders] = useState([]);
-    const isCheckingCoursesRef = useRef(false);
-
-    // 1. Fica ouvindo no Firebase se o aluno tem algum curso pendente
-    useEffect(() => {
-        if (!db || !user) return;
-        const qPending = query(
-            collection(db, "transactions"), 
-            where("userId", "==", user.uid), 
-            where("status", "in", ["pendente", "pending", "in_process"])
-        );
-        const unsubPending = onSnapshot(qPending, snap => {
-            setPendingCourseOrders(snap.docs.map(d => ({id: d.id, ...d.data()})));
-        });
-        return () => unsubPending();
-    }, [db, user]);
-
-    // 2. A função que vai secretamente ao Mercado Pago verificar se o PIX do curso foi pago
-    const verifyPendingCoursePayments = async () => {
-        if (isCheckingCoursesRef.current || pendingCourseOrders.length === 0) return;
-        
-        // Puxa a chave de acesso do Mercado Pago configurada no Painel Admin
-        const mpToken = genSettings?.mercadoPagoAccessToken || genSettings?.mercadopagoAccessToken || 'APP_USR-5078406563096978-100721-63ed85c89b2cb57e85109eb14514462c-336516116';
-        if (!mpToken) return;
-
-        isCheckingCoursesRef.current = true;
-
-        try {
-            for (let order of pendingCourseOrders) {
-                let mpStatus = null;
-                let mpData = null;
-
-                const mpId = order.mpPaymentId || order.paymentId || order.payment_id;
-                
-                // Tentativa 1: Busca pelo ID direto do Mercado Pago (se já existir)
-                if (mpId && mpId !== 'N/A') {
-                    const resId = await fetch(`https://api.mercadopago.com/v1/payments/${String(mpId).trim()}`, { 
-                        headers: { 'Authorization': `Bearer ${mpToken}` } 
-                    });
-                    if (resId.ok) { 
-                        mpData = await resId.json(); 
-                        mpStatus = String(mpData.status).toLowerCase(); 
-                    }
-                }
-
-                // Tentativa 2: MÁGICA! Busca pelo seu ID do Firebase (external_reference) igual no sistema de Produtos
-                if (!mpStatus) {
-                    const searchUrl = `https://api.mercadopago.com/v1/payments/search?sort=date_created&criteria=desc&external_reference=${order.id}`;
-                    const resSearch = await fetch(searchUrl, { 
-                        headers: { 'Authorization': `Bearer ${mpToken}` } 
-                    });
-                    if (resSearch.ok) {
-                        const searchData = await resSearch.json();
-                        if (searchData.results && searchData.results.length > 0) { 
-                            mpData = searchData.results[0]; 
-                            mpStatus = String(mpData.status).toLowerCase(); 
-                        }
-                    }
-                }
-
-                // Se encontrou o status real no Mercado Pago, faz a liberação
-                if (mpStatus) {
-                    let novoStatus = order.status;
-                    // Traduz o status do MP para o nosso sistema
-                    if (['approved', 'accredited'].includes(mpStatus)) novoStatus = 'pago'; 
-                    else if (['rejected', 'cancelled', 'refunded', 'charged_back'].includes(mpStatus)) novoStatus = 'cancelado'; 
-                    
-                    // Se o status mudou para PAGO, atualiza no Banco de Dados
-                        if (novoStatus !== order.status) {
-                            
-                            // 👇 CÓDIGO NOVO: PEGANDO A FOTO DO CURSO 👇
-                            let capaDoCurso = "https://images.unsplash.com/photo-1616469829941-c7200edec809?q=80&w=600";
-                            try {
-                                const cursoInfo = allCourses.find(c => c.id === order.courseId);
-                                if (cursoInfo && (cursoInfo.cover || cursoInfo.thumbnailUrl)) {
-                                    capaDoCurso = cursoInfo.cover || cursoInfo.thumbnailUrl;
-                                }
-                            } catch(e){}
-                            // 👆 FIM DA CAPA 👇
-
-                            await updateDoc(doc(db, "transactions", order.id), { 
-                                ...(novoStatus === 'pago' ? { paidAt: order.paidAt || mpData?.date_approved || serverTimestamp() } : {}),
-                                status: novoStatus, 
-                                mpPaymentId: mpData ? String(mpData.id) : order.mpPaymentId, 
-                                updatedAt: serverTimestamp() 
-                            });
-                            
-                            // Notifica o aluno e já libera!
-                            if (novoStatus === 'pago') {
-                                if(showNotification) showNotification(`🎉 Pagamento aprovado! O curso "${order.courseTitle || 'Adquirido'}" já está liberado.`, "success");
-                                
-                               // 👇 DISPARO DE E-MAIL ANIMADO (CURSO) 👇
-                                const platformName = currentSettings?.siteName || "Nossa Plataforma";
-                                const logoUrl = currentSettings?.siteLogoUrl || currentSettings?.logoUrl || "";
-                                const linkPlataforma = getPlatformStudentUrl();
-
-                                const compraCursoHTML = `
-                                    <div style="background-color: #030303; padding: 40px 20px; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;">
-                                        <div style="max-width: 600px; margin: 0 auto; background: linear-gradient(145deg, #111111, #0a0a0f); padding: 40px; border-radius: 24px; box-shadow: 0 20px 50px rgba(79,70,229,0.2); border: 1px solid #333333;">
-                                            
-                                            <!-- Logo do Site -->
-                                            ${logoUrl ? `<div style="text-align: center; margin-bottom: 30px;"><img src="${logoUrl}" alt="${platformName}" style="max-height: 80px; max-width: 250px; object-fit: contain;"></div>` : ''}
-
-                                            <!-- GIF Animado de Celebração -->
-                                            <div style="text-align: center; margin-bottom: 25px;">
-                                                <img src="https://media.giphy.com/media/v1.Y2lkPTc5MGI3NjExODg3c2MwYnd1ajMwOXh3ZmV1eHN2NmhjdWV1OG12eXB2dTRudHltaSZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/artj92V8o75VPL7AeQ/giphy.gif" alt="Festa" style="width: 100px; border-radius: 50%; box-shadow: 0 0 25px rgba(16, 185, 129, 0.3);">
-                                            </div>
-
-                                            <h1 style="color: #34d399; margin: 0 0 15px 0; font-size: 28px; font-weight: 900; text-align: center; text-transform: uppercase; letter-spacing: 1px;">Acesso Liberado! 🎉</h1>
-                                            
-                                            <p style="color: #cbd5e1; font-size: 16px; margin-bottom: 30px; text-align: center;">Olá, <strong style="color: #ffffff;">${order.userName || 'Aluno'}</strong>! Que incrível ter você com a gente.</p>
-                                            
-                                            <!-- Card do Curso com Borda Gradiente -->
-                                            <div style="background: linear-gradient(to right, #4f46e5, #9333ea); padding: 3px; border-radius: 16px; margin-bottom: 30px;">
-                                                <div style="background-color: #0f0f13; padding: 25px; border-radius: 14px; text-align: center;">
-                                                    <img src="${capaDoCurso}" alt="Capa do Curso" style="width: 100%; max-height: 250px; object-fit: cover; border-radius: 10px; margin-bottom: 15px; border: 1px solid rgba(255,255,255,0.1);">
-                                                    <h2 style="color: #ffffff; margin: 0 0 10px 0; font-size: 22px;">${tituloDoCurso}</h2>
-                                                    <span style="display: inline-block; background-color: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16, 185, 129, 0.3); color: #34d399; padding: 5px 15px; border-radius: 50px; font-size: 14px; font-weight: bold;">R$ ${precoDoCurso}</span>
-                                                </div>
-                                            </div>
-                                            
-                                            <p style="color: #94a3b8; font-size: 15px; line-height: 1.6; margin-bottom: 35px; text-align: center;">O seu portal de conhecimento já está desbloqueado. Clique no botão abaixo para ir direto para a sua área de membros e começar a aprender agora mesmo!</p>
-                                            
-                                            <!-- Botão de Acesso Estilizado -->
-                                            <div style="text-align: center;">
-                                                <a href="${linkPlataforma}" style="display: inline-block; background: linear-gradient(to right, #4f46e5, #7e22ce); color: #ffffff; text-decoration: none; font-size: 16px; font-weight: 900; padding: 18px 40px; border-radius: 50px; box-shadow: 0 10px 20px rgba(126, 34, 206, 0.4); text-transform: uppercase; letter-spacing: 1px;">Acessar Plataforma 🚀</a>
-                                            </div>
-                                            
-                                            <p style="color: #475569; font-size: 12px; margin-top: 40px; text-align: center;">Equipe ${platformName}</p>
-                                        </div>
-                                    </div>
-                                `;
-
-                                fetch("https://script.google.com/macros/s/AKfycbzyuxuOw0fx5YiAWuE_PaN8JE9VrupAStYQfKk6fFDMiLMn7BARtbLagoF3sPbhg9A/exec", {
-                                    method: "POST", mode: "no-cors", headers: { "Content-Type": "text/plain;charset=utf-8" },
-                                    body: JSON.stringify({
-                                        type: "transactional",
-                                        to: order.userEmail,
-                                        subject: `Acesso Liberado: ${tituloDoCurso} 🎉`,
-                                        body: compraCursoHTML,
-                                        senderName: `Equipe ${platformName}`
-                                    })
-                                }).catch(e => console.log("Erro no e-mail: ", e));
-                                // 👆 FIM DO DISPARO 👇
-
-                            }
-                        }
-                }
-            }
-        } catch (error) {
-            console.error("Erro na verificação automática de Cursos:", error);
-        } finally {
-            isCheckingCoursesRef.current = false;
-        }
-    };
-
-    // 3. O RELÓGIO: Roda a cada 5 segundos SE o aluno tiver uma compra aguardando
-    useEffect(() => {
-        let interval;
-        if (pendingCourseOrders.length > 0) {
-            interval = setInterval(() => {
-                verifyPendingCoursePayments();
-            }, 5000); // 5000ms = 5 segundos
-        }
-        return () => clearInterval(interval);
-    }, [pendingCourseOrders, genSettings]);
-
-       
       // 👇 MOTOR DE ATUALIZAÇÃO DA IA (BLINDADO PARA QUALQUER VARIÁVEL DO ADMIN) 👇
        useEffect(() => {
            if (genSettings) {
@@ -13399,7 +11873,7 @@ function InactivityGate({user,children}) {
                window.AemPlatformName = genSettings.siteName || "nossa plataforma";
 
                // 👇 INÍCIO: CONSTRUINDO A BASE DE CONHECIMENTO E PERSONALIDADE 👇
-               let baseDeConhecimento = "";
+               let baseDeConhecimento=String(genSettings.aiCustomText||'');if(genSettings.aiLinks)baseDeConhecimento+='\n\n[LINKS DE REFERÊNCIA]\n'+String(genSettings.aiLinks);for(const document of genSettings.aiDocuments||[])if(document.text)baseDeConhecimento+='\n\n[DOCUMENTO: '+document.name+']\n'+document.text;
                
                if (genSettings.aiKnowledgeBlocks && genSettings.aiKnowledgeBlocks.length > 0) {
                    genSettings.aiKnowledgeBlocks.forEach(block => {
@@ -13545,34 +12019,11 @@ function InactivityGate({user,children}) {
               const docRef = doc(db, "config", "general_settings");
               unsubSettings = onSnapshot(docRef, (docSnap) => {
                   if (docSnap.exists()) {
-                      const data = docSnap.data();
-                      setGenSettings(data);
+                      const data=platformCleanSettings(docSnap.data());window.platformPublicSettings=data;setGenSettings(data);platformHydrateAIConfiguration(data).then(hydrated=>{if(window.platformPublicSettings===data)setGenSettings(hydrated);});
 
                       // Atualiza o tema e o manifesto
                       if (window.applyTheme) window.applyTheme(data);
                       if (window.applyPwaManifest) window.applyPwaManifest(data);
-
-                      // MOTOR DE IDENTIDADE DINÂMICA (FAVICON = LOGÓTIPO DO SITE)
-                      const siteLogo = data.siteLogoUrl || data.logoUrl || data.pwaIconUrl;
-                      if (siteLogo) {
-                          // 1. Atualiza ou cria o Favicon (Ícone da Aba)
-                          let favicon = document.querySelector('link[rel="icon"]');
-                          if (!favicon) {
-                              favicon = document.createElement('link');
-                              favicon.rel = 'icon';
-                              document.head.appendChild(favicon);
-                          }
-                          favicon.href = siteLogo;
-
-                          // 2. Atualiza ou cria o Apple Touch Icon (iOS)
-                          let appleIcon = document.querySelector('link[rel="apple-touch-icon"]');
-                          if (!appleIcon) {
-                              appleIcon = document.createElement('link');
-                              appleIcon.rel = 'apple-touch-icon';
-                              document.head.appendChild(appleIcon);
-                          }
-                          appleIcon.href = data.pwaIconUrl || siteLogo;
-                      }
 
                       setTimeout(() => {
                           if (window.initMeusCursosCarousel) {
@@ -13613,12 +12064,12 @@ function InactivityGate({user,children}) {
                  return () => { unsubCerts(); unsubCourses(); unsubPromos(); if(unsubSettings) unsubSettings(); };
               } catch(e) { console.log("Erro listeners firestore", e); }
           }
-      }, []);
+      }, [user?.uid]);
 
       // 2. MODO PREVIEW AO VIVO E HANDSHAKE (Gatilho Inteligente)
       useEffect(() => {
           const handleMessage = (event) => {
-              if (event.data && event.data.type === 'UPDATE_PREVIEW') {
+              if (isPreview && event.source===window.parent && event.data && event.data.type === 'UPDATE_PREVIEW') {
                   const newSettings = event.data.settings;
                   
                   // Forçamos a leitura das variáveis corretas caso os nomes venham diferentes
@@ -14126,7 +12577,7 @@ function InactivityGate({user,children}) {
             typing.classList.remove('hidden');
         }
         
-        const backendUrl = "https://meu-backend-ia.vercel.app";
+        const backendUrl=window.platformAIEndpoint();
         const requestController = new AbortController();
         iaRequests.add(requestController); 
         
@@ -14169,7 +12620,7 @@ JSON Permitidos (Siga exatamente estes formatos):
             
             const payload = `${systemPrompt}\n\n[HISTÓRICO DA CONVERSA]:\n${chatHistory.join('\n')}\n\n[NOVA MENSAGEM DO ALUNO]:\n${userMsg}\nResponda de forma natural e contínua:`;
             
-            const response = await fetch(`${backendUrl}/api/chat`, {
+            const response = await fetch(backendUrl, {
                 method: "POST", headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ message: payload }), signal: requestController.signal
             });
