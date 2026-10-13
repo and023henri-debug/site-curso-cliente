@@ -603,6 +603,2332 @@ html{-webkit-text-size-adjust:100%;scroll-padding-top:12px}
 })();
 </script>
 
+<script>
+/*
+QR Code Generator for JavaScript — qrcode-generator 1.4.4
+Copyright (c) 2009 Kazuhiko Arase
+https://github.com/kazuhikoarase/qrcode-generator
+
+MIT License
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+*/
+//---------------------------------------------------------------------
+//
+// QR Code Generator for JavaScript
+//
+// Copyright (c) 2009 Kazuhiko Arase
+//
+// URL: http://www.d-project.com/
+//
+// Licensed under the MIT license:
+//  http://www.opensource.org/licenses/mit-license.php
+//
+// The word 'QR Code' is registered trademark of
+// DENSO WAVE INCORPORATED
+//  http://www.denso-wave.com/qrcode/faqpatent-e.html
+//
+//---------------------------------------------------------------------
+
+var qrcode = function() {
+
+  //---------------------------------------------------------------------
+  // qrcode
+  //---------------------------------------------------------------------
+
+  /**
+   * qrcode
+   * @param typeNumber 1 to 40
+   * @param errorCorrectionLevel 'L','M','Q','H'
+   */
+  var qrcode = function(typeNumber, errorCorrectionLevel) {
+
+    var PAD0 = 0xEC;
+    var PAD1 = 0x11;
+
+    var _typeNumber = typeNumber;
+    var _errorCorrectionLevel = QRErrorCorrectionLevel[errorCorrectionLevel];
+    var _modules = null;
+    var _moduleCount = 0;
+    var _dataCache = null;
+    var _dataList = [];
+
+    var _this = {};
+
+    var makeImpl = function(test, maskPattern) {
+
+      _moduleCount = _typeNumber * 4 + 17;
+      _modules = function(moduleCount) {
+        var modules = new Array(moduleCount);
+        for (var row = 0; row < moduleCount; row += 1) {
+          modules[row] = new Array(moduleCount);
+          for (var col = 0; col < moduleCount; col += 1) {
+            modules[row][col] = null;
+          }
+        }
+        return modules;
+      }(_moduleCount);
+
+      setupPositionProbePattern(0, 0);
+      setupPositionProbePattern(_moduleCount - 7, 0);
+      setupPositionProbePattern(0, _moduleCount - 7);
+      setupPositionAdjustPattern();
+      setupTimingPattern();
+      setupTypeInfo(test, maskPattern);
+
+      if (_typeNumber >= 7) {
+        setupTypeNumber(test);
+      }
+
+      if (_dataCache == null) {
+        _dataCache = createData(_typeNumber, _errorCorrectionLevel, _dataList);
+      }
+
+      mapData(_dataCache, maskPattern);
+    };
+
+    var setupPositionProbePattern = function(row, col) {
+
+      for (var r = -1; r <= 7; r += 1) {
+
+        if (row + r <= -1 || _moduleCount <= row + r) continue;
+
+        for (var c = -1; c <= 7; c += 1) {
+
+          if (col + c <= -1 || _moduleCount <= col + c) continue;
+
+          if ( (0 <= r && r <= 6 && (c == 0 || c == 6) )
+              || (0 <= c && c <= 6 && (r == 0 || r == 6) )
+              || (2 <= r && r <= 4 && 2 <= c && c <= 4) ) {
+            _modules[row + r][col + c] = true;
+          } else {
+            _modules[row + r][col + c] = false;
+          }
+        }
+      }
+    };
+
+    var getBestMaskPattern = function() {
+
+      var minLostPoint = 0;
+      var pattern = 0;
+
+      for (var i = 0; i < 8; i += 1) {
+
+        makeImpl(true, i);
+
+        var lostPoint = QRUtil.getLostPoint(_this);
+
+        if (i == 0 || minLostPoint > lostPoint) {
+          minLostPoint = lostPoint;
+          pattern = i;
+        }
+      }
+
+      return pattern;
+    };
+
+    var setupTimingPattern = function() {
+
+      for (var r = 8; r < _moduleCount - 8; r += 1) {
+        if (_modules[r][6] != null) {
+          continue;
+        }
+        _modules[r][6] = (r % 2 == 0);
+      }
+
+      for (var c = 8; c < _moduleCount - 8; c += 1) {
+        if (_modules[6][c] != null) {
+          continue;
+        }
+        _modules[6][c] = (c % 2 == 0);
+      }
+    };
+
+    var setupPositionAdjustPattern = function() {
+
+      var pos = QRUtil.getPatternPosition(_typeNumber);
+
+      for (var i = 0; i < pos.length; i += 1) {
+
+        for (var j = 0; j < pos.length; j += 1) {
+
+          var row = pos[i];
+          var col = pos[j];
+
+          if (_modules[row][col] != null) {
+            continue;
+          }
+
+          for (var r = -2; r <= 2; r += 1) {
+
+            for (var c = -2; c <= 2; c += 1) {
+
+              if (r == -2 || r == 2 || c == -2 || c == 2
+                  || (r == 0 && c == 0) ) {
+                _modules[row + r][col + c] = true;
+              } else {
+                _modules[row + r][col + c] = false;
+              }
+            }
+          }
+        }
+      }
+    };
+
+    var setupTypeNumber = function(test) {
+
+      var bits = QRUtil.getBCHTypeNumber(_typeNumber);
+
+      for (var i = 0; i < 18; i += 1) {
+        var mod = (!test && ( (bits >> i) & 1) == 1);
+        _modules[Math.floor(i / 3)][i % 3 + _moduleCount - 8 - 3] = mod;
+      }
+
+      for (var i = 0; i < 18; i += 1) {
+        var mod = (!test && ( (bits >> i) & 1) == 1);
+        _modules[i % 3 + _moduleCount - 8 - 3][Math.floor(i / 3)] = mod;
+      }
+    };
+
+    var setupTypeInfo = function(test, maskPattern) {
+
+      var data = (_errorCorrectionLevel << 3) | maskPattern;
+      var bits = QRUtil.getBCHTypeInfo(data);
+
+      // vertical
+      for (var i = 0; i < 15; i += 1) {
+
+        var mod = (!test && ( (bits >> i) & 1) == 1);
+
+        if (i < 6) {
+          _modules[i][8] = mod;
+        } else if (i < 8) {
+          _modules[i + 1][8] = mod;
+        } else {
+          _modules[_moduleCount - 15 + i][8] = mod;
+        }
+      }
+
+      // horizontal
+      for (var i = 0; i < 15; i += 1) {
+
+        var mod = (!test && ( (bits >> i) & 1) == 1);
+
+        if (i < 8) {
+          _modules[8][_moduleCount - i - 1] = mod;
+        } else if (i < 9) {
+          _modules[8][15 - i - 1 + 1] = mod;
+        } else {
+          _modules[8][15 - i - 1] = mod;
+        }
+      }
+
+      // fixed module
+      _modules[_moduleCount - 8][8] = (!test);
+    };
+
+    var mapData = function(data, maskPattern) {
+
+      var inc = -1;
+      var row = _moduleCount - 1;
+      var bitIndex = 7;
+      var byteIndex = 0;
+      var maskFunc = QRUtil.getMaskFunction(maskPattern);
+
+      for (var col = _moduleCount - 1; col > 0; col -= 2) {
+
+        if (col == 6) col -= 1;
+
+        while (true) {
+
+          for (var c = 0; c < 2; c += 1) {
+
+            if (_modules[row][col - c] == null) {
+
+              var dark = false;
+
+              if (byteIndex < data.length) {
+                dark = ( ( (data[byteIndex] >>> bitIndex) & 1) == 1);
+              }
+
+              var mask = maskFunc(row, col - c);
+
+              if (mask) {
+                dark = !dark;
+              }
+
+              _modules[row][col - c] = dark;
+              bitIndex -= 1;
+
+              if (bitIndex == -1) {
+                byteIndex += 1;
+                bitIndex = 7;
+              }
+            }
+          }
+
+          row += inc;
+
+          if (row < 0 || _moduleCount <= row) {
+            row -= inc;
+            inc = -inc;
+            break;
+          }
+        }
+      }
+    };
+
+    var createBytes = function(buffer, rsBlocks) {
+
+      var offset = 0;
+
+      var maxDcCount = 0;
+      var maxEcCount = 0;
+
+      var dcdata = new Array(rsBlocks.length);
+      var ecdata = new Array(rsBlocks.length);
+
+      for (var r = 0; r < rsBlocks.length; r += 1) {
+
+        var dcCount = rsBlocks[r].dataCount;
+        var ecCount = rsBlocks[r].totalCount - dcCount;
+
+        maxDcCount = Math.max(maxDcCount, dcCount);
+        maxEcCount = Math.max(maxEcCount, ecCount);
+
+        dcdata[r] = new Array(dcCount);
+
+        for (var i = 0; i < dcdata[r].length; i += 1) {
+          dcdata[r][i] = 0xff & buffer.getBuffer()[i + offset];
+        }
+        offset += dcCount;
+
+        var rsPoly = QRUtil.getErrorCorrectPolynomial(ecCount);
+        var rawPoly = qrPolynomial(dcdata[r], rsPoly.getLength() - 1);
+
+        var modPoly = rawPoly.mod(rsPoly);
+        ecdata[r] = new Array(rsPoly.getLength() - 1);
+        for (var i = 0; i < ecdata[r].length; i += 1) {
+          var modIndex = i + modPoly.getLength() - ecdata[r].length;
+          ecdata[r][i] = (modIndex >= 0)? modPoly.getAt(modIndex) : 0;
+        }
+      }
+
+      var totalCodeCount = 0;
+      for (var i = 0; i < rsBlocks.length; i += 1) {
+        totalCodeCount += rsBlocks[i].totalCount;
+      }
+
+      var data = new Array(totalCodeCount);
+      var index = 0;
+
+      for (var i = 0; i < maxDcCount; i += 1) {
+        for (var r = 0; r < rsBlocks.length; r += 1) {
+          if (i < dcdata[r].length) {
+            data[index] = dcdata[r][i];
+            index += 1;
+          }
+        }
+      }
+
+      for (var i = 0; i < maxEcCount; i += 1) {
+        for (var r = 0; r < rsBlocks.length; r += 1) {
+          if (i < ecdata[r].length) {
+            data[index] = ecdata[r][i];
+            index += 1;
+          }
+        }
+      }
+
+      return data;
+    };
+
+    var createData = function(typeNumber, errorCorrectionLevel, dataList) {
+
+      var rsBlocks = QRRSBlock.getRSBlocks(typeNumber, errorCorrectionLevel);
+
+      var buffer = qrBitBuffer();
+
+      for (var i = 0; i < dataList.length; i += 1) {
+        var data = dataList[i];
+        buffer.put(data.getMode(), 4);
+        buffer.put(data.getLength(), QRUtil.getLengthInBits(data.getMode(), typeNumber) );
+        data.write(buffer);
+      }
+
+      // calc num max data.
+      var totalDataCount = 0;
+      for (var i = 0; i < rsBlocks.length; i += 1) {
+        totalDataCount += rsBlocks[i].dataCount;
+      }
+
+      if (buffer.getLengthInBits() > totalDataCount * 8) {
+        throw 'code length overflow. ('
+          + buffer.getLengthInBits()
+          + '>'
+          + totalDataCount * 8
+          + ')';
+      }
+
+      // end code
+      if (buffer.getLengthInBits() + 4 <= totalDataCount * 8) {
+        buffer.put(0, 4);
+      }
+
+      // padding
+      while (buffer.getLengthInBits() % 8 != 0) {
+        buffer.putBit(false);
+      }
+
+      // padding
+      while (true) {
+
+        if (buffer.getLengthInBits() >= totalDataCount * 8) {
+          break;
+        }
+        buffer.put(PAD0, 8);
+
+        if (buffer.getLengthInBits() >= totalDataCount * 8) {
+          break;
+        }
+        buffer.put(PAD1, 8);
+      }
+
+      return createBytes(buffer, rsBlocks);
+    };
+
+    _this.addData = function(data, mode) {
+
+      mode = mode || 'Byte';
+
+      var newData = null;
+
+      switch(mode) {
+      case 'Numeric' :
+        newData = qrNumber(data);
+        break;
+      case 'Alphanumeric' :
+        newData = qrAlphaNum(data);
+        break;
+      case 'Byte' :
+        newData = qr8BitByte(data);
+        break;
+      case 'Kanji' :
+        newData = qrKanji(data);
+        break;
+      default :
+        throw 'mode:' + mode;
+      }
+
+      _dataList.push(newData);
+      _dataCache = null;
+    };
+
+    _this.isDark = function(row, col) {
+      if (row < 0 || _moduleCount <= row || col < 0 || _moduleCount <= col) {
+        throw row + ',' + col;
+      }
+      return _modules[row][col];
+    };
+
+    _this.getModuleCount = function() {
+      return _moduleCount;
+    };
+
+    _this.make = function() {
+      if (_typeNumber < 1) {
+        var typeNumber = 1;
+
+        for (; typeNumber < 40; typeNumber++) {
+          var rsBlocks = QRRSBlock.getRSBlocks(typeNumber, _errorCorrectionLevel);
+          var buffer = qrBitBuffer();
+
+          for (var i = 0; i < _dataList.length; i++) {
+            var data = _dataList[i];
+            buffer.put(data.getMode(), 4);
+            buffer.put(data.getLength(), QRUtil.getLengthInBits(data.getMode(), typeNumber) );
+            data.write(buffer);
+          }
+
+          var totalDataCount = 0;
+          for (var i = 0; i < rsBlocks.length; i++) {
+            totalDataCount += rsBlocks[i].dataCount;
+          }
+
+          if (buffer.getLengthInBits() <= totalDataCount * 8) {
+            break;
+          }
+        }
+
+        _typeNumber = typeNumber;
+      }
+
+      makeImpl(false, getBestMaskPattern() );
+    };
+
+    _this.createTableTag = function(cellSize, margin) {
+
+      cellSize = cellSize || 2;
+      margin = (typeof margin == 'undefined')? cellSize * 4 : margin;
+
+      var qrHtml = '';
+
+      qrHtml += '<table style="';
+      qrHtml += ' border-width: 0px; border-style: none;';
+      qrHtml += ' border-collapse: collapse;';
+      qrHtml += ' padding: 0px; margin: ' + margin + 'px;';
+      qrHtml += '">';
+      qrHtml += '<tbody>';
+
+      for (var r = 0; r < _this.getModuleCount(); r += 1) {
+
+        qrHtml += '<tr>';
+
+        for (var c = 0; c < _this.getModuleCount(); c += 1) {
+          qrHtml += '<td style="';
+          qrHtml += ' border-width: 0px; border-style: none;';
+          qrHtml += ' border-collapse: collapse;';
+          qrHtml += ' padding: 0px; margin: 0px;';
+          qrHtml += ' width: ' + cellSize + 'px;';
+          qrHtml += ' height: ' + cellSize + 'px;';
+          qrHtml += ' background-color: ';
+          qrHtml += _this.isDark(r, c)? '#000000' : '#ffffff';
+          qrHtml += ';';
+          qrHtml += '"/>';
+        }
+
+        qrHtml += '</tr>';
+      }
+
+      qrHtml += '</tbody>';
+      qrHtml += '</table>';
+
+      return qrHtml;
+    };
+
+    _this.createSvgTag = function(cellSize, margin, alt, title) {
+
+      var opts = {};
+      if (typeof arguments[0] == 'object') {
+        // Called by options.
+        opts = arguments[0];
+        // overwrite cellSize and margin.
+        cellSize = opts.cellSize;
+        margin = opts.margin;
+        alt = opts.alt;
+        title = opts.title;
+      }
+
+      cellSize = cellSize || 2;
+      margin = (typeof margin == 'undefined')? cellSize * 4 : margin;
+
+      // Compose alt property surrogate
+      alt = (typeof alt === 'string') ? {text: alt} : alt || {};
+      alt.text = alt.text || null;
+      alt.id = (alt.text) ? alt.id || 'qrcode-description' : null;
+
+      // Compose title property surrogate
+      title = (typeof title === 'string') ? {text: title} : title || {};
+      title.text = title.text || null;
+      title.id = (title.text) ? title.id || 'qrcode-title' : null;
+
+      var size = _this.getModuleCount() * cellSize + margin * 2;
+      var c, mc, r, mr, qrSvg='', rect;
+
+      rect = 'l' + cellSize + ',0 0,' + cellSize +
+        ' -' + cellSize + ',0 0,-' + cellSize + 'z ';
+
+      qrSvg += '<svg version="1.1" xmlns="http://www.w3.org/2000/svg"';
+      qrSvg += !opts.scalable ? ' width="' + size + 'px" height="' + size + 'px"' : '';
+      qrSvg += ' viewBox="0 0 ' + size + ' ' + size + '" ';
+      qrSvg += ' preserveAspectRatio="xMinYMin meet"';
+      qrSvg += (title.text || alt.text) ? ' role="img" aria-labelledby="' +
+          escapeXml([title.id, alt.id].join(' ').trim() ) + '"' : '';
+      qrSvg += '>';
+      qrSvg += (title.text) ? '<title id="' + escapeXml(title.id) + '">' +
+          escapeXml(title.text) + '</title>' : '';
+      qrSvg += (alt.text) ? '<description id="' + escapeXml(alt.id) + '">' +
+          escapeXml(alt.text) + '</description>' : '';
+      qrSvg += '<rect width="100%" height="100%" fill="white" cx="0" cy="0"/>';
+      qrSvg += '<path d="';
+
+      for (r = 0; r < _this.getModuleCount(); r += 1) {
+        mr = r * cellSize + margin;
+        for (c = 0; c < _this.getModuleCount(); c += 1) {
+          if (_this.isDark(r, c) ) {
+            mc = c*cellSize+margin;
+            qrSvg += 'M' + mc + ',' + mr + rect;
+          }
+        }
+      }
+
+      qrSvg += '" stroke="transparent" fill="black"/>';
+      qrSvg += '</svg>';
+
+      return qrSvg;
+    };
+
+    _this.createDataURL = function(cellSize, margin) {
+
+      cellSize = cellSize || 2;
+      margin = (typeof margin == 'undefined')? cellSize * 4 : margin;
+
+      var size = _this.getModuleCount() * cellSize + margin * 2;
+      var min = margin;
+      var max = size - margin;
+
+      return createDataURL(size, size, function(x, y) {
+        if (min <= x && x < max && min <= y && y < max) {
+          var c = Math.floor( (x - min) / cellSize);
+          var r = Math.floor( (y - min) / cellSize);
+          return _this.isDark(r, c)? 0 : 1;
+        } else {
+          return 1;
+        }
+      } );
+    };
+
+    _this.createImgTag = function(cellSize, margin, alt) {
+
+      cellSize = cellSize || 2;
+      margin = (typeof margin == 'undefined')? cellSize * 4 : margin;
+
+      var size = _this.getModuleCount() * cellSize + margin * 2;
+
+      var img = '';
+      img += '<img';
+      img += '\u0020src="';
+      img += _this.createDataURL(cellSize, margin);
+      img += '"';
+      img += '\u0020width="';
+      img += size;
+      img += '"';
+      img += '\u0020height="';
+      img += size;
+      img += '"';
+      if (alt) {
+        img += '\u0020alt="';
+        img += escapeXml(alt);
+        img += '"';
+      }
+      img += '/>';
+
+      return img;
+    };
+
+    var escapeXml = function(s) {
+      var escaped = '';
+      for (var i = 0; i < s.length; i += 1) {
+        var c = s.charAt(i);
+        switch(c) {
+        case '<': escaped += '&lt;'; break;
+        case '>': escaped += '&gt;'; break;
+        case '&': escaped += '&amp;'; break;
+        case '"': escaped += '&quot;'; break;
+        default : escaped += c; break;
+        }
+      }
+      return escaped;
+    };
+
+    var _createHalfASCII = function(margin) {
+      var cellSize = 1;
+      margin = (typeof margin == 'undefined')? cellSize * 2 : margin;
+
+      var size = _this.getModuleCount() * cellSize + margin * 2;
+      var min = margin;
+      var max = size - margin;
+
+      var y, x, r1, r2, p;
+
+      var blocks = {
+        '██': '█',
+        '█ ': '▀',
+        ' █': '▄',
+        '  ': ' '
+      };
+
+      var blocksLastLineNoMargin = {
+        '██': '▀',
+        '█ ': '▀',
+        ' █': ' ',
+        '  ': ' '
+      };
+
+      var ascii = '';
+      for (y = 0; y < size; y += 2) {
+        r1 = Math.floor((y - min) / cellSize);
+        r2 = Math.floor((y + 1 - min) / cellSize);
+        for (x = 0; x < size; x += 1) {
+          p = '█';
+
+          if (min <= x && x < max && min <= y && y < max && _this.isDark(r1, Math.floor((x - min) / cellSize))) {
+            p = ' ';
+          }
+
+          if (min <= x && x < max && min <= y+1 && y+1 < max && _this.isDark(r2, Math.floor((x - min) / cellSize))) {
+            p += ' ';
+          }
+          else {
+            p += '█';
+          }
+
+          // Output 2 characters per pixel, to create full square. 1 character per pixels gives only half width of square.
+          ascii += (margin < 1 && y+1 >= max) ? blocksLastLineNoMargin[p] : blocks[p];
+        }
+
+        ascii += '\n';
+      }
+
+      if (size % 2 && margin > 0) {
+        return ascii.substring(0, ascii.length - size - 1) + Array(size+1).join('▀');
+      }
+
+      return ascii.substring(0, ascii.length-1);
+    };
+
+    _this.createASCII = function(cellSize, margin) {
+      cellSize = cellSize || 1;
+
+      if (cellSize < 2) {
+        return _createHalfASCII(margin);
+      }
+
+      cellSize -= 1;
+      margin = (typeof margin == 'undefined')? cellSize * 2 : margin;
+
+      var size = _this.getModuleCount() * cellSize + margin * 2;
+      var min = margin;
+      var max = size - margin;
+
+      var y, x, r, p;
+
+      var white = Array(cellSize+1).join('██');
+      var black = Array(cellSize+1).join('  ');
+
+      var ascii = '';
+      var line = '';
+      for (y = 0; y < size; y += 1) {
+        r = Math.floor( (y - min) / cellSize);
+        line = '';
+        for (x = 0; x < size; x += 1) {
+          p = 1;
+
+          if (min <= x && x < max && min <= y && y < max && _this.isDark(r, Math.floor((x - min) / cellSize))) {
+            p = 0;
+          }
+
+          // Output 2 characters per pixel, to create full square. 1 character per pixels gives only half width of square.
+          line += p ? white : black;
+        }
+
+        for (r = 0; r < cellSize; r += 1) {
+          ascii += line + '\n';
+        }
+      }
+
+      return ascii.substring(0, ascii.length-1);
+    };
+
+    _this.renderTo2dContext = function(context, cellSize) {
+      cellSize = cellSize || 2;
+      var length = _this.getModuleCount();
+      for (var row = 0; row < length; row++) {
+        for (var col = 0; col < length; col++) {
+          context.fillStyle = _this.isDark(row, col) ? 'black' : 'white';
+          context.fillRect(row * cellSize, col * cellSize, cellSize, cellSize);
+        }
+      }
+    }
+
+    return _this;
+  };
+
+  //---------------------------------------------------------------------
+  // qrcode.stringToBytes
+  //---------------------------------------------------------------------
+
+  qrcode.stringToBytesFuncs = {
+    'default' : function(s) {
+      var bytes = [];
+      for (var i = 0; i < s.length; i += 1) {
+        var c = s.charCodeAt(i);
+        bytes.push(c & 0xff);
+      }
+      return bytes;
+    }
+  };
+
+  qrcode.stringToBytes = qrcode.stringToBytesFuncs['default'];
+
+  //---------------------------------------------------------------------
+  // qrcode.createStringToBytes
+  //---------------------------------------------------------------------
+
+  /**
+   * @param unicodeData base64 string of byte array.
+   * [16bit Unicode],[16bit Bytes], ...
+   * @param numChars
+   */
+  qrcode.createStringToBytes = function(unicodeData, numChars) {
+
+    // create conversion map.
+
+    var unicodeMap = function() {
+
+      var bin = base64DecodeInputStream(unicodeData);
+      var read = function() {
+        var b = bin.read();
+        if (b == -1) throw 'eof';
+        return b;
+      };
+
+      var count = 0;
+      var unicodeMap = {};
+      while (true) {
+        var b0 = bin.read();
+        if (b0 == -1) break;
+        var b1 = read();
+        var b2 = read();
+        var b3 = read();
+        var k = String.fromCharCode( (b0 << 8) | b1);
+        var v = (b2 << 8) | b3;
+        unicodeMap[k] = v;
+        count += 1;
+      }
+      if (count != numChars) {
+        throw count + ' != ' + numChars;
+      }
+
+      return unicodeMap;
+    }();
+
+    var unknownChar = '?'.charCodeAt(0);
+
+    return function(s) {
+      var bytes = [];
+      for (var i = 0; i < s.length; i += 1) {
+        var c = s.charCodeAt(i);
+        if (c < 128) {
+          bytes.push(c);
+        } else {
+          var b = unicodeMap[s.charAt(i)];
+          if (typeof b == 'number') {
+            if ( (b & 0xff) == b) {
+              // 1byte
+              bytes.push(b);
+            } else {
+              // 2bytes
+              bytes.push(b >>> 8);
+              bytes.push(b & 0xff);
+            }
+          } else {
+            bytes.push(unknownChar);
+          }
+        }
+      }
+      return bytes;
+    };
+  };
+
+  //---------------------------------------------------------------------
+  // QRMode
+  //---------------------------------------------------------------------
+
+  var QRMode = {
+    MODE_NUMBER :    1 << 0,
+    MODE_ALPHA_NUM : 1 << 1,
+    MODE_8BIT_BYTE : 1 << 2,
+    MODE_KANJI :     1 << 3
+  };
+
+  //---------------------------------------------------------------------
+  // QRErrorCorrectionLevel
+  //---------------------------------------------------------------------
+
+  var QRErrorCorrectionLevel = {
+    L : 1,
+    M : 0,
+    Q : 3,
+    H : 2
+  };
+
+  //---------------------------------------------------------------------
+  // QRMaskPattern
+  //---------------------------------------------------------------------
+
+  var QRMaskPattern = {
+    PATTERN000 : 0,
+    PATTERN001 : 1,
+    PATTERN010 : 2,
+    PATTERN011 : 3,
+    PATTERN100 : 4,
+    PATTERN101 : 5,
+    PATTERN110 : 6,
+    PATTERN111 : 7
+  };
+
+  //---------------------------------------------------------------------
+  // QRUtil
+  //---------------------------------------------------------------------
+
+  var QRUtil = function() {
+
+    var PATTERN_POSITION_TABLE = [
+      [],
+      [6, 18],
+      [6, 22],
+      [6, 26],
+      [6, 30],
+      [6, 34],
+      [6, 22, 38],
+      [6, 24, 42],
+      [6, 26, 46],
+      [6, 28, 50],
+      [6, 30, 54],
+      [6, 32, 58],
+      [6, 34, 62],
+      [6, 26, 46, 66],
+      [6, 26, 48, 70],
+      [6, 26, 50, 74],
+      [6, 30, 54, 78],
+      [6, 30, 56, 82],
+      [6, 30, 58, 86],
+      [6, 34, 62, 90],
+      [6, 28, 50, 72, 94],
+      [6, 26, 50, 74, 98],
+      [6, 30, 54, 78, 102],
+      [6, 28, 54, 80, 106],
+      [6, 32, 58, 84, 110],
+      [6, 30, 58, 86, 114],
+      [6, 34, 62, 90, 118],
+      [6, 26, 50, 74, 98, 122],
+      [6, 30, 54, 78, 102, 126],
+      [6, 26, 52, 78, 104, 130],
+      [6, 30, 56, 82, 108, 134],
+      [6, 34, 60, 86, 112, 138],
+      [6, 30, 58, 86, 114, 142],
+      [6, 34, 62, 90, 118, 146],
+      [6, 30, 54, 78, 102, 126, 150],
+      [6, 24, 50, 76, 102, 128, 154],
+      [6, 28, 54, 80, 106, 132, 158],
+      [6, 32, 58, 84, 110, 136, 162],
+      [6, 26, 54, 82, 110, 138, 166],
+      [6, 30, 58, 86, 114, 142, 170]
+    ];
+    var G15 = (1 << 10) | (1 << 8) | (1 << 5) | (1 << 4) | (1 << 2) | (1 << 1) | (1 << 0);
+    var G18 = (1 << 12) | (1 << 11) | (1 << 10) | (1 << 9) | (1 << 8) | (1 << 5) | (1 << 2) | (1 << 0);
+    var G15_MASK = (1 << 14) | (1 << 12) | (1 << 10) | (1 << 4) | (1 << 1);
+
+    var _this = {};
+
+    var getBCHDigit = function(data) {
+      var digit = 0;
+      while (data != 0) {
+        digit += 1;
+        data >>>= 1;
+      }
+      return digit;
+    };
+
+    _this.getBCHTypeInfo = function(data) {
+      var d = data << 10;
+      while (getBCHDigit(d) - getBCHDigit(G15) >= 0) {
+        d ^= (G15 << (getBCHDigit(d) - getBCHDigit(G15) ) );
+      }
+      return ( (data << 10) | d) ^ G15_MASK;
+    };
+
+    _this.getBCHTypeNumber = function(data) {
+      var d = data << 12;
+      while (getBCHDigit(d) - getBCHDigit(G18) >= 0) {
+        d ^= (G18 << (getBCHDigit(d) - getBCHDigit(G18) ) );
+      }
+      return (data << 12) | d;
+    };
+
+    _this.getPatternPosition = function(typeNumber) {
+      return PATTERN_POSITION_TABLE[typeNumber - 1];
+    };
+
+    _this.getMaskFunction = function(maskPattern) {
+
+      switch (maskPattern) {
+
+      case QRMaskPattern.PATTERN000 :
+        return function(i, j) { return (i + j) % 2 == 0; };
+      case QRMaskPattern.PATTERN001 :
+        return function(i, j) { return i % 2 == 0; };
+      case QRMaskPattern.PATTERN010 :
+        return function(i, j) { return j % 3 == 0; };
+      case QRMaskPattern.PATTERN011 :
+        return function(i, j) { return (i + j) % 3 == 0; };
+      case QRMaskPattern.PATTERN100 :
+        return function(i, j) { return (Math.floor(i / 2) + Math.floor(j / 3) ) % 2 == 0; };
+      case QRMaskPattern.PATTERN101 :
+        return function(i, j) { return (i * j) % 2 + (i * j) % 3 == 0; };
+      case QRMaskPattern.PATTERN110 :
+        return function(i, j) { return ( (i * j) % 2 + (i * j) % 3) % 2 == 0; };
+      case QRMaskPattern.PATTERN111 :
+        return function(i, j) { return ( (i * j) % 3 + (i + j) % 2) % 2 == 0; };
+
+      default :
+        throw 'bad maskPattern:' + maskPattern;
+      }
+    };
+
+    _this.getErrorCorrectPolynomial = function(errorCorrectLength) {
+      var a = qrPolynomial([1], 0);
+      for (var i = 0; i < errorCorrectLength; i += 1) {
+        a = a.multiply(qrPolynomial([1, QRMath.gexp(i)], 0) );
+      }
+      return a;
+    };
+
+    _this.getLengthInBits = function(mode, type) {
+
+      if (1 <= type && type < 10) {
+
+        // 1 - 9
+
+        switch(mode) {
+        case QRMode.MODE_NUMBER    : return 10;
+        case QRMode.MODE_ALPHA_NUM : return 9;
+        case QRMode.MODE_8BIT_BYTE : return 8;
+        case QRMode.MODE_KANJI     : return 8;
+        default :
+          throw 'mode:' + mode;
+        }
+
+      } else if (type < 27) {
+
+        // 10 - 26
+
+        switch(mode) {
+        case QRMode.MODE_NUMBER    : return 12;
+        case QRMode.MODE_ALPHA_NUM : return 11;
+        case QRMode.MODE_8BIT_BYTE : return 16;
+        case QRMode.MODE_KANJI     : return 10;
+        default :
+          throw 'mode:' + mode;
+        }
+
+      } else if (type < 41) {
+
+        // 27 - 40
+
+        switch(mode) {
+        case QRMode.MODE_NUMBER    : return 14;
+        case QRMode.MODE_ALPHA_NUM : return 13;
+        case QRMode.MODE_8BIT_BYTE : return 16;
+        case QRMode.MODE_KANJI     : return 12;
+        default :
+          throw 'mode:' + mode;
+        }
+
+      } else {
+        throw 'type:' + type;
+      }
+    };
+
+    _this.getLostPoint = function(qrcode) {
+
+      var moduleCount = qrcode.getModuleCount();
+
+      var lostPoint = 0;
+
+      // LEVEL1
+
+      for (var row = 0; row < moduleCount; row += 1) {
+        for (var col = 0; col < moduleCount; col += 1) {
+
+          var sameCount = 0;
+          var dark = qrcode.isDark(row, col);
+
+          for (var r = -1; r <= 1; r += 1) {
+
+            if (row + r < 0 || moduleCount <= row + r) {
+              continue;
+            }
+
+            for (var c = -1; c <= 1; c += 1) {
+
+              if (col + c < 0 || moduleCount <= col + c) {
+                continue;
+              }
+
+              if (r == 0 && c == 0) {
+                continue;
+              }
+
+              if (dark == qrcode.isDark(row + r, col + c) ) {
+                sameCount += 1;
+              }
+            }
+          }
+
+          if (sameCount > 5) {
+            lostPoint += (3 + sameCount - 5);
+          }
+        }
+      };
+
+      // LEVEL2
+
+      for (var row = 0; row < moduleCount - 1; row += 1) {
+        for (var col = 0; col < moduleCount - 1; col += 1) {
+          var count = 0;
+          if (qrcode.isDark(row, col) ) count += 1;
+          if (qrcode.isDark(row + 1, col) ) count += 1;
+          if (qrcode.isDark(row, col + 1) ) count += 1;
+          if (qrcode.isDark(row + 1, col + 1) ) count += 1;
+          if (count == 0 || count == 4) {
+            lostPoint += 3;
+          }
+        }
+      }
+
+      // LEVEL3
+
+      for (var row = 0; row < moduleCount; row += 1) {
+        for (var col = 0; col < moduleCount - 6; col += 1) {
+          if (qrcode.isDark(row, col)
+              && !qrcode.isDark(row, col + 1)
+              &&  qrcode.isDark(row, col + 2)
+              &&  qrcode.isDark(row, col + 3)
+              &&  qrcode.isDark(row, col + 4)
+              && !qrcode.isDark(row, col + 5)
+              &&  qrcode.isDark(row, col + 6) ) {
+            lostPoint += 40;
+          }
+        }
+      }
+
+      for (var col = 0; col < moduleCount; col += 1) {
+        for (var row = 0; row < moduleCount - 6; row += 1) {
+          if (qrcode.isDark(row, col)
+              && !qrcode.isDark(row + 1, col)
+              &&  qrcode.isDark(row + 2, col)
+              &&  qrcode.isDark(row + 3, col)
+              &&  qrcode.isDark(row + 4, col)
+              && !qrcode.isDark(row + 5, col)
+              &&  qrcode.isDark(row + 6, col) ) {
+            lostPoint += 40;
+          }
+        }
+      }
+
+      // LEVEL4
+
+      var darkCount = 0;
+
+      for (var col = 0; col < moduleCount; col += 1) {
+        for (var row = 0; row < moduleCount; row += 1) {
+          if (qrcode.isDark(row, col) ) {
+            darkCount += 1;
+          }
+        }
+      }
+
+      var ratio = Math.abs(100 * darkCount / moduleCount / moduleCount - 50) / 5;
+      lostPoint += ratio * 10;
+
+      return lostPoint;
+    };
+
+    return _this;
+  }();
+
+  //---------------------------------------------------------------------
+  // QRMath
+  //---------------------------------------------------------------------
+
+  var QRMath = function() {
+
+    var EXP_TABLE = new Array(256);
+    var LOG_TABLE = new Array(256);
+
+    // initialize tables
+    for (var i = 0; i < 8; i += 1) {
+      EXP_TABLE[i] = 1 << i;
+    }
+    for (var i = 8; i < 256; i += 1) {
+      EXP_TABLE[i] = EXP_TABLE[i - 4]
+        ^ EXP_TABLE[i - 5]
+        ^ EXP_TABLE[i - 6]
+        ^ EXP_TABLE[i - 8];
+    }
+    for (var i = 0; i < 255; i += 1) {
+      LOG_TABLE[EXP_TABLE[i] ] = i;
+    }
+
+    var _this = {};
+
+    _this.glog = function(n) {
+
+      if (n < 1) {
+        throw 'glog(' + n + ')';
+      }
+
+      return LOG_TABLE[n];
+    };
+
+    _this.gexp = function(n) {
+
+      while (n < 0) {
+        n += 255;
+      }
+
+      while (n >= 256) {
+        n -= 255;
+      }
+
+      return EXP_TABLE[n];
+    };
+
+    return _this;
+  }();
+
+  //---------------------------------------------------------------------
+  // qrPolynomial
+  //---------------------------------------------------------------------
+
+  function qrPolynomial(num, shift) {
+
+    if (typeof num.length == 'undefined') {
+      throw num.length + '/' + shift;
+    }
+
+    var _num = function() {
+      var offset = 0;
+      while (offset < num.length && num[offset] == 0) {
+        offset += 1;
+      }
+      var _num = new Array(num.length - offset + shift);
+      for (var i = 0; i < num.length - offset; i += 1) {
+        _num[i] = num[i + offset];
+      }
+      return _num;
+    }();
+
+    var _this = {};
+
+    _this.getAt = function(index) {
+      return _num[index];
+    };
+
+    _this.getLength = function() {
+      return _num.length;
+    };
+
+    _this.multiply = function(e) {
+
+      var num = new Array(_this.getLength() + e.getLength() - 1);
+
+      for (var i = 0; i < _this.getLength(); i += 1) {
+        for (var j = 0; j < e.getLength(); j += 1) {
+          num[i + j] ^= QRMath.gexp(QRMath.glog(_this.getAt(i) ) + QRMath.glog(e.getAt(j) ) );
+        }
+      }
+
+      return qrPolynomial(num, 0);
+    };
+
+    _this.mod = function(e) {
+
+      if (_this.getLength() - e.getLength() < 0) {
+        return _this;
+      }
+
+      var ratio = QRMath.glog(_this.getAt(0) ) - QRMath.glog(e.getAt(0) );
+
+      var num = new Array(_this.getLength() );
+      for (var i = 0; i < _this.getLength(); i += 1) {
+        num[i] = _this.getAt(i);
+      }
+
+      for (var i = 0; i < e.getLength(); i += 1) {
+        num[i] ^= QRMath.gexp(QRMath.glog(e.getAt(i) ) + ratio);
+      }
+
+      // recursive call
+      return qrPolynomial(num, 0).mod(e);
+    };
+
+    return _this;
+  };
+
+  //---------------------------------------------------------------------
+  // QRRSBlock
+  //---------------------------------------------------------------------
+
+  var QRRSBlock = function() {
+
+    var RS_BLOCK_TABLE = [
+
+      // L
+      // M
+      // Q
+      // H
+
+      // 1
+      [1, 26, 19],
+      [1, 26, 16],
+      [1, 26, 13],
+      [1, 26, 9],
+
+      // 2
+      [1, 44, 34],
+      [1, 44, 28],
+      [1, 44, 22],
+      [1, 44, 16],
+
+      // 3
+      [1, 70, 55],
+      [1, 70, 44],
+      [2, 35, 17],
+      [2, 35, 13],
+
+      // 4
+      [1, 100, 80],
+      [2, 50, 32],
+      [2, 50, 24],
+      [4, 25, 9],
+
+      // 5
+      [1, 134, 108],
+      [2, 67, 43],
+      [2, 33, 15, 2, 34, 16],
+      [2, 33, 11, 2, 34, 12],
+
+      // 6
+      [2, 86, 68],
+      [4, 43, 27],
+      [4, 43, 19],
+      [4, 43, 15],
+
+      // 7
+      [2, 98, 78],
+      [4, 49, 31],
+      [2, 32, 14, 4, 33, 15],
+      [4, 39, 13, 1, 40, 14],
+
+      // 8
+      [2, 121, 97],
+      [2, 60, 38, 2, 61, 39],
+      [4, 40, 18, 2, 41, 19],
+      [4, 40, 14, 2, 41, 15],
+
+      // 9
+      [2, 146, 116],
+      [3, 58, 36, 2, 59, 37],
+      [4, 36, 16, 4, 37, 17],
+      [4, 36, 12, 4, 37, 13],
+
+      // 10
+      [2, 86, 68, 2, 87, 69],
+      [4, 69, 43, 1, 70, 44],
+      [6, 43, 19, 2, 44, 20],
+      [6, 43, 15, 2, 44, 16],
+
+      // 11
+      [4, 101, 81],
+      [1, 80, 50, 4, 81, 51],
+      [4, 50, 22, 4, 51, 23],
+      [3, 36, 12, 8, 37, 13],
+
+      // 12
+      [2, 116, 92, 2, 117, 93],
+      [6, 58, 36, 2, 59, 37],
+      [4, 46, 20, 6, 47, 21],
+      [7, 42, 14, 4, 43, 15],
+
+      // 13
+      [4, 133, 107],
+      [8, 59, 37, 1, 60, 38],
+      [8, 44, 20, 4, 45, 21],
+      [12, 33, 11, 4, 34, 12],
+
+      // 14
+      [3, 145, 115, 1, 146, 116],
+      [4, 64, 40, 5, 65, 41],
+      [11, 36, 16, 5, 37, 17],
+      [11, 36, 12, 5, 37, 13],
+
+      // 15
+      [5, 109, 87, 1, 110, 88],
+      [5, 65, 41, 5, 66, 42],
+      [5, 54, 24, 7, 55, 25],
+      [11, 36, 12, 7, 37, 13],
+
+      // 16
+      [5, 122, 98, 1, 123, 99],
+      [7, 73, 45, 3, 74, 46],
+      [15, 43, 19, 2, 44, 20],
+      [3, 45, 15, 13, 46, 16],
+
+      // 17
+      [1, 135, 107, 5, 136, 108],
+      [10, 74, 46, 1, 75, 47],
+      [1, 50, 22, 15, 51, 23],
+      [2, 42, 14, 17, 43, 15],
+
+      // 18
+      [5, 150, 120, 1, 151, 121],
+      [9, 69, 43, 4, 70, 44],
+      [17, 50, 22, 1, 51, 23],
+      [2, 42, 14, 19, 43, 15],
+
+      // 19
+      [3, 141, 113, 4, 142, 114],
+      [3, 70, 44, 11, 71, 45],
+      [17, 47, 21, 4, 48, 22],
+      [9, 39, 13, 16, 40, 14],
+
+      // 20
+      [3, 135, 107, 5, 136, 108],
+      [3, 67, 41, 13, 68, 42],
+      [15, 54, 24, 5, 55, 25],
+      [15, 43, 15, 10, 44, 16],
+
+      // 21
+      [4, 144, 116, 4, 145, 117],
+      [17, 68, 42],
+      [17, 50, 22, 6, 51, 23],
+      [19, 46, 16, 6, 47, 17],
+
+      // 22
+      [2, 139, 111, 7, 140, 112],
+      [17, 74, 46],
+      [7, 54, 24, 16, 55, 25],
+      [34, 37, 13],
+
+      // 23
+      [4, 151, 121, 5, 152, 122],
+      [4, 75, 47, 14, 76, 48],
+      [11, 54, 24, 14, 55, 25],
+      [16, 45, 15, 14, 46, 16],
+
+      // 24
+      [6, 147, 117, 4, 148, 118],
+      [6, 73, 45, 14, 74, 46],
+      [11, 54, 24, 16, 55, 25],
+      [30, 46, 16, 2, 47, 17],
+
+      // 25
+      [8, 132, 106, 4, 133, 107],
+      [8, 75, 47, 13, 76, 48],
+      [7, 54, 24, 22, 55, 25],
+      [22, 45, 15, 13, 46, 16],
+
+      // 26
+      [10, 142, 114, 2, 143, 115],
+      [19, 74, 46, 4, 75, 47],
+      [28, 50, 22, 6, 51, 23],
+      [33, 46, 16, 4, 47, 17],
+
+      // 27
+      [8, 152, 122, 4, 153, 123],
+      [22, 73, 45, 3, 74, 46],
+      [8, 53, 23, 26, 54, 24],
+      [12, 45, 15, 28, 46, 16],
+
+      // 28
+      [3, 147, 117, 10, 148, 118],
+      [3, 73, 45, 23, 74, 46],
+      [4, 54, 24, 31, 55, 25],
+      [11, 45, 15, 31, 46, 16],
+
+      // 29
+      [7, 146, 116, 7, 147, 117],
+      [21, 73, 45, 7, 74, 46],
+      [1, 53, 23, 37, 54, 24],
+      [19, 45, 15, 26, 46, 16],
+
+      // 30
+      [5, 145, 115, 10, 146, 116],
+      [19, 75, 47, 10, 76, 48],
+      [15, 54, 24, 25, 55, 25],
+      [23, 45, 15, 25, 46, 16],
+
+      // 31
+      [13, 145, 115, 3, 146, 116],
+      [2, 74, 46, 29, 75, 47],
+      [42, 54, 24, 1, 55, 25],
+      [23, 45, 15, 28, 46, 16],
+
+      // 32
+      [17, 145, 115],
+      [10, 74, 46, 23, 75, 47],
+      [10, 54, 24, 35, 55, 25],
+      [19, 45, 15, 35, 46, 16],
+
+      // 33
+      [17, 145, 115, 1, 146, 116],
+      [14, 74, 46, 21, 75, 47],
+      [29, 54, 24, 19, 55, 25],
+      [11, 45, 15, 46, 46, 16],
+
+      // 34
+      [13, 145, 115, 6, 146, 116],
+      [14, 74, 46, 23, 75, 47],
+      [44, 54, 24, 7, 55, 25],
+      [59, 46, 16, 1, 47, 17],
+
+      // 35
+      [12, 151, 121, 7, 152, 122],
+      [12, 75, 47, 26, 76, 48],
+      [39, 54, 24, 14, 55, 25],
+      [22, 45, 15, 41, 46, 16],
+
+      // 36
+      [6, 151, 121, 14, 152, 122],
+      [6, 75, 47, 34, 76, 48],
+      [46, 54, 24, 10, 55, 25],
+      [2, 45, 15, 64, 46, 16],
+
+      // 37
+      [17, 152, 122, 4, 153, 123],
+      [29, 74, 46, 14, 75, 47],
+      [49, 54, 24, 10, 55, 25],
+      [24, 45, 15, 46, 46, 16],
+
+      // 38
+      [4, 152, 122, 18, 153, 123],
+      [13, 74, 46, 32, 75, 47],
+      [48, 54, 24, 14, 55, 25],
+      [42, 45, 15, 32, 46, 16],
+
+      // 39
+      [20, 147, 117, 4, 148, 118],
+      [40, 75, 47, 7, 76, 48],
+      [43, 54, 24, 22, 55, 25],
+      [10, 45, 15, 67, 46, 16],
+
+      // 40
+      [19, 148, 118, 6, 149, 119],
+      [18, 75, 47, 31, 76, 48],
+      [34, 54, 24, 34, 55, 25],
+      [20, 45, 15, 61, 46, 16]
+    ];
+
+    var qrRSBlock = function(totalCount, dataCount) {
+      var _this = {};
+      _this.totalCount = totalCount;
+      _this.dataCount = dataCount;
+      return _this;
+    };
+
+    var _this = {};
+
+    var getRsBlockTable = function(typeNumber, errorCorrectionLevel) {
+
+      switch(errorCorrectionLevel) {
+      case QRErrorCorrectionLevel.L :
+        return RS_BLOCK_TABLE[(typeNumber - 1) * 4 + 0];
+      case QRErrorCorrectionLevel.M :
+        return RS_BLOCK_TABLE[(typeNumber - 1) * 4 + 1];
+      case QRErrorCorrectionLevel.Q :
+        return RS_BLOCK_TABLE[(typeNumber - 1) * 4 + 2];
+      case QRErrorCorrectionLevel.H :
+        return RS_BLOCK_TABLE[(typeNumber - 1) * 4 + 3];
+      default :
+        return undefined;
+      }
+    };
+
+    _this.getRSBlocks = function(typeNumber, errorCorrectionLevel) {
+
+      var rsBlock = getRsBlockTable(typeNumber, errorCorrectionLevel);
+
+      if (typeof rsBlock == 'undefined') {
+        throw 'bad rs block @ typeNumber:' + typeNumber +
+            '/errorCorrectionLevel:' + errorCorrectionLevel;
+      }
+
+      var length = rsBlock.length / 3;
+
+      var list = [];
+
+      for (var i = 0; i < length; i += 1) {
+
+        var count = rsBlock[i * 3 + 0];
+        var totalCount = rsBlock[i * 3 + 1];
+        var dataCount = rsBlock[i * 3 + 2];
+
+        for (var j = 0; j < count; j += 1) {
+          list.push(qrRSBlock(totalCount, dataCount) );
+        }
+      }
+
+      return list;
+    };
+
+    return _this;
+  }();
+
+  //---------------------------------------------------------------------
+  // qrBitBuffer
+  //---------------------------------------------------------------------
+
+  var qrBitBuffer = function() {
+
+    var _buffer = [];
+    var _length = 0;
+
+    var _this = {};
+
+    _this.getBuffer = function() {
+      return _buffer;
+    };
+
+    _this.getAt = function(index) {
+      var bufIndex = Math.floor(index / 8);
+      return ( (_buffer[bufIndex] >>> (7 - index % 8) ) & 1) == 1;
+    };
+
+    _this.put = function(num, length) {
+      for (var i = 0; i < length; i += 1) {
+        _this.putBit( ( (num >>> (length - i - 1) ) & 1) == 1);
+      }
+    };
+
+    _this.getLengthInBits = function() {
+      return _length;
+    };
+
+    _this.putBit = function(bit) {
+
+      var bufIndex = Math.floor(_length / 8);
+      if (_buffer.length <= bufIndex) {
+        _buffer.push(0);
+      }
+
+      if (bit) {
+        _buffer[bufIndex] |= (0x80 >>> (_length % 8) );
+      }
+
+      _length += 1;
+    };
+
+    return _this;
+  };
+
+  //---------------------------------------------------------------------
+  // qrNumber
+  //---------------------------------------------------------------------
+
+  var qrNumber = function(data) {
+
+    var _mode = QRMode.MODE_NUMBER;
+    var _data = data;
+
+    var _this = {};
+
+    _this.getMode = function() {
+      return _mode;
+    };
+
+    _this.getLength = function(buffer) {
+      return _data.length;
+    };
+
+    _this.write = function(buffer) {
+
+      var data = _data;
+
+      var i = 0;
+
+      while (i + 2 < data.length) {
+        buffer.put(strToNum(data.substring(i, i + 3) ), 10);
+        i += 3;
+      }
+
+      if (i < data.length) {
+        if (data.length - i == 1) {
+          buffer.put(strToNum(data.substring(i, i + 1) ), 4);
+        } else if (data.length - i == 2) {
+          buffer.put(strToNum(data.substring(i, i + 2) ), 7);
+        }
+      }
+    };
+
+    var strToNum = function(s) {
+      var num = 0;
+      for (var i = 0; i < s.length; i += 1) {
+        num = num * 10 + chatToNum(s.charAt(i) );
+      }
+      return num;
+    };
+
+    var chatToNum = function(c) {
+      if ('0' <= c && c <= '9') {
+        return c.charCodeAt(0) - '0'.charCodeAt(0);
+      }
+      throw 'illegal char :' + c;
+    };
+
+    return _this;
+  };
+
+  //---------------------------------------------------------------------
+  // qrAlphaNum
+  //---------------------------------------------------------------------
+
+  var qrAlphaNum = function(data) {
+
+    var _mode = QRMode.MODE_ALPHA_NUM;
+    var _data = data;
+
+    var _this = {};
+
+    _this.getMode = function() {
+      return _mode;
+    };
+
+    _this.getLength = function(buffer) {
+      return _data.length;
+    };
+
+    _this.write = function(buffer) {
+
+      var s = _data;
+
+      var i = 0;
+
+      while (i + 1 < s.length) {
+        buffer.put(
+          getCode(s.charAt(i) ) * 45 +
+          getCode(s.charAt(i + 1) ), 11);
+        i += 2;
+      }
+
+      if (i < s.length) {
+        buffer.put(getCode(s.charAt(i) ), 6);
+      }
+    };
+
+    var getCode = function(c) {
+
+      if ('0' <= c && c <= '9') {
+        return c.charCodeAt(0) - '0'.charCodeAt(0);
+      } else if ('A' <= c && c <= 'Z') {
+        return c.charCodeAt(0) - 'A'.charCodeAt(0) + 10;
+      } else {
+        switch (c) {
+        case ' ' : return 36;
+        case '$' : return 37;
+        case '%' : return 38;
+        case '*' : return 39;
+        case '+' : return 40;
+        case '-' : return 41;
+        case '.' : return 42;
+        case '/' : return 43;
+        case ':' : return 44;
+        default :
+          throw 'illegal char :' + c;
+        }
+      }
+    };
+
+    return _this;
+  };
+
+  //---------------------------------------------------------------------
+  // qr8BitByte
+  //---------------------------------------------------------------------
+
+  var qr8BitByte = function(data) {
+
+    var _mode = QRMode.MODE_8BIT_BYTE;
+    var _data = data;
+    var _bytes = qrcode.stringToBytes(data);
+
+    var _this = {};
+
+    _this.getMode = function() {
+      return _mode;
+    };
+
+    _this.getLength = function(buffer) {
+      return _bytes.length;
+    };
+
+    _this.write = function(buffer) {
+      for (var i = 0; i < _bytes.length; i += 1) {
+        buffer.put(_bytes[i], 8);
+      }
+    };
+
+    return _this;
+  };
+
+  //---------------------------------------------------------------------
+  // qrKanji
+  //---------------------------------------------------------------------
+
+  var qrKanji = function(data) {
+
+    var _mode = QRMode.MODE_KANJI;
+    var _data = data;
+
+    var stringToBytes = qrcode.stringToBytesFuncs['SJIS'];
+    if (!stringToBytes) {
+      throw 'sjis not supported.';
+    }
+    !function(c, code) {
+      // self test for sjis support.
+      var test = stringToBytes(c);
+      if (test.length != 2 || ( (test[0] << 8) | test[1]) != code) {
+        throw 'sjis not supported.';
+      }
+    }('\u53cb', 0x9746);
+
+    var _bytes = stringToBytes(data);
+
+    var _this = {};
+
+    _this.getMode = function() {
+      return _mode;
+    };
+
+    _this.getLength = function(buffer) {
+      return ~~(_bytes.length / 2);
+    };
+
+    _this.write = function(buffer) {
+
+      var data = _bytes;
+
+      var i = 0;
+
+      while (i + 1 < data.length) {
+
+        var c = ( (0xff & data[i]) << 8) | (0xff & data[i + 1]);
+
+        if (0x8140 <= c && c <= 0x9FFC) {
+          c -= 0x8140;
+        } else if (0xE040 <= c && c <= 0xEBBF) {
+          c -= 0xC140;
+        } else {
+          throw 'illegal char at ' + (i + 1) + '/' + c;
+        }
+
+        c = ( (c >>> 8) & 0xff) * 0xC0 + (c & 0xff);
+
+        buffer.put(c, 13);
+
+        i += 2;
+      }
+
+      if (i < data.length) {
+        throw 'illegal char at ' + (i + 1);
+      }
+    };
+
+    return _this;
+  };
+
+  //=====================================================================
+  // GIF Support etc.
+  //
+
+  //---------------------------------------------------------------------
+  // byteArrayOutputStream
+  //---------------------------------------------------------------------
+
+  var byteArrayOutputStream = function() {
+
+    var _bytes = [];
+
+    var _this = {};
+
+    _this.writeByte = function(b) {
+      _bytes.push(b & 0xff);
+    };
+
+    _this.writeShort = function(i) {
+      _this.writeByte(i);
+      _this.writeByte(i >>> 8);
+    };
+
+    _this.writeBytes = function(b, off, len) {
+      off = off || 0;
+      len = len || b.length;
+      for (var i = 0; i < len; i += 1) {
+        _this.writeByte(b[i + off]);
+      }
+    };
+
+    _this.writeString = function(s) {
+      for (var i = 0; i < s.length; i += 1) {
+        _this.writeByte(s.charCodeAt(i) );
+      }
+    };
+
+    _this.toByteArray = function() {
+      return _bytes;
+    };
+
+    _this.toString = function() {
+      var s = '';
+      s += '[';
+      for (var i = 0; i < _bytes.length; i += 1) {
+        if (i > 0) {
+          s += ',';
+        }
+        s += _bytes[i];
+      }
+      s += ']';
+      return s;
+    };
+
+    return _this;
+  };
+
+  //---------------------------------------------------------------------
+  // base64EncodeOutputStream
+  //---------------------------------------------------------------------
+
+  var base64EncodeOutputStream = function() {
+
+    var _buffer = 0;
+    var _buflen = 0;
+    var _length = 0;
+    var _base64 = '';
+
+    var _this = {};
+
+    var writeEncoded = function(b) {
+      _base64 += String.fromCharCode(encode(b & 0x3f) );
+    };
+
+    var encode = function(n) {
+      if (n < 0) {
+        // error.
+      } else if (n < 26) {
+        return 0x41 + n;
+      } else if (n < 52) {
+        return 0x61 + (n - 26);
+      } else if (n < 62) {
+        return 0x30 + (n - 52);
+      } else if (n == 62) {
+        return 0x2b;
+      } else if (n == 63) {
+        return 0x2f;
+      }
+      throw 'n:' + n;
+    };
+
+    _this.writeByte = function(n) {
+
+      _buffer = (_buffer << 8) | (n & 0xff);
+      _buflen += 8;
+      _length += 1;
+
+      while (_buflen >= 6) {
+        writeEncoded(_buffer >>> (_buflen - 6) );
+        _buflen -= 6;
+      }
+    };
+
+    _this.flush = function() {
+
+      if (_buflen > 0) {
+        writeEncoded(_buffer << (6 - _buflen) );
+        _buffer = 0;
+        _buflen = 0;
+      }
+
+      if (_length % 3 != 0) {
+        // padding
+        var padlen = 3 - _length % 3;
+        for (var i = 0; i < padlen; i += 1) {
+          _base64 += '=';
+        }
+      }
+    };
+
+    _this.toString = function() {
+      return _base64;
+    };
+
+    return _this;
+  };
+
+  //---------------------------------------------------------------------
+  // base64DecodeInputStream
+  //---------------------------------------------------------------------
+
+  var base64DecodeInputStream = function(str) {
+
+    var _str = str;
+    var _pos = 0;
+    var _buffer = 0;
+    var _buflen = 0;
+
+    var _this = {};
+
+    _this.read = function() {
+
+      while (_buflen < 8) {
+
+        if (_pos >= _str.length) {
+          if (_buflen == 0) {
+            return -1;
+          }
+          throw 'unexpected end of file./' + _buflen;
+        }
+
+        var c = _str.charAt(_pos);
+        _pos += 1;
+
+        if (c == '=') {
+          _buflen = 0;
+          return -1;
+        } else if (c.match(/^\s$/) ) {
+          // ignore if whitespace.
+          continue;
+        }
+
+        _buffer = (_buffer << 6) | decode(c.charCodeAt(0) );
+        _buflen += 6;
+      }
+
+      var n = (_buffer >>> (_buflen - 8) ) & 0xff;
+      _buflen -= 8;
+      return n;
+    };
+
+    var decode = function(c) {
+      if (0x41 <= c && c <= 0x5a) {
+        return c - 0x41;
+      } else if (0x61 <= c && c <= 0x7a) {
+        return c - 0x61 + 26;
+      } else if (0x30 <= c && c <= 0x39) {
+        return c - 0x30 + 52;
+      } else if (c == 0x2b) {
+        return 62;
+      } else if (c == 0x2f) {
+        return 63;
+      } else {
+        throw 'c:' + c;
+      }
+    };
+
+    return _this;
+  };
+
+  //---------------------------------------------------------------------
+  // gifImage (B/W)
+  //---------------------------------------------------------------------
+
+  var gifImage = function(width, height) {
+
+    var _width = width;
+    var _height = height;
+    var _data = new Array(width * height);
+
+    var _this = {};
+
+    _this.setPixel = function(x, y, pixel) {
+      _data[y * _width + x] = pixel;
+    };
+
+    _this.write = function(out) {
+
+      //---------------------------------
+      // GIF Signature
+
+      out.writeString('GIF87a');
+
+      //---------------------------------
+      // Screen Descriptor
+
+      out.writeShort(_width);
+      out.writeShort(_height);
+
+      out.writeByte(0x80); // 2bit
+      out.writeByte(0);
+      out.writeByte(0);
+
+      //---------------------------------
+      // Global Color Map
+
+      // black
+      out.writeByte(0x00);
+      out.writeByte(0x00);
+      out.writeByte(0x00);
+
+      // white
+      out.writeByte(0xff);
+      out.writeByte(0xff);
+      out.writeByte(0xff);
+
+      //---------------------------------
+      // Image Descriptor
+
+      out.writeString(',');
+      out.writeShort(0);
+      out.writeShort(0);
+      out.writeShort(_width);
+      out.writeShort(_height);
+      out.writeByte(0);
+
+      //---------------------------------
+      // Local Color Map
+
+      //---------------------------------
+      // Raster Data
+
+      var lzwMinCodeSize = 2;
+      var raster = getLZWRaster(lzwMinCodeSize);
+
+      out.writeByte(lzwMinCodeSize);
+
+      var offset = 0;
+
+      while (raster.length - offset > 255) {
+        out.writeByte(255);
+        out.writeBytes(raster, offset, 255);
+        offset += 255;
+      }
+
+      out.writeByte(raster.length - offset);
+      out.writeBytes(raster, offset, raster.length - offset);
+      out.writeByte(0x00);
+
+      //---------------------------------
+      // GIF Terminator
+      out.writeString(';');
+    };
+
+    var bitOutputStream = function(out) {
+
+      var _out = out;
+      var _bitLength = 0;
+      var _bitBuffer = 0;
+
+      var _this = {};
+
+      _this.write = function(data, length) {
+
+        if ( (data >>> length) != 0) {
+          throw 'length over';
+        }
+
+        while (_bitLength + length >= 8) {
+          _out.writeByte(0xff & ( (data << _bitLength) | _bitBuffer) );
+          length -= (8 - _bitLength);
+          data >>>= (8 - _bitLength);
+          _bitBuffer = 0;
+          _bitLength = 0;
+        }
+
+        _bitBuffer = (data << _bitLength) | _bitBuffer;
+        _bitLength = _bitLength + length;
+      };
+
+      _this.flush = function() {
+        if (_bitLength > 0) {
+          _out.writeByte(_bitBuffer);
+        }
+      };
+
+      return _this;
+    };
+
+    var getLZWRaster = function(lzwMinCodeSize) {
+
+      var clearCode = 1 << lzwMinCodeSize;
+      var endCode = (1 << lzwMinCodeSize) + 1;
+      var bitLength = lzwMinCodeSize + 1;
+
+      // Setup LZWTable
+      var table = lzwTable();
+
+      for (var i = 0; i < clearCode; i += 1) {
+        table.add(String.fromCharCode(i) );
+      }
+      table.add(String.fromCharCode(clearCode) );
+      table.add(String.fromCharCode(endCode) );
+
+      var byteOut = byteArrayOutputStream();
+      var bitOut = bitOutputStream(byteOut);
+
+      // clear code
+      bitOut.write(clearCode, bitLength);
+
+      var dataIndex = 0;
+
+      var s = String.fromCharCode(_data[dataIndex]);
+      dataIndex += 1;
+
+      while (dataIndex < _data.length) {
+
+        var c = String.fromCharCode(_data[dataIndex]);
+        dataIndex += 1;
+
+        if (table.contains(s + c) ) {
+
+          s = s + c;
+
+        } else {
+
+          bitOut.write(table.indexOf(s), bitLength);
+
+          if (table.size() < 0xfff) {
+
+            if (table.size() == (1 << bitLength) ) {
+              bitLength += 1;
+            }
+
+            table.add(s + c);
+          }
+
+          s = c;
+        }
+      }
+
+      bitOut.write(table.indexOf(s), bitLength);
+
+      // end code
+      bitOut.write(endCode, bitLength);
+
+      bitOut.flush();
+
+      return byteOut.toByteArray();
+    };
+
+    var lzwTable = function() {
+
+      var _map = {};
+      var _size = 0;
+
+      var _this = {};
+
+      _this.add = function(key) {
+        if (_this.contains(key) ) {
+          throw 'dup key:' + key;
+        }
+        _map[key] = _size;
+        _size += 1;
+      };
+
+      _this.size = function() {
+        return _size;
+      };
+
+      _this.indexOf = function(key) {
+        return _map[key];
+      };
+
+      _this.contains = function(key) {
+        return typeof _map[key] != 'undefined';
+      };
+
+      return _this;
+    };
+
+    return _this;
+  };
+
+  var createDataURL = function(width, height, getPixel) {
+    var gif = gifImage(width, height);
+    for (var y = 0; y < height; y += 1) {
+      for (var x = 0; x < width; x += 1) {
+        gif.setPixel(x, y, getPixel(x, y) );
+      }
+    }
+
+    var b = byteArrayOutputStream();
+    gif.write(b);
+
+    var base64 = base64EncodeOutputStream();
+    var bytes = b.toByteArray();
+    for (var i = 0; i < bytes.length; i += 1) {
+      base64.writeByte(bytes[i]);
+    }
+    base64.flush();
+
+    return 'data:image/gif;base64,' + base64;
+  };
+
+  //---------------------------------------------------------------------
+  // returns qrcode function.
+
+  return qrcode;
+}();
+
+// multibyte support
+!function() {
+
+  qrcode.stringToBytesFuncs['UTF-8'] = function(s) {
+    // http://stackoverflow.com/questions/18729405/how-to-convert-utf8-string-to-byte-array
+    function toUTF8Array(str) {
+      var utf8 = [];
+      for (var i=0; i < str.length; i++) {
+        var charcode = str.charCodeAt(i);
+        if (charcode < 0x80) utf8.push(charcode);
+        else if (charcode < 0x800) {
+          utf8.push(0xc0 | (charcode >> 6),
+              0x80 | (charcode & 0x3f));
+        }
+        else if (charcode < 0xd800 || charcode >= 0xe000) {
+          utf8.push(0xe0 | (charcode >> 12),
+              0x80 | ((charcode>>6) & 0x3f),
+              0x80 | (charcode & 0x3f));
+        }
+        // surrogate pair
+        else {
+          i++;
+          // UTF-16 encodes 0x10000-0x10FFFF by
+          // subtracting 0x10000 and splitting the
+          // 20 bits of 0x0-0xFFFFF into two halves
+          charcode = 0x10000 + (((charcode & 0x3ff)<<10)
+            | (str.charCodeAt(i) & 0x3ff));
+          utf8.push(0xf0 | (charcode >>18),
+              0x80 | ((charcode>>12) & 0x3f),
+              0x80 | ((charcode>>6) & 0x3f),
+              0x80 | (charcode & 0x3f));
+        }
+      }
+      return utf8;
+    }
+    return toUTF8Array(s);
+  };
+
+}();
+
+(function (factory) {
+  if (typeof define === 'function' && define.amd) {
+      define([], factory);
+  } else if (typeof exports === 'object') {
+      module.exports = factory();
+  }
+}(function () {
+    return qrcode;
+}));
+
+</script>
 <script type="text/babel" data-type="module" data-compact="true" data-generator-opts='{"compact":true}'>
     import React, { useState, useEffect, useRef } from 'react';
     import { createRoot } from 'react-dom/client';
@@ -624,7 +2950,7 @@ html{-webkit-text-size-adjust:100%;scroll-padding-top:12px}
     import { initializeApp } from 'firebase/app';
 import { runTransaction as meetTransaction, limit as meetLimit } from 'firebase/firestore';
 import { runTransaction as inactivityTransaction, query as inactivityQuery, orderBy as inactivityOrderBy, documentId as inactivityDocumentId, limit as inactivityLimit, startAfter as inactivityStartAfter } from 'firebase/firestore';
-    import { getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, onAuthStateChanged, updateProfile, GoogleAuthProvider, signInWithPopup, signInWithRedirect, getRedirectResult, multiFactor, TotpMultiFactorGenerator, getMultiFactorResolver, sendEmailVerification, reload, getIdTokenResult, onIdTokenChanged } from 'firebase/auth';
+    import { getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, onAuthStateChanged, updateProfile, GoogleAuthProvider, signInWithPopup, signInWithRedirect, getRedirectResult, multiFactor, TotpMultiFactorGenerator, getMultiFactorResolver, sendEmailVerification, reload, getIdTokenResult, onIdTokenChanged, deleteUser } from 'firebase/auth';
     import { getDocFromServer, getFirestore, doc, getDoc, getDocs, setDoc, collection, addDoc, query, orderBy, onSnapshot, serverTimestamp, updateDoc, arrayUnion, arrayRemove, deleteDoc, where, limit } from 'firebase/firestore';
     import { jsPDF } from "jspdf";
     import { pipeline, env } from 'transformers';
@@ -689,6 +3015,11 @@ async function platformBackendRequest(kind,payload={},settings=window.platformPu
  const endpoint=kind==='uploads'?(settings.uploadBackendUrl||settings.r2UploadBackendUrl):settings.paymentBackendUrl;
  let url;try{url=new URL(String(endpoint||('./api/'+kind)).trim(),location.href);}catch(_){throw Object.assign(Error('O endereço do servidor de '+(kind==='uploads'?'arquivos':'pagamentos')+' é inválido.'),{code:'platform/invalid-backend-url'});}if(url.protocol!=='https:'&&!(url.protocol==='http:'&&['localhost','127.0.0.1','[::1]'].includes(url.hostname)))throw Object.assign(Error('Configure um endereço HTTPS para o servidor.'),{code:'platform/insecure-backend-url'});
  if(!auth?.currentUser)throw Object.assign(Error('Entre na plataforma para continuar.'),{code:'platform/sign-in-required',status:401});
+ if(kind==='payments'&&['create','redeem'].includes(payload.action)){
+  const identity=await platformAssertPurchaseIdentity(payload.buyerUid||auth.currentUser.uid);
+  if(payload.userId&&payload.userId!==identity.uid||payload.buyerCpf&&platformCpfDigits(payload.buyerCpf)!==identity.cpfNormalized)throw Error('A compra deve usar o CPF e o perfil da conta conectada.');
+  payload={...payload,buyerUid:identity.uid,buyerCpf:identity.cpfNormalized};
+ }
  const token=await auth.currentUser.getIdToken(),controller=new AbortController(),timer=setTimeout(()=>controller.abort(),30000);
  try{const response=await fetch(url.href,{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+token},body:JSON.stringify(payload),signal:controller.signal});const data=await response.json().catch(()=>({}));if(!response.ok)throw Object.assign(Error(data.error||((response.status===404)?'O servidor ainda não foi publicado. Confira o endereço desta integração nos Ajustes gerais.':'O servidor não concluiu esta operação.')),{code:'platform/backend-http-error',status:response.status});return data;}catch(error){if(error.name==='AbortError')throw Object.assign(Error('O servidor não respondeu. Tente novamente.'),{code:'platform/backend-timeout'});throw error;}finally{clearTimeout(timer);}
 }
@@ -726,7 +3057,7 @@ window.platformAIEndpoint=platformAIEndpoint;
 const PlatformCheckout=({item,itemType,user,onClose,settings,showNotification})=>{
  const [state,setState]=React.useState({loading:true,error:'',url:'',amount:null}),requestId=React.useRef(crypto.randomUUID());
  const title=item.title||item.titulo||'Produto';
- React.useEffect(()=>{let active=true;(async()=>{try{const attribution=await resolvePurchaseAttribution(item,itemType,platformMoney(item.price||item.preco||0));const data=await platformBackendRequest('payments',{action:'create',itemType,itemId:item.id,ref:attribution.ref,requestId:requestId.current},settings);if(!active)return;localStorage.setItem(itemType==='product'?'last_mp_order_id':'last_transaction_id',data.orderId);if(data.free){showNotification?.('Acesso liberado sem cobrança.','success');onClose();return;}const url=data.init_point||data.sandbox_init_point;if(!/^https:\/\//.test(url||''))throw Error('O servidor não retornou o endereço de pagamento.');setState({loading:false,error:'',url,amount:data.amount});}catch(e){if(active)setState({loading:false,error:e.message,url:'',amount:null});}})();return()=>{active=false;};},[item.id,user.uid]);
+ React.useEffect(()=>{let active=true;(async()=>{try{platformAssertCurrentAccount(user.uid);const attribution=await resolvePurchaseAttribution(item,itemType,platformMoney(item.price||item.preco||0));const data=await platformBackendRequest('payments',{action:'create',itemType,itemId:item.id,ref:attribution.ref,requestId:requestId.current,buyerUid:user.uid},settings);if(!active)return;localStorage.setItem(itemType==='product'?'last_mp_order_id':'last_transaction_id',data.orderId);if(data.free){showNotification?.('Acesso liberado sem cobrança.','success');onClose();return;}const url=data.init_point||data.sandbox_init_point;if(!/^https:\/\//.test(url||''))throw Error('O servidor não retornou o endereço de pagamento.');setState({loading:false,error:'',url,amount:data.amount});}catch(e){if(active)setState({loading:false,error:e.message,url:'',amount:null});}})();return()=>{active=false;};},[item.id,user.uid]);
  return <div role="dialog" aria-modal="true" aria-label="Pagamento" className="fixed inset-0 z-[100000] bg-black/80 flex items-center justify-center p-5"><div className="w-full max-w-lg border border-slate-700 rounded-2xl bg-[#080d15] text-white p-7"><header className="flex justify-between gap-5"><h2 className="text-xl font-bold">{title}</h2><button type="button" aria-label="Fechar pagamento" onClick={onClose}>✕</button></header><p className="text-slate-400 text-sm mt-3">O pagamento e sua confirmação são processados pelo Mercado Pago.</p>{state.loading?<p role="status" className="py-10 text-blue-300">Preparando seu pagamento…</p>:state.error?<div role="alert" className="mt-6 p-4 rounded-xl border border-red-900 text-red-300">{state.error}</div>:<><p className="text-3xl font-bold mt-7">{Number(state.amount).toLocaleString('pt-BR',{style:'currency',currency:'BRL'})}</p><a className="flex justify-center mt-6 px-5 py-4 bg-blue-600 hover:bg-blue-500 rounded-xl font-bold" href={state.url}>Continuar no Mercado Pago</a><p className="text-xs text-slate-400 mt-4">Após a aprovação, o acesso aparece automaticamente na plataforma.</p></>}<button type="button" className="text-slate-400 text-sm underline mt-6" onClick={onClose}>Voltar à plataforma</button></div></div>;
 };
 function platformMoney(value){if(typeof value==='number')return Number.isFinite(value)?value:0;const raw=String(value||'0').replace(/[^\d,.-]/g,'');const number=Number(raw.includes(',')?raw.replace(/\./g,'').replace(',','.'):raw);return Number.isFinite(number)?number:0;}
@@ -825,7 +3156,7 @@ function platformResolveMfa(error){
   const form=document.createElement('form');form.setAttribute('role','dialog');form.setAttribute('aria-modal','true');form.setAttribute('aria-label','Verificação em duas etapas');
   form.style.cssText='max-width:440px;width:100%;background:#111827;padding:28px;border:1px solid #475569;border-radius:20px';
   const title=document.createElement('h2');title.textContent='Verificação em duas etapas';title.style.cssText='font-size:24px;font-weight:700;margin-bottom:14px';
-  const help=document.createElement('p');help.textContent='Abra seu aplicativo autenticador e digite o código de seis dígitos para entrar.';help.style.marginBottom='18px';
+  const help=document.createElement('p');help.textContent='A verificação em duas etapas é obrigatória para proteger os dados da plataforma. Abra seu aplicativo autenticador e digite o código de seis dígitos para entrar.';help.style.marginBottom='18px';
   const select=document.createElement('select');select.setAttribute('aria-label','Autenticador');select.style.cssText='width:100%;padding:10px;background:#1e293b;color:white;margin-bottom:12px';
   factors.forEach((f,i)=>{const option=document.createElement('option');option.value=String(i);option.textContent=f.displayName||'Autenticador '+(i+1);select.append(option);});select.hidden=factors.length===1;
   const label=document.createElement('label');label.textContent='Código do autenticador';
@@ -846,14 +3177,14 @@ function platformResolveMfa(error){
   form.append(title,help,select,label,notice,submit,cancel);overlay.append(form);document.body.append(overlay);document.addEventListener('keydown',keys,true);input.focus();
  });
 }
-function StudentMfaGate({user,children}){
+function PlatformMfaGate({user,children,student=false}){
  const [state,setState]=useState('checking'),[busy,setBusy]=useState(false),[message,setMessage]=useState(''),[secret,setSecret]=useState(null),[code,setCode]=useState(''),[resendAt,setResendAt]=useState(0);
  const alive=useRef(true);
  const inspect=async()=>{
   await reload(user);
   const token=await getIdTokenResult(user,true);
   if(!alive.current)return;
-  if(token.claims.firebase?.sign_in_second_factor==='totp'){await platformEnsureGoogleProfile(user);if(!alive.current)return;setSecret(null);setState('ready');return;}
+  if(token.claims.firebase?.sign_in_second_factor==='totp'){if(student)await platformEnsureGoogleProfile(user);if(!alive.current)return;setSecret(null);setState('ready');return;}
   if(!user.emailVerified){setState('email');return;}
   setState(multiFactor(user).enrolledFactors.length?'signin':'enroll');
  };
@@ -863,8 +3194,9 @@ function StudentMfaGate({user,children}){
    const attempt=++revision;
    if(!current||current.uid!==user.uid){setState('checking');return;}
    try{const token=await getIdTokenResult(current);if(!alive.current||attempt!==revision)return;
-    if(token.claims.firebase?.sign_in_second_factor==='totp')await platformEnsureGoogleProfile(current);
+    if(token.claims.firebase?.sign_in_second_factor==='totp')if(student)await platformEnsureGoogleProfile(current);
     if(!alive.current||attempt!==revision)return;
+    if(token.claims.firebase?.sign_in_second_factor==='totp'){setSecret(null);setCode('');}
     setState(token.claims.firebase?.sign_in_second_factor==='totp'?'ready':!current.emailVerified?'email':multiFactor(current).enrolledFactors.length?'signin':'enroll');
    }catch(error){if(alive.current){setMessage(platformMfaMessage(error));setState('error');}}
   });
@@ -874,20 +3206,20 @@ function StudentMfaGate({user,children}){
  const send=()=>run(async()=>{if(Date.now()<resendAt){setMessage('Aguarde um minuto antes de reenviar.');return;}auth.languageCode='pt-BR';await sendEmailVerification(user);setResendAt(Date.now()+60000);setMessage('Enviamos um link para '+user.email+'. Confira também a pasta de spam.');});
  const generate=()=>run(async()=>{await reload(user);if(!user.emailVerified){setState('email');return;}const session=await multiFactor(user).getSession();const value=await TotpMultiFactorGenerator.generateSecret(session);if(alive.current)setSecret(value);});
  const enroll=e=>{e.preventDefault();if(!secret||!/^\d{6}$/.test(code))return;run(async()=>{
-  await multiFactor(user).enroll(TotpMultiFactorGenerator.assertionForEnrollment(secret,code),'Autenticador do aluno');
+  await multiFactor(user).enroll(TotpMultiFactorGenerator.assertionForEnrollment(secret,code),student?'Autenticador do aluno':'Autenticador da plataforma');
   setSecret(null);setCode('');setState('signin');setMessage('Autenticador ativado. Entre novamente para concluir o primeiro acesso seguro.');
  });};
  if(state==='ready')return children;
- const button='w-full rounded-xl px-4 py-3 bg-indigo-600 text-white font-bold disabled:opacity-50 mt-3';
+ const button='w-full rounded-xl px-4 py-3 bg-blue-600 text-white font-bold disabled:opacity-50 mt-3';
  return <main style={{fontFamily:"Inter,system-ui,sans-serif"}} className="min-h-screen flex items-center justify-center p-5 bg-slate-950 text-slate-100"><section className="w-full max-w-lg rounded-2xl border border-slate-700 bg-slate-900 p-7" aria-label="Segurança da conta">
-  <p className="text-indigo-300 text-sm mb-3">SEGURANÇA DA CONTA</p><h1 className="text-2xl font-bold mb-4">Verificação em duas etapas</h1>
+  <p className="text-blue-300 text-sm mb-3">SEGURANÇA DA CONTA</p><h1 className="text-2xl font-bold mb-4">Verificação em duas etapas</h1>
+  <PlatformAuthenticatorNotice/>
   {state==='checking'&&<p role="status">Conferindo sua sessão segura…</p>}
   {state==='email'&&<><p className="leading-relaxed">Primeiro, confirme seu e-mail: <strong>{user.email}</strong>. Abra o link recebido e volte a esta página.</p><button className={button} disabled={busy} onClick={send}>Enviar confirmação por e-mail</button><button className={button} disabled={busy} onClick={()=>run(inspect)}>Já confirmei meu e-mail</button></>}
   {state==='enroll'&&<><p className="leading-relaxed">Adicione esta conta ao Google Authenticator, Microsoft Authenticator ou outro aplicativo compatível no seu celular. Ele gera os códigos sem SMS.</p>
    {!secret?<button className={button} disabled={busy} onClick={generate}>Ativar autenticador</button>:<form onSubmit={enroll}>
-    <label className="block mt-4">No aplicativo, escolha adicionar chave de configuração, selecione “baseada no tempo” e copie esta chave:<input aria-label="Chave de configuração do autenticador" readOnly value={secret.secretKey} onFocus={e=>e.target.select()} className="w-full bg-slate-950 border border-slate-600 rounded-lg p-3 my-3 font-mono"/></label>
-    <p className="text-sm text-slate-300">Guarde a chave em um local seguro. Ela permite recuperar os códigos se você trocar de celular. Não compartilhe.</p>
-    <label className="block mt-4">Código de seis dígitos<input autoComplete="one-time-code" inputMode="numeric" pattern="[0-9]{6}" maxLength={6} required value={code} onChange={e=>setCode(e.target.value.replace(/\D/g,''))} className="block w-full bg-slate-950 border border-slate-600 rounded-lg p-3 mt-2"/></label><button className={button} disabled={busy}>Confirmar ativação</button><button type="button" className="w-full mt-3 text-slate-300 underline" disabled={busy} onClick={()=>{setSecret(null);setCode('');setMessage('');}}>Recomeçar configuração</button>
+    <PlatformTotpSetup secret={secret} user={user}/>
+    <label className="block mt-4">Código de seis dígitos<input autoComplete="one-time-code" inputMode="numeric" pattern="[0-9]{6}" maxLength={6} required value={code} aria-label="Código de seis dígitos para ativar autenticador" onChange={e=>setCode(e.target.value.replace(/\D/g,''))} className="block w-full bg-slate-950 border border-slate-600 rounded-lg p-3 mt-2"/></label><button className={button} disabled={busy}>Confirmar ativação</button><button type="button" className="w-full mt-3 text-slate-300 underline" disabled={busy} onClick={()=>{setSecret(null);setCode('');setMessage('');}}>Recomeçar configuração</button>
    </form>}
   </>}
   {state==='signin'&&<><p className="leading-relaxed">Seu autenticador está cadastrado. Entre novamente com sua senha ou Google e confirme o código do aplicativo. Depois, você continuará conectado enquanto sua sessão permanecer válida.</p><button className={button} disabled={busy} onClick={()=>run(()=>signOut(auth))}>Ir para o login seguro</button></>}
@@ -1767,7 +4099,7 @@ const CourseAccessGate = ({ course, user, ...props }) => {
     useEffect(() => {
         setReady(false); setError('');
         if (!user?.email) return;
-        return onSnapshot(query(collection(db, 'transactions'), where('userEmail', '==', user.email)), snap => {
+        return onSnapshot(query(collection(db, 'transactions'), where('userId', '==', user.uid)), snap => {
             setRecords(snap.docs.map(d => ({ id: d.id, ...d.data() })).filter(t => !t.userId || t.userId === user.uid)); setReady(true);
         }, () => { setError('Não foi possível verificar seu acesso. Tente novamente.'); setReady(true); });
     }, [user?.uid, user?.email, course.id]);
@@ -2161,7 +4493,7 @@ const StudentMarketplace = ({ db, user, settings, showNotification, promotions =
         let unsubCourses = () => {};
         let unsubProds = () => {};
         if (user) {
-            unsubCourses = onSnapshot(query(collection(db, "transactions"), where("userEmail", "==", user.email), where("status", "in", ["aprovado", "pago", "approved", "concluido", "concluído", "liberado"])), snap => {
+            unsubCourses = onSnapshot(query(collection(db, "transactions"), where("userId", "==", user.uid), where("status", "in", ["aprovado", "pago", "approved", "concluido", "concluído", "liberado"])), snap => {
                 setPurchasedCourses(snap.docs.map(d => d.data().courseId));
             });
             unsubProds = onSnapshot(query(collection(db, "marketplace_orders"), where("userId", "==", user.uid), where("status", "in", ["aprovado", "pago", "approved", "concluido", "concluído", "liberado"])), snap => {
@@ -5413,7 +7745,7 @@ const CertificatesSection = ({ user, courses, userProgress, certificates, custom
                 if(!db) return;
                 try {
                     const docSnap = await getDoc(doc(db, "users", user.uid));
-                    if(docSnap.exists()) setUserData(prev => ({...prev, ...docSnap.data()}));
+                    if(docSnap.exists()) setUserData(prev => ({...prev, ...docSnap.data(),cpf:platformCpfFormat(docSnap.data().cpf)}));
                 } catch (error) { console.error("Erro ao buscar perfil", error); }
             };
             fetchUserData();
@@ -5474,12 +7806,12 @@ const CertificatesSection = ({ user, courses, userProgress, certificates, custom
             setIsLoading(true);
             try {
                 if(!db) throw new Error("DB offline");
-                await updateProfile(auth.currentUser, { displayName: userData.name });
-                await setDoc(doc(db, "users", user.uid), { ...userData, updatedAt: serverTimestamp() }, { merge: true });
+                await platformSaveOwnProfile(user,userData);
+                await updateProfile(platformAssertCurrentAccount(user.uid), { displayName: userData.name });
                 setIsEditing(false);
                 if (showNotification) showNotification("Perfil atualizado com sucesso!", "success");
             } catch (error) {
-                if (showNotification) showNotification("Erro ao salvar perfil.", "error");
+                if (showNotification) showNotification(error.message||"Erro ao salvar perfil.", "error");
             } finally { setIsLoading(false); }
         };
 
@@ -5585,7 +7917,7 @@ const CertificatesSection = ({ user, courses, userProgress, certificates, custom
                                 <div className="space-y-3 md:space-y-5 relative z-10">
                                     <PremiumInput label="Nome Completo" id="profile-name" value={userData.name} onChange={e => handleChange('name', e.target.value)} disabled={!isEditing} />
                                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 md:gap-4">
-                                        <PremiumInput label="CPF" id="profile-cpf" value={userData.cpf} onChange={handleCpfChange} disabled={!isEditing} placeholder="000.000.000-00"/>
+                                        <PremiumInput label="CPF" id="profile-cpf" value={userData.cpf} onChange={handleCpfChange} disabled={!isEditing||!!userData.cpfNormalized} placeholder="000.000.000-00"/>
                                         <PremiumInput label="RG" id="profile-rg" value={userData.rg} onChange={e => handleChange('rg', e.target.value)} disabled={!isEditing} placeholder="Opcional"/>
                                     </div>
                                     <PremiumInput label="Data de Nascimento" id="profile-birth" type="date" value={userData.birthDate} onChange={e => handleChange('birthDate', e.target.value)} disabled={!isEditing}/>
@@ -7049,7 +9381,7 @@ const SupportSection = ({ user, settings }) => {
       };
 
       const [formData, setFormData] = useState({ 
-          email: '', password: '', name: ''
+          email: '', password: '', name: '', cpf: ''
       });
       const [showLoginPassword, setShowLoginPassword] = useState(false);
 
@@ -7059,44 +9391,31 @@ const SupportSection = ({ user, settings }) => {
       }, []);
 
       const handleSubmit = async (e) => {
-        e.preventDefault();
-        if (loading) return;
-        setLoading(true); setError('');
-        if (!auth) {
-            setError("Erro de conexão. Verifique sua internet.");
-            setLoading(false); return;
-        }
-
-        try {
-          if (isLogin) {
-            await guardedPasswordSignIn(auth, formData.email, formData.password);
-          } else {
-             if (!formData.name) throw new Error("Preencha seu nome completo.");
-             
-             const cred = await window.platformAuthAttempt('registration', () => createUserWithEmailAndPassword(auth, formData.email.trim(), formData.password));
-             await updateProfile(cred.user, { displayName: formData.name });
-             
-             if (db && (await getIdTokenResult(cred.user)).claims.firebase?.sign_in_second_factor === 'totp') {
-                 await inactivityTransaction(db, async tx => {
-                     const ref=doc(db, 'users', cred.user.uid), existing=await tx.get(ref);
-                     tx.set(ref, {name:formData.name, email:cred.user.email, role:'student',
-                         createdAt:existing.data()?.createdAt || serverTimestamp(), profileComplete:false}, {merge:true});
-                 });
-             }
-          }
-        } catch (err) { 
-            let msg = err.message || "Erro desconhecido";
-            const errCode = err.code || "";
-            if(errCode === "auth/invalid-credential" || errCode === "auth/user-not-found" || errCode === "auth/wrong-password") {
-                msg = "E-mail ou senha incorretos.";
-            } else if(errCode === "auth/email-already-in-use") {
-                msg = "Este e-mail já possui cadastro.";
-            } else if(errCode === "auth/weak-password") {
-                msg = "A senha deve ter pelo menos 6 caracteres.";
-            }
-            setError(msg); setLoading(false); 
-        }
-      };
+    e.preventDefault();if(loading)return;setLoading(true);setError('');
+    if(!auth){setError('Não foi possível conectar. Confira sua internet.');setLoading(false);return;}
+    let created=null;
+    try{
+     if(isLogin){await guardedPasswordSignIn(auth,formData.email,formData.password);return;}
+     if(!formData.name.trim())throw Error('Preencha seu nome completo.');
+     if(!platformCpfValid(formData.cpf))throw Error('Informe um CPF válido com 11 dígitos. Cada CPF só pode ter uma conta.');
+     window.platformRegistrationPending=true;
+     const credential=await window.platformAuthAttempt('registration',()=>createUserWithEmailAndPassword(auth,formData.email.trim(),formData.password));created=credential.user;
+     await platformIdentityRequest({action:'reserve',cpf:platformCpfDigits(formData.cpf)},settings,created.uid);
+     await updateProfile(created,{displayName:formData.name.trim()});
+     window.platformPendingCpf={uid:created.uid,cpf:platformCpfFormat(formData.cpf)};
+     onLogin(created);
+    }catch(error){
+     if(created){
+      // Apaga somente a credencial que acabou de ser criada nesta tentativa.
+      let canDelete=['platform/cpf-in-use','platform/invalid-cpf','platform/cpf-not-initialized'].includes(error.code);
+      try{await platformIdentityRequest({action:'release-reservation',cpf:platformCpfDigits(formData.cpf)},settings,created.uid);canDelete=true;}catch(_){}
+      // Uma falha de conexão não deixa uma reserva presa a uma conta apagada.
+      if(canDelete){try{await deleteUser(created);}catch(_){try{await signOut(auth);}catch(_){} }}
+      else window.platformPendingCpf={uid:created.uid,cpf:platformCpfFormat(formData.cpf)};
+     }
+     const messages={'auth/invalid-credential':'E-mail ou senha incorretos.','auth/user-not-found':'E-mail ou senha incorretos.','auth/wrong-password':'E-mail ou senha incorretos.','auth/email-already-in-use':'Este e-mail já possui cadastro.','auth/weak-password':'A senha deve ter pelo menos 6 caracteres.'};setError(messages[error.code]||error.message||'Não foi possível concluir o cadastro.');
+    }finally{window.platformRegistrationPending=false;window.dispatchEvent(new Event('platform-registration-complete'));setLoading(false);}
+   };
 
       const [googleRetryRedirect, setGoogleRetryRedirect] = useState(false);
       const [googleHelp, setGoogleHelp] = useState('');
@@ -7192,7 +9511,7 @@ const SupportSection = ({ user, settings }) => {
                     </div>
                 )}
 
-                <form onSubmit={handleSubmit} className="space-y-5">
+                <div className="mb-4 text-xs text-slate-400 leading-relaxed">Por política de segurança e preservação de dados, o acesso exige verificação em duas etapas. Após entrar, você poderá instalar o autenticador e adicionar sua conta por QR code.</div><form onSubmit={handleSubmit} className="space-y-5">
                     <div className="space-y-4 stagger-item delay-3">
                         
                         {!isLogin && (
@@ -7209,7 +9528,8 @@ const SupportSection = ({ user, settings }) => {
                             </div>
                         )}
 
-                        <div className="space-y-1.5 text-left">
+                        {!isLogin&&<div className="space-y-1.5 text-left"><label htmlFor="registration-cpf" className="block text-[10px] font-bold text-primary uppercase tracking-widest ml-1">Seu CPF</label><input id="registration-cpf" aria-label="CPF do titular da conta" inputMode="numeric" autoComplete="off" value={formData.cpf} onChange={e=>setFormData({...formData,cpf:platformCpfFormat(e.target.value)})} required maxLength={14} placeholder="000.000.000-00" className="w-full px-4 py-3 bg-white rounded-xl text-slate-900 text-sm"/><p className="text-xs text-slate-400">Use seu próprio CPF. Cada CPF só pode ter uma conta e as compras ficam vinculadas a ela.</p></div>}
+     <div className="space-y-1.5 text-left">
                             <label className="block text-[10px] font-bold text-primary uppercase tracking-widest ml-1">Endereço de E-mail</label>
                             <input 
                                 type="email" 
@@ -7271,11 +9591,12 @@ const SupportSection = ({ user, settings }) => {
     // 👆 FIM DO NOVO CÓDIGO 👆
 
     // --- MODAL DE COMPLETAR CADASTRO (CORRIGIDO - ALTO CONTRASTE) ---
-    const CompleteRegistrationModal = ({ user, onSuccess }) => {
+    const CompleteRegistrationModal = ({ user, onSuccess, initialProfile={} }) => {
         const [formData, setFormData] = useState({
-            cpf: '', phone: '', zipCode: '', address: '', number: '', neighborhood: '', city: '', state: '' 
+            cpf: window.platformPendingCpf?.uid===user.uid?window.platformPendingCpf.cpf:'', phone: '', zipCode: '', address: '', number: '', neighborhood: '', city: '', state: '' 
         });
-        const [loading, setLoading] = useState(false);
+        const [loading, setLoading] = useState(false),[error,setError]=useState('');
+        useEffect(()=>{setFormData(old=>({...old,...Object.fromEntries(Object.keys(old).filter(key=>initialProfile[key]!==undefined).map(key=>[key,key==='cpf'?platformCpfFormat(initialProfile[key]):initialProfile[key]]))}));},[user.uid]);
 
         const handleCpfChange = (e) => {
             let v = e.target.value.replace(/\D/g, '').slice(0, 11);
@@ -7302,13 +9623,13 @@ const SupportSection = ({ user, settings }) => {
 
         const handleSave = async (e) => {
             e.preventDefault();
-            setLoading(true);
+            if(loading)return;setLoading(true);setError('');
             try {
-                await setDoc(doc(db, "users", user.uid), { ...formData, updatedAt: serverTimestamp() }, { merge: true });
+                await platformSaveOwnProfile(user,formData);
+                if(window.platformPendingCpf?.uid===user.uid)delete window.platformPendingCpf;
                 onSuccess();
             } catch (error) {
-                console.error("Erro ao salvar:", error);
-                window.platformAlert("Erro ao salvar dados.");
+                setError(error.message||"Erro ao salvar dados.");
             } finally { setLoading(false); }
         };
 
@@ -7324,7 +9645,7 @@ const SupportSection = ({ user, settings }) => {
                         <p className="text-slate-500 dark:text-slate-400 mt-2">Identificamos que faltam alguns dados obrigatórios. Complete abaixo para liberar seu acesso.</p>
                     </div>
 
-                    <form onSubmit={handleSave} className="space-y-4">
+                    {error&&<p role="alert" className="mb-4 text-sm text-red-400">{error}</p>}<p className="text-xs text-slate-400 mb-4">Informe seu próprio CPF. Ele será vinculado a esta conta e não poderá ser substituído para realizar compras em nome de outra pessoa.</p><form onSubmit={handleSave} className="space-y-4">
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                             <Input label="CPF" value={formData.cpf} onChange={handleCpfChange} placeholder="000.000.000-00" required />
                             <Input label="Telefone" value={formData.phone} onChange={handlePhoneChange} placeholder="(00) 00000-0000" required />
@@ -10099,62 +12420,15 @@ const PointsWalletSection = ({ user, courses, purchasedIds, userPoints, db, setP
     const currentLevel = [...levels].sort((a,b) => (b.requiredPoints || 0) - (a.requiredPoints || 0)).find(l => userTotalEarned >= (l.requiredPoints || 0));
 
     const handleExchange = async (course) => {
-        if (userPoints < course.pointsCost) {
-            showNotification(`Saldo insuficiente. Faltam ${course.pointsCost - userPoints} ${coinName.p.toLowerCase()}.`, "error");
-            return;
-        }
-        
-        requestConfirmation(
-            "Confirmar Troca",
-            `Deseja investir ${course.pointsCost} ${coinName.p.toLowerCase()} para liberar o curso "${course.title || course.titulo}"?`,
-            "Confirmar Troca",
-            async () => {
-                setIsProcessing(true);
-                try {
-                    const userRef = doc(db, "users", user.uid);
-                    const userSnap = await getDoc(userRef);
-                    if (userSnap.exists()) {
-                        const uData = userSnap.data();
-                        await updateDoc(userRef, {
-                            pointsSpent: (Number(uData.pointsSpent) || 0) + Number(course.pointsCost),
-                            pointsBalance: (Number(uData.pointsBalance) || 0) - Number(course.pointsCost)
-                        });
-                    }
-
-                    await addDoc(collection(db, "transactions"), {
-                        courseId: course.id, courseTitle: course.title || course.titulo, userId: user.uid, userName: user.displayName || 'Aluno',
-                        userEmail: user.email, valor: 0, status: 'pago', method: 'points_exchange', pointsCost: course.pointsCost,
-                        createdAt: new Date(), updatedAt: new Date()
-                    });
-
-                    setPurchasedIds(prev => [...prev, course.id]);
-                    showNotification("Troca realizada com sucesso! O curso já está liberado.", "success");
-
-                    // 👇 DISPARO DE E-MAIL (RESGATE POR PONTOS) 👇
-                    let capaDoCurso = course.cover || course.thumbnailUrl || "https://images.unsplash.com/photo-1616469829941-c7200edec809?q=80&w=600";
-                    fetch("https://script.google.com/macros/s/AKfycbzyuxuOw0fx5YiAWuE_PaN8JE9VrupAStYQfKk6fFDMiLMn7BARtbLagoF3sPbhg9A/exec", {
-                        method: "POST", mode: "no-cors", headers: { "Content-Type": "text/plain;charset=utf-8" },
-                        body: JSON.stringify({
-                            to: user.email,
-                            userName: user.displayName || 'Aluno',
-                            itemName: course.title || course.titulo,
-                            itemImage: capaDoCurso,
-                            itemType: "course", // MUDADO PARA COURSE PARA LIBERAR ACESSO
-                            subject: "Seu Acesso via Recompensa foi Liberado!",
-                            titleHeader: "RECOMPENSA LIBERADA",
-                            message: `Parabéns! Você resgatou "${course.title || course.titulo}" utilizando seus pontos. O seu acesso ao curso já foi liberado na área do aluno.`
-                        })
-                    }).catch(e => console.log("Erro no e-mail de resgate: ", e));
-                    // 👆 FIM DO DISPARO 👇
-
-                } catch (error) {
-                    showNotification("Erro ao processar a troca. Tente novamente.", "error");
-                } finally {
-                    setIsProcessing(false);
-                }
-            }
-        ); 
-    };
+   if(isProcessing)return;
+   requestConfirmation('Confirmar Troca',`Deseja usar ${course.pointsCost} pontos para liberar "${course.title||course.titulo}"?`,'Confirmar Troca',async()=>{
+    setIsProcessing(true);try{
+     platformAssertCurrentAccount(user.uid);
+     await platformBackendRequest('payments',{action:'redeem',itemType:'course',itemId:course.id,requestId:crypto.randomUUID(),buyerUid:user.uid});
+     setPurchasedIds(prev=>[...new Set([...prev,course.id])]);showNotification('Troca realizada com sucesso! O curso já está liberado.','success');
+    }catch(error){showNotification(error.message||'Não foi possível realizar a troca.','error');}finally{setIsProcessing(false);}
+   });
+  };
 
     const rewardCourses = courses.filter(c => Number(c.pointsCost) > 0);
 
@@ -10275,17 +12549,17 @@ const MyCoursesSection = ({ courses, purchasedIds, onSelectCourse, user, db, set
             if (showNotification) showNotification("Enviando solicitação de cancelamento...", "info");
     
             const validStatus = ["pago", "approved", "aprovado", "liberado", "concluido", "concluído"];
-            let qTrans = query(collection(db, "transactions"), where("userEmail", "==", user.email), where("courseId", "==", course.id), where("status", "in", validStatus));
+            let qTrans = query(collection(db, "transactions"), where("userId", "==", user.uid), where("courseId", "==", course.id), where("status", "in", validStatus));
             let transSnap = await getDocs(qTrans);
     
             if (transSnap.empty) {
                 const courseTitle = course.title || course.titulo;
-                qTrans = query(collection(db, "transactions"), where("userEmail", "==", user.email), where("courseTitle", "==", courseTitle), where("status", "in", validStatus));
+                qTrans = query(collection(db, "transactions"), where("userId", "==", user.uid), where("courseTitle", "==", courseTitle), where("status", "in", validStatus));
                 transSnap = await getDocs(qTrans);
             }
 
             if (transSnap.empty) {
-                qTrans = query(collection(db, "transactions"), where("userEmail", "==", user.email), where("courseId", "==", course.id));
+                qTrans = query(collection(db, "transactions"), where("userId", "==", user.uid), where("courseId", "==", course.id));
                 transSnap = await getDocs(qTrans);
             }
     
@@ -11287,7 +13561,7 @@ function useCustomStudentTabs(user,purchasedIds=[],groups=[]){
                    });
                    
                    // 2. Transações em Tempo Real (A MÁGICA DA LIBERAÇÃO IMEDIATA)
-                   const qTrans = query(collection(db, "transactions"), where("userEmail", "==", user.email), where("status", "in", ["aprovado", "pago", "approved", "concluido", "concluído", "liberado"]));
+                   const qTrans = query(collection(db, "transactions"), where("userId", "==", user.uid), where("status", "in", ["aprovado", "pago", "approved", "concluido", "concluído", "liberado"]));
                    unsubTrans = onSnapshot(qTrans, (snap) => {
                        setPurchasedIds(snap.docs.map(d => d.data().courseId));
                    });
@@ -11311,51 +13585,18 @@ function useCustomStudentTabs(user,purchasedIds=[],groups=[]){
 
        const handleSelectCourse = (course) => { if(!course||!audienceAllows(course.audienceConfig||{},user,purchasedIds,audienceState.groups))return showNotification('Este conteúdo não está disponível para sua conta.','warning');setSelectedCourse(course);setView('course_details'); }; 
        const handleResumeCourse = (course, modIdx, lessonIdx) => { setSelectedCourse(course); setView('course_player'); };
-       const handleStartCourse = async (courseToStart) => { 
-    // Se o aluno não tem o curso, ele só pode ter chegado aqui se for GRATUITO.
-    // Então, vamos matricular ele silenciosamente no banco de dados!
-    if (!purchasedIds.includes(courseToStart.id)) {
-        try {
-            await addDoc(collection(db, "transactions"), {
-                courseId: courseToStart.id,
-                courseTitle: courseToStart.title || courseToStart.titulo || 'Curso Gratuito',
-                userId: user.uid,
-                userName: user.displayName || 'Aluno',
-                userEmail: user.email,
-                valor: 0,
-                status: 'pago', // Marca como pago para o sistema liberar o acesso permanentemente
-                method: 'free_enrollment',
-                createdAt: serverTimestamp(),
-                updatedAt: serverTimestamp()
-            });
-            
-            // Atualiza os cursos que ele tem no mesmo segundo
-            setPurchasedIds(prev => [...prev, courseToStart.id]);
-            if (showNotification) showNotification("Curso gratuito adicionado aos seus portais!", "success");
-
-            // 👇 DISPARO DE E-MAIL (CURSO GRÁTIS) 👇
-            let capaDoCurso = courseToStart.cover || courseToStart.thumbnailUrl || "https://images.unsplash.com/photo-1616469829941-c7200edec809?q=80&w=600";
-            fetch("https://script.google.com/macros/s/AKfycbzyuxuOw0fx5YiAWuE_PaN8JE9VrupAStYQfKk6fFDMiLMn7BARtbLagoF3sPbhg9A/exec", {
-                method: "POST", mode: "no-cors", headers: { "Content-Type": "text/plain;charset=utf-8" },
-                body: JSON.stringify({
-                    to: user.email,
-                    userName: user.displayName || 'Aluno',
-                    itemName: courseToStart.title || courseToStart.titulo || 'Curso Gratuito',
-                    itemImage: capaDoCurso,
-                    itemType: "course", // MUDADO PARA COURSE PARA LIBERAR ACESSO
-                    subject: "Seu Novo Curso Gratuito foi Liberado!",
-                    titleHeader: "ACESSO GRATUITO LIBERADO",
-                    message: `Olá! Seu acesso ao curso gratuito "${courseToStart.title || courseToStart.titulo}" foi liberado com sucesso. Aproveite os estudos!`
-                })
-            }).catch(e => console.log("Erro no e-mail grátis: ", e));
-            // 👆 FIM DO DISPARO 👇
-
-        } catch (err) {
-            console.error("Erro ao matricular no curso gratuito:", err);
-        }
-    }
-    setView('course_player'); 
-};
+       const handleStartCourse = async (courseToStart) => {
+   if(!courseToStart)return;
+   if(!purchasedIds.includes(courseToStart.id)){
+    try{
+     platformAssertCurrentAccount(user.uid);
+     const result=await platformBackendRequest('payments',{action:'create',itemType:'course',itemId:courseToStart.id,requestId:crypto.randomUUID(),buyerUid:user.uid,requireFree:true},currentSettings);
+     if(!result.free||result.status!=='pago')throw Error('Este curso exige uma compra confirmada antes de começar.');
+     setPurchasedIds(prev=>[...new Set([...prev,courseToStart.id])]);showNotification?.('Curso gratuito adicionado aos seus portais!','success');
+    }catch(error){showNotification?.(error.message||'Não foi possível matricular nesta conta.','error');return;}
+   }
+   setSelectedCourse(courseToStart);setView('course_player');
+  };
        const handlePurchaseSuccess = (courseId) => { setPurchasedIds(prev => [...prev, courseId]); setCheckoutCourse(null); showNotification("Acesso Liberado!", "success"); };
        
        const myCoursesList = allCourses.filter(c => purchasedIds.includes(c.id));
@@ -12158,6 +14399,7 @@ function InactivityGate({user,children}) {
          // A) Tenta conectar com Firebase Auth
          if (typeof isFirebaseAvailable !== 'undefined' && isFirebaseAvailable && auth) {
              unsubscribeAuth = onAuthStateChanged(auth, (currentUser) => {
+               if(window.platformRegistrationPending)return;
                setUser(currentUser);
                if (currentUser) setShowAuth(false);
                setLoading(false); // Sucesso
@@ -12170,6 +14412,8 @@ function InactivityGate({user,children}) {
              setTimeout(() => setLoading(false), 1000);
          }
          
+         const finishRegistration=()=>{if(!window.platformRegistrationPending){const current=auth?.currentUser;setUser(current);if(current)setShowAuth(false);setLoading(false);}};
+         window.addEventListener('platform-registration-complete',finishRegistration);
          // B) TRAVA DE SEGURANÇA (TIMEOUT)
          const safetyTimer = setTimeout(() => {
              if (loading) {
@@ -12181,6 +14425,7 @@ function InactivityGate({user,children}) {
          return () => { 
              if(unsubscribeAuth) unsubscribeAuth(); 
              clearTimeout(safetyTimer);
+             window.removeEventListener('platform-registration-complete',finishRegistration);
          };
        }, [loading, isPreview]);
 
@@ -12212,7 +14457,7 @@ function InactivityGate({user,children}) {
        // 3. FLUXO NORMAL DA APLICAÇÃO (Aluno Autenticado ou Visitante)
        // 👇 AQUI A MÁGICA FINAL: O APP PASSA A LISTA DE PROMOÇÕES (promotions={promocoes}) PARA O DASHBOARD 👇
        if (user) {
-           return <StudentMfaGate key={user.uid} user={user}><InactivityGate key={user.uid} user={user}><StudentDashboard user={user} settings={genSettings} certificates={certificados} promotions={promocoes} onLogout={() => { if(auth) signOut(auth); else setUser(null); }} /></InactivityGate></StudentMfaGate>;
+           return <PlatformMfaGate key={user.uid} user={user} student><PlatformStudentIdentityGate key={user.uid} user={user}><InactivityGate key={user.uid} user={user}><StudentDashboard user={user} settings={genSettings} certificates={certificados} promotions={promocoes} onLogout={() => { if(auth) signOut(auth); else setUser(null); }} /></InactivityGate></PlatformStudentIdentityGate></PlatformMfaGate>;
        }
        
        if (showAuth) {
@@ -12251,7 +14496,129 @@ function InactivityGate({user,children}) {
     }
   
   
-  </script>
+  
+// O QR é calculado localmente. A chave TOTP nunca vai para serviços de imagens.
+const PLATFORM_AUTHENTICATOR_STORES={
+ android:'https://play.google.com/store/apps/details?id=com.google.android.apps.authenticator2',
+ ios:'https://apps.apple.com/br/app/google-authenticator/id388497605'
+};
+function platformCpfDigits(value){return String(value||'').replace(/\D/g,'');}
+function platformCpfValid(value){
+ const cpf=platformCpfDigits(value);
+ if(cpf.length!==11||/^(\d)\1{10}$/.test(cpf))return false;
+ for(let size=9;size<=10;size++){
+  let sum=0;for(let i=0;i<size;i++)sum+=Number(cpf[i])*(size+1-i);
+  const digit=(sum*10)%11;
+  if(Number(cpf[size])!==(digit===10?0:digit))return false;
+ }return true;
+}
+function platformCpfFormat(value){return platformCpfDigits(value).slice(0,11).replace(/(\d{3})(\d)/,'$1.$2').replace(/(\d{3})(\d)/,'$1.$2').replace(/(\d{3})(\d{1,2})$/,'$1-$2');}
+function PlatformLocalQr({value,label,size=224}){
+ const canvas=React.useRef(null),[error,setError]=React.useState(false);
+ React.useEffect(()=>{
+  setError(false);const target=canvas.current;if(!target||!value)return;
+  try{
+   const qr=window.qrcode(0,'M');qr.addData(String(value),'Byte');qr.make();
+   const count=qr.getModuleCount(),quiet=4,cell=Math.max(4,Math.ceil(size/(count+quiet*2)));
+   target.width=target.height=(count+quiet*2)*cell;const context=target.getContext('2d');
+   context.fillStyle='#fff';context.fillRect(0,0,target.width,target.height);context.fillStyle='#000';
+   for(let row=0;row<count;row++)for(let col=0;col<count;col++)if(qr.isDark(row,col))context.fillRect((col+quiet)*cell,(row+quiet)*cell,cell,cell);
+  }catch(_){setError(true);}
+  return()=>{const context=target.getContext('2d');context?.clearRect(0,0,target.width,target.height);};
+ },[value,size]);
+ return error?<p role="alert" className="text-amber-200 text-sm">Não foi possível desenhar o QR code. Use o link ou a chave de configuração abaixo.</p>:<canvas ref={canvas} role="img" aria-label={label} style={{width:size,height:size,maxWidth:'100%',imageRendering:'pixelated',background:'#fff',borderRadius:8}}/>;
+}
+function PlatformAuthenticatorNotice(){
+ const [store,setStore]=React.useState(/iPad|iPhone|iPod/.test(navigator.userAgent)?'ios':'android');
+ return <aside className="mt-4 mb-5 rounded-xl border border-blue-500/40 bg-blue-950/40 p-4" aria-label="Política de segurança da plataforma">
+  <h2 className="text-sm font-bold text-blue-200">Autenticador obrigatório para proteger seus dados</h2>
+  <p className="text-sm leading-relaxed text-slate-200 mt-2">A verificação em duas etapas faz parte da política de segurança e preservação de dados da plataforma. Instale o Google Authenticator, Microsoft Authenticator ou outro aplicativo compatível antes de continuar.</p>
+  <div className="flex gap-2 flex-wrap mt-3">
+   <a href={PLATFORM_AUTHENTICATOR_STORES.android} target="_blank" rel="noopener noreferrer" className="rounded-lg border border-slate-600 bg-black px-3 py-2 text-sm text-white">Baixar para Android</a>
+   <a href={PLATFORM_AUTHENTICATOR_STORES.ios} target="_blank" rel="noopener noreferrer" className="rounded-lg border border-slate-600 bg-black px-3 py-2 text-sm text-white">Baixar para iPhone</a>
+  </div>
+  <details className="mt-3 text-sm"><summary className="cursor-pointer text-blue-200">QR code para baixar o aplicativo</summary><div className="mt-3 flex flex-col items-center gap-3">
+   <label className="w-full">Seu celular<select aria-label="Loja do autenticador" value={store} onChange={e=>setStore(e.target.value)} className="block w-full bg-slate-950 text-white border border-slate-600 rounded-lg p-2 mt-2"><option value="android">Android — Google Play</option><option value="ios">iPhone — App Store</option></select></label>
+   <PlatformLocalQr value={PLATFORM_AUTHENTICATOR_STORES[store]} label="QR code para baixar Google Authenticator" size={176}/>
+   <p className="text-slate-300">Este QR abre a loja. O QR da sua conta aparece ao iniciar a configuração abaixo.</p>
+  </div></details>
+ </aside>;
+}
+function PlatformTotpSetup({secret,user}){
+ const issuer=String(window.platformPublicSettings?.siteName||window.platformPublicSettings?.platformName||'Plataforma de Ensino').slice(0,64);
+ const uri=React.useMemo(()=>{
+  const url=new URL(secret.generateQrCodeUrl(encodeURIComponent(user.email||user.uid),encodeURIComponent(issuer)));
+  url.searchParams.set('period',String(secret.codeIntervalSeconds||30));return url.href;
+ },[secret,user.uid,user.email,issuer]);
+ return <div className="mt-5">
+  <h2 className="font-bold text-white">Escaneie para adicionar sua conta</h2>
+  <p className="text-sm text-slate-300 leading-relaxed mt-2">No autenticador, toque em + e escolha “Escanear QR code”. Depois, digite nesta página os seis números que o aplicativo mostrar.</p>
+  <div className="flex justify-center my-5"><PlatformLocalQr value={uri} label="QR code para configurar a verificação em duas etapas desta conta"/></div>
+  <a href={uri} referrerPolicy="no-referrer" className="block text-center text-blue-300 underline text-sm">Estou no mesmo celular: abrir no autenticador</a>
+  <details className="mt-4 text-sm"><summary className="cursor-pointer text-slate-300">Não consigo escanear: usar chave manual</summary>
+   <label className="block mt-3">Escolha uma conta “baseada no tempo” e informe esta chave:<input aria-label="Chave de configuração do autenticador" readOnly value={secret.secretKey} onFocus={e=>e.target.select()} className="w-full bg-slate-950 border border-slate-600 rounded-lg p-3 my-3 font-mono"/></label>
+  </details>
+  <p className="mt-3 text-xs text-slate-400 leading-relaxed">O QR code e a chave são privados. Não compartilhe nem envie uma captura de tela. Mantenha o aplicativo e o relógio do celular atualizados.</p>
+ </div>;
+}
+function platformAssertCurrentAccount(expectedUid){
+ const current=auth?.currentUser;
+ if(!current||expectedUid&&current.uid!==expectedUid)throw Object.assign(Error('Esta operação só pode ser feita no perfil da conta conectada. Entre no seu próprio perfil.'),{code:'platform/account-mismatch'});
+ return current;
+}
+async function platformIdentityRequest(payload,settings=window.platformPublicSettings||{},expectedUid){
+ const current=platformAssertCurrentAccount(expectedUid);let url;
+ try{
+  const configured=settings.identityBackendUrl||window.PLATFORM_IDENTITY_BACKEND_URL;
+  url=configured?new URL(configured,location.href):settings.paymentBackendUrl?new URL('./identity',new URL(settings.paymentBackendUrl,location.href)):new URL('./api/identity',location.href);
+ }catch(_){throw Error('O endereço do serviço interno de segurança é inválido.');}
+ if(url.protocol!=='https:'&&!(url.protocol==='http:'&&['localhost','127.0.0.1','[::1]'].includes(url.hostname)))throw Error('Configure HTTPS para o serviço interno de segurança.');
+ const token=await current.getIdToken(),controller=new AbortController(),timeout=setTimeout(()=>controller.abort(),30000);
+ try{
+  const response=await fetch(url.href,{method:'POST',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},body:JSON.stringify(payload),signal:controller.signal,cache:'no-store'});
+  const data=await response.json().catch(()=>({}));
+  if(!response.ok)throw Object.assign(Error(data.error||(response.status===404?'O serviço interno de segurança precisa ser publicado. Solicite a configuração ao administrador.':'Não foi possível validar a segurança desta conta.')),{code:data.code||'platform/identity-error',status:response.status});
+  platformAssertCurrentAccount(current.uid);return data;
+ }catch(error){if(error.name==='AbortError')throw Error('A verificação de segurança demorou. Confira sua internet e tente novamente.');throw error;}
+ finally{clearTimeout(timeout);}
+}
+async function platformAssertPurchaseIdentity(expectedUid){
+ const current=platformAssertCurrentAccount(expectedUid),token=await getIdTokenResult(current);
+ if(token.claims.firebase?.sign_in_second_factor!=='totp')throw Error('Entre com o código do autenticador antes de realizar uma compra.');
+ const data=await platformIdentityRequest({action:'check'},undefined,current.uid);
+ if(data.uid!==current.uid||!platformCpfValid(data.cpfNormalized))throw Error('O CPF não está vinculado ao seu perfil. Complete seu cadastro antes de comprar.');
+ return data;
+}
+async function platformSaveOwnProfile(user,form){
+ platformAssertCurrentAccount(user.uid);
+ if(!platformCpfValid(form.cpf))throw Error('Informe um CPF válido com 11 dígitos.');
+ const fields=['name','cpf','rg','phone','birthDate','zipCode','address','number','neighborhood','city','state','bio','photoBase64'];
+ const profile=Object.fromEntries(fields.filter(key=>form[key]!==undefined).map(key=>[key,form[key]]));
+ return platformIdentityRequest({action:'save-profile',profile},undefined,user.uid);
+}
+function PlatformStudentIdentityGate({user,children}){
+ const [state,setState]=React.useState({loading:true,active:false,error:'',profile:{}}),[retry,setRetry]=React.useState(0);
+ React.useEffect(()=>{let alive=true;setState(old=>({...old,loading:true,error:''}));platformIdentityRequest({action:'profile-status'},undefined,user.uid).then(data=>{if(alive)setState({loading:false,active:data.active===true,error:'',profile:data.profile||{}});}).catch(error=>{if(alive)setState({loading:false,active:false,error:error.message,profile:{}});});return()=>{alive=false;};},[user.uid,retry]);
+ if(state.active)return children;
+ if(!state.loading&&!state.error)return <CompleteRegistrationModal user={user} initialProfile={state.profile} onSuccess={()=>setRetry(value=>value+1)}/>;
+ return <main className="min-h-screen bg-black text-white grid place-items-center p-6"><section className="max-w-lg rounded-2xl border border-slate-700 p-7 bg-slate-950"><h1 className="font-bold text-xl">Segurança do seu cadastro</h1><p role={state.error?'alert':'status'} className="mt-4 text-sm leading-relaxed text-slate-300">{state.loading?'Verificando o CPF vinculado à sua conta…':state.error}</p>{state.error&&<button type="button" className="mt-5 rounded-xl bg-blue-600 px-4 py-3 font-bold" onClick={()=>setRetry(value=>value+1)}>Tentar novamente</button>}<button type="button" className="block mt-5 text-slate-400 underline" onClick={()=>signOut(auth)}>Sair da conta</button></section></main>;
+}
+function PlatformIdentityAdminCard({settings,showNotification}){
+ const [state,setState]=React.useState({loading:true,ready:false,error:'',report:null}),[busy,setBusy]=React.useState(false);
+ const refresh=async()=>{try{const data=await platformIdentityRequest({action:'security-status'},settings);setState({loading:false,ready:data.ready,error:'',report:data.report||null});}catch(error){setState({loading:false,ready:false,error:error.message,report:null});}};
+ React.useEffect(()=>{refresh();},[settings?.identityBackendUrl,settings?.paymentBackendUrl]);
+ const initialize=async()=>{if(busy)return;setBusy(true);try{const data=await platformIdentityRequest({action:'initialize'},settings);setState({loading:false,ready:data.ready,error:'',report:data.report});showNotification?.('Índice de CPF atualizado. Cadastros com conflitos permanecem bloqueados.','success');}catch(error){setState(old=>({...old,error:error.message}));showNotification?.(error.message,'error');}finally{setBusy(false);}};
+ return <section className="mt-5 rounded-2xl border border-slate-700 bg-[#090c12] p-6 text-white" aria-label="Segurança de CPF e compras">
+  <h3 className="text-lg font-bold">Segurança de CPF e compras</h3><p className="text-sm text-slate-400 mt-2">Cada CPF fica vinculado a uma única conta. Compras, matrículas e resgates usam o perfil da pessoa conectada, com verificação interna no servidor.</p>
+  <p className="text-sm mt-4 text-blue-200" role="status">{state.loading?'Verificando configuração…':state.ready?'Proteção interna preparada.': 'Inicialize os CPFs existentes antes de liberar novos cadastros e compras.'}</p>
+  {state.error&&<p role="alert" className="mt-3 text-sm text-red-300">{state.error}</p>}
+  {state.report&&<div className="mt-4 text-sm text-slate-300"><p>{state.report.indexed||0} contas vinculadas · {state.report.conflictCount||0} CPFs em conflito · {state.report.invalidCount||0} CPFs inválidos</p>{(state.report.conflicts||[]).length>0&&<details className="mt-3"><summary className="cursor-pointer text-amber-200">Ver conflitos que exigem revisão</summary><ul className="mt-2 space-y-2">{state.report.conflicts.map((item,index)=><li key={index}>{item.cpfMasked}: {(item.accounts||[]).map(account=>account.name||account.uid).join(' / ')}</li>)}</ul><p className="mt-3 text-xs">Revise os cadastros envolvidos na área de alunos e execute a atualização novamente. Nenhuma conta será apagada ou terá compras transferidas.</p></details>}</div>}
+  <button type="button" onClick={initialize} disabled={busy||state.loading} className="mt-5 px-4 py-3 rounded-xl bg-blue-600 hover:bg-blue-500 font-bold disabled:opacity-50">{busy?'Verificando os cadastros…':state.ready?'Atualizar e revisar CPFs existentes':'Inicializar proteção de CPF'}</button>
+  <p className="text-xs text-slate-400 mt-3">O autenticador de dois fatores é obrigatório. As regras de segurança incluídas no pacote devem estar publicadas no Firebase.</p>
+ </section>;
+}
+
+</script>
 
 <script>
 (function() {
