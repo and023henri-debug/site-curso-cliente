@@ -3213,7 +3213,7 @@ function PlatformMfaGate({user,children,student=false}){
  const button='w-full rounded-xl px-4 py-3 bg-blue-600 text-white font-bold disabled:opacity-50 mt-3';
  return <main style={{fontFamily:"Inter,system-ui,sans-serif"}} className="min-h-screen flex items-center justify-center p-5 bg-slate-950 text-slate-100"><section className="w-full max-w-lg rounded-2xl border border-slate-700 bg-slate-900 p-7" aria-label="Segurança da conta">
   <p className="text-blue-300 text-sm mb-3">SEGURANÇA DA CONTA</p><h1 className="text-2xl font-bold mb-4">Verificação em duas etapas</h1>
-  <PlatformAuthenticatorNotice/>
+  <PlatformAuthenticatorNotice setupActive={!!secret}/>
   {state==='checking'&&<p role="status">Conferindo sua sessão segura…</p>}
   {state==='email'&&<><p className="leading-relaxed">Primeiro, confirme seu e-mail: <strong>{user.email}</strong>. Abra o link recebido e volte a esta página.</p><button className={button} disabled={busy} onClick={send}>Enviar confirmação por e-mail</button><button className={button} disabled={busy} onClick={()=>run(inspect)}>Já confirmei meu e-mail</button></>}
   {state==='enroll'&&<><p className="leading-relaxed">Adicione esta conta ao Google Authenticator, Microsoft Authenticator ou outro aplicativo compatível no seu celular. Ele gera os códigos sem SMS.</p>
@@ -14526,9 +14526,9 @@ function PlatformLocalQr({value,label,size=224}){
   }catch(_){setError(true);}
   return()=>{const context=target.getContext('2d');context?.clearRect(0,0,target.width,target.height);};
  },[value,size]);
- return error?<p role="alert" className="text-amber-200 text-sm">Não foi possível desenhar o QR code. Use o link ou a chave de configuração abaixo.</p>:<canvas ref={canvas} role="img" aria-label={label} style={{width:size,height:size,maxWidth:'100%',imageRendering:'pixelated',background:'#fff',borderRadius:8}}/>;
+ return error?<p role="alert" className="text-amber-200 text-sm">Não foi possível desenhar o QR code. Use o link ou a chave de configuração abaixo.</p>:<canvas ref={canvas} role="img" aria-label={label} style={{width:size,height:'auto',aspectRatio:'1 / 1',maxWidth:'100%',imageRendering:'pixelated',background:'#fff',borderRadius:8}}/>;
 }
-function PlatformAuthenticatorNotice(){
+function PlatformAuthenticatorNotice({setupActive=false}){
  const [store,setStore]=React.useState(/iPad|iPhone|iPod/.test(navigator.userAgent)?'ios':'android');
  return <aside className="mt-4 mb-5 rounded-xl border border-blue-500/40 bg-blue-950/40 p-4" aria-label="Política de segurança da plataforma">
   <h2 className="text-sm font-bold text-blue-200">Autenticador obrigatório para proteger seus dados</h2>
@@ -14537,26 +14537,41 @@ function PlatformAuthenticatorNotice(){
    <a href={PLATFORM_AUTHENTICATOR_STORES.android} target="_blank" rel="noopener noreferrer" className="rounded-lg border border-slate-600 bg-black px-3 py-2 text-sm text-white">Baixar para Android</a>
    <a href={PLATFORM_AUTHENTICATOR_STORES.ios} target="_blank" rel="noopener noreferrer" className="rounded-lg border border-slate-600 bg-black px-3 py-2 text-sm text-white">Baixar para iPhone</a>
   </div>
-  <details className="mt-3 text-sm"><summary className="cursor-pointer text-blue-200">QR code para baixar o aplicativo</summary><div className="mt-3 flex flex-col items-center gap-3">
+  {!setupActive&&<details className="mt-3 text-sm"><summary className="cursor-pointer text-blue-200">QR code para baixar o aplicativo</summary><div className="mt-3 flex flex-col items-center gap-3">
    <label className="w-full">Seu celular<select aria-label="Loja do autenticador" value={store} onChange={e=>setStore(e.target.value)} className="block w-full bg-slate-950 text-white border border-slate-600 rounded-lg p-2 mt-2"><option value="android">Android — Google Play</option><option value="ios">iPhone — App Store</option></select></label>
    <PlatformLocalQr value={PLATFORM_AUTHENTICATOR_STORES[store]} label="QR code para baixar Google Authenticator" size={176}/>
    <p className="text-slate-300">Este QR abre a loja. O QR da sua conta aparece ao iniciar a configuração abaixo.</p>
-  </div></details>
+  </div></details>}
  </aside>;
 }
+function platformTotpProvisioning(secret,user,brand='Plataforma de Ensino'){
+ // RFC 3986: espaços são %20. Não usar URLSearchParams, que os troca por +.
+ const encode=value=>encodeURIComponent(value).replace(/[!'()*]/g,c=>'%'+c.charCodeAt(0).toString(16).toUpperCase());
+ const label=value=>String(value||'').normalize('NFKC').replace(/[:\u0000-\u001f\u007f\u200b-\u200f\u202a-\u202e\u2066-\u2069\ufeff]/g,' ').replace(/\s+/g,' ').trim();
+ const issuer=Array.from(label(brand)||'Plataforma de Ensino').slice(0,64).join(''),account=label(user.email||user.uid)||'Minha conta';
+ const key=String(secret?.secretKey||'').replace(/\s/g,'').replace(/=+$/,'').toUpperCase();
+ const algorithm=String(secret?.hashingAlgorithm||'SHA1').replace(/-/g,'').toUpperCase(),digits=Number(secret?.codeLength||6),period=Number(secret?.codeIntervalSeconds||30);
+ if(!/^[A-Z2-7]+$/.test(key)||![6,8].includes(digits)||!['SHA1','SHA256','SHA512'].includes(algorithm)||!Number.isInteger(period)||period<1||period>86400)throw Error('A chave de configuração não veio em um formato compatível. Clique em Recomeçar configuração para gerar um novo QR code.');
+ const uri='otpauth://totp/'+encode(issuer)+':'+encode(account)+'?secret='+encode(key)+'&issuer='+encode(issuer)+'&algorithm='+algorithm+'&digits='+digits+'&period='+period;
+ return {uri,key,issuer,account};
+}
 function PlatformTotpSetup({secret,user}){
- const issuer=String(window.platformPublicSettings?.siteName||window.platformPublicSettings?.platformName||'Plataforma de Ensino').slice(0,64);
- const uri=React.useMemo(()=>{
-  const url=new URL(secret.generateQrCodeUrl(encodeURIComponent(user.email||user.uid),encodeURIComponent(issuer)));
-  url.searchParams.set('period',String(secret.codeIntervalSeconds||30));return url.href;
- },[secret,user.uid,user.email,issuer]);
+ const brand=window.platformPublicSettings?.siteName||window.platformPublicSettings?.platformName||'Plataforma de Ensino';
+ const provisioning=React.useMemo(()=>{try{return platformTotpProvisioning(secret,user,brand);}catch(error){return {error:error.message,key:secret?.secretKey||''};}},[secret,user.uid,user.email,brand]);
+ const [copyMessage,setCopyMessage]=React.useState('');
+ const copy=async()=>{try{await navigator.clipboard.writeText(provisioning.key);setCopyMessage('Chave copiada. No aplicativo, escolha inserir chave e selecione baseada no tempo.');}catch(_){setCopyMessage('Selecione a chave no campo abaixo e use a opção Copiar do seu navegador.');}};
  return <div className="mt-5">
   <h2 className="font-bold text-white">Escaneie para adicionar sua conta</h2>
-  <p className="text-sm text-slate-300 leading-relaxed mt-2">No autenticador, toque em + e escolha “Escanear QR code”. Depois, digite nesta página os seis números que o aplicativo mostrar.</p>
-  <div className="flex justify-center my-5"><PlatformLocalQr value={uri} label="QR code para configurar a verificação em duas etapas desta conta"/></div>
-  <a href={uri} referrerPolicy="no-referrer" className="block text-center text-blue-300 underline text-sm">Estou no mesmo celular: abrir no autenticador</a>
+  <p className="text-sm text-slate-300 leading-relaxed mt-2">No Google Authenticator, toque em + e escolha “Ler QR code”. Leia o código abaixo para adicionar esta conta da plataforma.</p>
+  <p className="mt-3 text-sm text-blue-200 break-all">Conta: <strong>{user.email||'Sua conta na plataforma'}</strong></p>
+  {provisioning.error?<p role="alert" className="mt-4 text-sm text-amber-200">{provisioning.error}</p>:<>
+   <div className="flex justify-center my-5"><PlatformLocalQr value={provisioning.uri} size={256} label="QR code para configurar a verificação em duas etapas desta conta"/></div>
+   <p className="text-center text-xs text-slate-300 mb-4">Este QR adiciona a conta. Depois, use nesta página o código de seis números gerado pelo aplicativo.</p>
+   <a href={provisioning.uri} referrerPolicy="no-referrer" className="block text-center text-blue-300 underline text-sm">Estou no mesmo celular: tentar abrir no autenticador</a>
+  </>}
   <details className="mt-4 text-sm"><summary className="cursor-pointer text-slate-300">Não consigo escanear: usar chave manual</summary>
-   <label className="block mt-3">Escolha uma conta “baseada no tempo” e informe esta chave:<input aria-label="Chave de configuração do autenticador" readOnly value={secret.secretKey} onFocus={e=>e.target.select()} className="w-full bg-slate-950 border border-slate-600 rounded-lg p-3 my-3 font-mono"/></label>
+   <label className="block mt-3">Escolha uma conta “baseada no tempo” e informe esta chave:<input aria-label="Chave de configuração do autenticador" readOnly value={provisioning.key} onFocus={e=>e.target.select()} className="w-full bg-slate-950 border border-slate-600 rounded-lg p-3 my-3 font-mono"/></label>
+   <button type="button" onClick={copy} className="px-3 py-2 rounded-lg border border-slate-600 text-blue-200">Copiar chave de configuração</button>{copyMessage&&<p role="status" className="mt-3 text-slate-300">{copyMessage}</p>}
   </details>
   <p className="mt-3 text-xs text-slate-400 leading-relaxed">O QR code e a chave são privados. Não compartilhe nem envie uma captura de tela. Mantenha o aplicativo e o relógio do celular atualizados.</p>
  </div>;
