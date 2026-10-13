@@ -624,7 +624,7 @@ html{-webkit-text-size-adjust:100%;scroll-padding-top:12px}
     import { initializeApp } from 'firebase/app';
 import { runTransaction as meetTransaction, limit as meetLimit } from 'firebase/firestore';
 import { runTransaction as inactivityTransaction, query as inactivityQuery, orderBy as inactivityOrderBy, documentId as inactivityDocumentId, limit as inactivityLimit, startAfter as inactivityStartAfter } from 'firebase/firestore';
-    import { getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, onAuthStateChanged, updateProfile, GoogleAuthProvider, signInWithPopup, signInWithRedirect, getRedirectResult } from 'firebase/auth';
+    import { getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, onAuthStateChanged, updateProfile, GoogleAuthProvider, signInWithPopup, signInWithRedirect, getRedirectResult, multiFactor, TotpMultiFactorGenerator, getMultiFactorResolver, sendEmailVerification, reload, getIdTokenResult, onIdTokenChanged } from 'firebase/auth';
     import { getDocFromServer, getFirestore, doc, getDoc, getDocs, setDoc, collection, addDoc, query, orderBy, onSnapshot, serverTimestamp, updateDoc, arrayUnion, arrayRemove, deleteDoc, where, limit } from 'firebase/firestore';
     import { jsPDF } from "jspdf";
     import { pipeline, env } from 'transformers';
@@ -794,7 +794,104 @@ function platformMoney(value){if(typeof value==='number')return Number.isFinite(
     const platformGoogleRedirectResult = auth ? getRedirectResult(auth).then(async result => {
         if (result?.user) await platformEnsureGoogleProfile(result.user);
         return { result, error: null };
-    }).catch(error => ({ result: null, error })) : Promise.resolve({ result: null, error: null });
+    }).catch(async error => {if(error.code==='auth/multi-factor-auth-required'){try {const result=await platformResolveMfa(error);await platformEnsureGoogleProfile(result.user);return {result,error:null};}catch(failure){return {result:null,error:failure};}}return {result:null,error};}) : Promise.resolve({ result: null, error: null });
+
+// Segundo fator validado pelo Firebase; nenhuma aprovação é guardada no navegador.
+function platformMfaMessage(error){
+ const messages={
+  'auth/invalid-verification-code':'Código inválido. Use o código atual do seu aplicativo autenticador.',
+  'auth/code-expired':'O código expirou. Digite o novo código do aplicativo.',
+  'auth/invalid-multi-factor-session':'A tentativa expirou. Entre novamente.',
+  'auth/requires-recent-login':'Por segurança, saia e entre novamente para configurar o autenticador.',
+  'auth/too-many-requests':'Muitas tentativas. Aguarde alguns minutos e tente novamente.',
+  'auth/network-request-failed':'Confira sua conexão e tente novamente.',
+  'auth/operation-not-allowed':'A autenticação em duas etapas ainda precisa ser ativada pelo administrador no Firebase.',
+  'auth/unsupported-first-factor':'Este método de acesso não permite cadastrar o autenticador. Entre com e-mail e senha ou Google.',
+  'auth/unverified-email':'Confirme seu e-mail antes de cadastrar o autenticador.'
+ };
+ return messages[error?.code]||('Não foi possível concluir a verificação. Informe ao suporte: '+(error?.code||'erro de autenticação'));
+}
+async function platformWithMfa(operation){
+ try{return await operation();}catch(error){if(error.code==='auth/multi-factor-auth-required')return platformResolveMfa(error);throw error;}
+}
+function platformResolveMfa(error){
+ const resolver=getMultiFactorResolver(auth,error),factors=resolver.hints.filter(f=>f.factorId===TotpMultiFactorGenerator.FACTOR_ID);
+ if(!factors.length)throw Error('Esta conta usa um segundo fator incompatível com esta versão. Contate o administrador para recuperar o acesso.');
+ return new Promise((resolve,reject)=>{
+  const previous=document.activeElement,overlay=document.createElement('div');
+  overlay.style.cssText='position:fixed;inset:0;z-index:2147483647;background:#030712eb;display:grid;place-items:center;padding:20px;color:#f8fafc;font-family:system-ui';
+  const form=document.createElement('form');form.setAttribute('role','dialog');form.setAttribute('aria-modal','true');form.setAttribute('aria-label','Verificação em duas etapas');
+  form.style.cssText='max-width:440px;width:100%;background:#111827;padding:28px;border:1px solid #475569;border-radius:20px';
+  const title=document.createElement('h2');title.textContent='Verificação em duas etapas';title.style.cssText='font-size:24px;font-weight:700;margin-bottom:14px';
+  const help=document.createElement('p');help.textContent='Abra seu aplicativo autenticador e digite o código de seis dígitos para entrar.';help.style.marginBottom='18px';
+  const select=document.createElement('select');select.setAttribute('aria-label','Autenticador');select.style.cssText='width:100%;padding:10px;background:#1e293b;color:white;margin-bottom:12px';
+  factors.forEach((f,i)=>{const option=document.createElement('option');option.value=String(i);option.textContent=f.displayName||'Autenticador '+(i+1);select.append(option);});select.hidden=factors.length===1;
+  const label=document.createElement('label');label.textContent='Código do autenticador';
+  const input=document.createElement('input');input.type='text';input.inputMode='numeric';input.autocomplete='one-time-code';input.pattern='[0-9]{6}';input.maxLength=6;input.required=true;input.setAttribute('aria-label','Código de seis dígitos');input.style.cssText='width:100%;box-sizing:border-box;padding:14px;background:#030712;color:white;border:1px solid #64748b;border-radius:10px;font-size:24px;letter-spacing:.3em;margin:8px 0 16px';label.append(input);
+  const notice=document.createElement('p');notice.setAttribute('role','alert');notice.style.cssText='color:#fda4af;line-height:1.5;margin-bottom:12px';
+  const submit=document.createElement('button'),cancel=document.createElement('button');submit.type='submit';submit.textContent='Verificar e entrar';cancel.type='button';cancel.textContent='Cancelar';
+  for(const b of [submit,cancel])b.style.cssText='padding:12px 16px;margin:4px;border-radius:10px;border:1px solid #64748b;background:#1d4ed8;color:white;cursor:pointer';
+  let busy=false,closed=false;
+  const finish=(value,failure)=>{if(closed)return;closed=true;document.removeEventListener('keydown',keys,true);overlay.remove();previous?.focus();failure?reject(failure):resolve(value);};
+  const abort=()=>{if(!busy)finish(null,Object.assign(Error('Verificação cancelada. Entre novamente para continuar.'),{code:'auth/mfa-cancelled'}));};
+  const keys=e=>{if(e.key==='Escape'){e.preventDefault();abort();}if(e.key==='Tab'){const items=[...form.querySelectorAll('input,select,button')].filter(el=>!el.hidden&&!el.disabled),first=items[0],last=items.at(-1);if(e.shiftKey&&document.activeElement===first){e.preventDefault();last.focus();}else if(!e.shiftKey&&document.activeElement===last){e.preventDefault();first.focus();}}};
+  cancel.onclick=abort;
+  form.onsubmit=async e=>{e.preventDefault();if(busy||!/^\d{6}$/.test(input.value))return;busy=true;submit.disabled=cancel.disabled=true;notice.textContent='';
+   try{const assertion=TotpMultiFactorGenerator.assertionForSignIn(factors[Number(select.value)||0].uid,input.value);finish(await resolver.resolveSignIn(assertion));}
+   catch(failure){notice.textContent=platformMfaMessage(failure);input.value='';input.focus();}
+   finally{busy=false;submit.disabled=cancel.disabled=false;}
+  };
+  form.append(title,help,select,label,notice,submit,cancel);overlay.append(form);document.body.append(overlay);document.addEventListener('keydown',keys,true);input.focus();
+ });
+}
+function StudentMfaGate({user,children}){
+ const [state,setState]=useState('checking'),[busy,setBusy]=useState(false),[message,setMessage]=useState(''),[secret,setSecret]=useState(null),[code,setCode]=useState(''),[resendAt,setResendAt]=useState(0);
+ const alive=useRef(true);
+ const inspect=async()=>{
+  await reload(user);
+  const token=await getIdTokenResult(user,true);
+  if(!alive.current)return;
+  if(token.claims.firebase?.sign_in_second_factor==='totp'){setSecret(null);setState('ready');return;}
+  if(!user.emailVerified){setState('email');return;}
+  setState(multiFactor(user).enrolledFactors.length?'signin':'enroll');
+ };
+ useEffect(()=>{
+  alive.current=true;let revision=0;
+  const unsubscribe=onIdTokenChanged(auth,async current=>{
+   const attempt=++revision;
+   if(!current||current.uid!==user.uid){setState('checking');return;}
+   try{const token=await getIdTokenResult(current);if(!alive.current||attempt!==revision)return;
+    setState(token.claims.firebase?.sign_in_second_factor==='totp'?'ready':!current.emailVerified?'email':multiFactor(current).enrolledFactors.length?'signin':'enroll');
+   }catch(error){if(alive.current){setMessage(platformMfaMessage(error));setState('error');}}
+  });
+  return()=>{alive.current=false;unsubscribe();};
+ },[user.uid]);
+ const run=async action=>{if(busy)return;setBusy(true);setMessage('');try{await action();}catch(error){if(alive.current)setMessage(platformMfaMessage(error));}finally{if(alive.current)setBusy(false);}};
+ const send=()=>run(async()=>{if(Date.now()<resendAt){setMessage('Aguarde um minuto antes de reenviar.');return;}auth.languageCode='pt-BR';await sendEmailVerification(user);setResendAt(Date.now()+60000);setMessage('Enviamos um link para '+user.email+'. Confira também a pasta de spam.');});
+ const generate=()=>run(async()=>{await reload(user);if(!user.emailVerified){setState('email');return;}const session=await multiFactor(user).getSession();const value=await TotpMultiFactorGenerator.generateSecret(session);if(alive.current)setSecret(value);});
+ const enroll=e=>{e.preventDefault();if(!secret||!/^\d{6}$/.test(code))return;run(async()=>{
+  await multiFactor(user).enroll(TotpMultiFactorGenerator.assertionForEnrollment(secret,code),'Autenticador do aluno');
+  setSecret(null);setCode('');setState('signin');setMessage('Autenticador ativado. Entre novamente para concluir o primeiro acesso seguro.');
+ });};
+ if(state==='ready')return children;
+ const button='w-full rounded-xl px-4 py-3 bg-indigo-600 text-white font-bold disabled:opacity-50 mt-3';
+ return <main className="min-h-screen flex items-center justify-center p-5 bg-slate-950 text-slate-100"><section className="w-full max-w-lg rounded-2xl border border-slate-700 bg-slate-900 p-7" aria-label="Segurança da conta">
+  <p className="text-indigo-300 text-sm mb-3">SEGURANÇA DA CONTA</p><h1 className="text-2xl font-bold mb-4">Verificação em duas etapas</h1>
+  {state==='checking'&&<p role="status">Conferindo sua sessão segura…</p>}
+  {state==='email'&&<><p className="leading-relaxed">Primeiro, confirme seu e-mail: <strong>{user.email}</strong>. Abra o link recebido e volte a esta página.</p><button className={button} disabled={busy} onClick={send}>Enviar confirmação por e-mail</button><button className={button} disabled={busy} onClick={()=>run(inspect)}>Já confirmei meu e-mail</button></>}
+  {state==='enroll'&&<><p className="leading-relaxed">Adicione esta conta ao Google Authenticator, Microsoft Authenticator ou outro aplicativo compatível no seu celular. Ele gera os códigos sem SMS.</p>
+   {!secret?<button className={button} disabled={busy} onClick={generate}>Ativar autenticador</button>:<form onSubmit={enroll}>
+    <label className="block mt-4">No aplicativo, escolha adicionar chave de configuração, selecione “baseada no tempo” e copie esta chave:<input aria-label="Chave de configuração do autenticador" readOnly value={secret.secretKey} onFocus={e=>e.target.select()} className="w-full bg-slate-950 border border-slate-600 rounded-lg p-3 my-3 font-mono"/></label>
+    <p className="text-sm text-slate-300">Guarde a chave em um local seguro. Ela permite recuperar os códigos se você trocar de celular. Não compartilhe.</p>
+    <label className="block mt-4">Código de seis dígitos<input autoComplete="one-time-code" inputMode="numeric" pattern="[0-9]{6}" maxLength={6} required value={code} onChange={e=>setCode(e.target.value.replace(/\D/g,''))} className="block w-full bg-slate-950 border border-slate-600 rounded-lg p-3 mt-2"/></label><button className={button} disabled={busy}>Confirmar ativação</button>
+   </form>}
+  </>}
+  {state==='signin'&&<><p className="leading-relaxed">Seu autenticador está cadastrado. Entre novamente com sua senha ou Google e confirme o código do aplicativo. Depois, você continuará conectado enquanto sua sessão permanecer válida.</p><button className={button} disabled={busy} onClick={()=>run(()=>signOut(auth))}>Ir para o login seguro</button></>}
+  {state==='error'&&<button className={button} disabled={busy} onClick={()=>run(inspect)}>Tentar novamente</button>}
+  {message&&<p role="status" className="mt-4 text-amber-200 leading-relaxed">{message}</p>}
+  <button className="w-full mt-5 text-slate-300 underline" disabled={busy} onClick={()=>run(()=>signOut(auth))}>Sair da conta</button>
+ </section></main>;
+}
 
     // --- UI COMPONENTS CORPORATIVOS (PREMIUM & MINIMALISTAS) ---
 
@@ -856,7 +953,7 @@ const usePlatformDomains = () => {
     return value;
 };
 
-const guardedPasswordSignIn = (instance, email, password) => window.platformAuthAttempt('password', () => signInWithEmailAndPassword(instance, String(email || '').trim(), password));
+const guardedPasswordSignIn = (instance, email, password) => window.platformAuthAttempt('password', () => platformWithMfa(() => signInWithEmailAndPassword(instance, String(email || '').trim(), password)));
 
 const platformVideoId = value => {
     try {
@@ -968,7 +1065,8 @@ async function meetDetailedBackgroundProcessor(onResults,isCurrent){
     const {FilesetResolver,ImageSegmenter}=await import(data.moduleUrl);
     const files=await FilesetResolver.forVisionTasks(data.wasmBase);
     const options=delegate=>({baseOptions:{modelAssetPath:data.modelUrl,delegate},canvas:new OffscreenCanvas(1,1),runningMode:'VIDEO',outputCategoryMask:false,outputConfidenceMasks:true});
-    let delegate='GPU';try{model=await ImageSegmenter.createFromOptions(files,options(delegate));}catch(_){delegate='CPU';model=await ImageSegmenter.createFromOptions(files,options(delegate));}
+    // CPU mantém a máscara em coordenadas de imagem, sem leitura de textura invertida.
+    const delegate='CPU';model=await ImageSegmenter.createFromOptions(files,options(delegate));
     labels=model.getLabels();const index=labels.findIndex(label=>label.toLowerCase()==='background');backgroundIndex=index>=0?index:0;
     self.postMessage({type:'ready',delegate,labels});
    }catch(error){self.postMessage({type:'error',message:error.message||'O modelo detalhado não iniciou.'});}
@@ -982,17 +1080,16 @@ async function meetDetailedBackgroundProcessor(onResults,isCurrent){
      if(frameCanvas.width!==bitmap.width||frameCanvas.height!==bitmap.height){frameCanvas.width=bitmap.width;frameCanvas.height=bitmap.height;}
      frameContext.drawImage(bitmap,0,0,frameCanvas.width,frameCanvas.height);
      model.segmentForVideo(frameCanvas,lastTimestamp,result=>{
-      const background=result.confidenceMasks?.[backgroundIndex];if(!background)throw Error('A máscara detalhada não foi produzida.');
+      const masks=result.confidenceMasks;
+      if(!masks?.length)throw Error('A máscara da pessoa não foi produzida.');
+      // O modelo binário exporta uma máscara da pessoa; modelos com várias
+      // classes usam o complemento do fundo, sem eliminar roupas/acessórios.
+      const background=masks.length===1?masks[0]:masks[backgroundIndex];
       const probabilities=background.getAsFloat32Array(),alpha=new Uint8ClampedArray(probabilities.length);
-      const masks=result.confidenceMasks,core=new Float32Array(alpha.length);
-      // Cabelo, pele e roupa formam a pessoa inteira. Acessórios precisam
-      // estar próximos desse corpo; objetos do ambiente não entram no recorte.
-      if(masks.length>=6){
-       for(const index of [1,2,3,4]){const values=masks[index].getAsFloat32Array();for(let i=0;i<core.length;i++)core[i]+=values[i]||0;}
-       const others=masks[5].getAsFloat32Array(),w=background.width,h=background.height,radius=Math.max(5,Math.round(Math.max(w,h)*.045)),distance=new Uint16Array(alpha.length);distance.fill(radius+1);
-       for(let y=0;y<h;y++)for(let x=0;x<w;x++){const i=y*w+x;if(core[i]>=.5)distance[i]=0;else distance[i]=Math.min(distance[i],x?distance[i-1]+1:radius+1,y?distance[i-w]+1:radius+1);}
-       for(let y=h-1;y>=0;y--)for(let x=w-1;x>=0;x--){const i=y*w+x;distance[i]=Math.min(distance[i],x+1<w?distance[i+1]+1:radius+1,y+1<h?distance[i+w]+1:radius+1);const proximity=Math.max(0,Math.min(1,(radius+1-distance[i])/Math.max(1,radius*.25)));alpha[i]=Math.round(Math.max(0,Math.min(1,core[i]+others[i]*proximity))*255);}
-      }else for(let i=0;i<alpha.length;i++)alpha[i]=Number.isFinite(probabilities[i])?Math.round(Math.max(0,Math.min(1,1-probabilities[i]))*255):0;
+      for(let i=0;i<alpha.length;i++){
+       const p=masks.length===1?probabilities[i]:1-probabilities[i];
+       alpha[i]=Number.isFinite(p)?Math.round(Math.max(0,Math.min(1,p))*255):0;
+      }
       self.postMessage({type:'mask',id:data.id,width:background.width,height:background.height,buffer:alpha.buffer,millis:performance.now()-start},[alpha.buffer]);
      });
     }catch(error){self.postMessage({type:'error',id:data.id,message:error.message||'O recorte detalhado falhou.'});}
@@ -1000,7 +1097,7 @@ async function meetDetailedBackgroundProcessor(onResults,isCurrent){
    }
   };
  };
- const config=window.PLATFORM_MEETING_MATTING||{},base='https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.21/';
+ const config=window.PLATFORM_MEETING_MATTING||{},base=new URL('./sala-model/vision/',location.href).href;
  const source=new Blob(['('+workerMain.toString()+')();'],{type:'text/javascript'}),url=URL.createObjectURL(source);
  let worker=null,closed=false,sequence=0,initResolve,initReject,cancelTimer;const requests=new globalThis.Map();
  const ready=new Promise((resolve,reject)=>{initResolve=resolve;initReject=reject;});
@@ -1024,11 +1121,11 @@ async function meetDetailedBackgroundProcessor(onResults,isCurrent){
     context.putImageData(image,0,0);onResults({segmentationMask:surface,image:request.image});request.resolve();
    }catch(error){request.reject(error);}
   };
-  worker.postMessage({type:'init',moduleUrl:new URL(config.moduleUrl||base+'vision_bundle.mjs',location.href).href,wasmBase:new URL(config.wasmBase||base+'wasm/',location.href).href,modelUrl:new URL(config.modelUrl||'https://storage.googleapis.com/mediapipe-models/image_segmenter/selfie_multiclass_256x256/float32/1/selfie_multiclass_256x256.tflite',location.href).href});
+  worker.postMessage({type:'init',moduleUrl:new URL(config.moduleUrl||base+'vision_bundle.mjs',location.href).href,wasmBase:new URL(config.wasmBase||base+'wasm/',location.href).href,modelUrl:new URL(config.modelUrl||new URL('./sala-model/selfie_segmenter.tflite',location.href).href,location.href).href});
   const info=await meetTimed(ready,50000,'O carregamento do recorte detalhado excedeu o tempo esperado.');
   clearInterval(cancelTimer);
   if(!isCurrent()){close();return null;}
-  return {backend:'worker',model:'multiclass',delegate:info.delegate,
+  return {backend:'worker',model:'person',delegate:info.delegate,
    async send({image}){
     if(closed||!isCurrent())return;const bitmap=await createImageBitmap(image);
     if(closed||!isCurrent()){bitmap.close();return;}
@@ -1053,13 +1150,12 @@ async function meetBackgroundProcessor(onResults,isCurrent,modelSelection){
 // Refinamento da máscara no dispositivo: filtro bilateral guiado pela câmera.
 // Só roda quando chega um recorte novo; a transmissão mantém seu próprio relógio.
 function meetMaskRefiner(){
- const canvas=document.createElement('canvas'),fallback=document.createElement('canvas');
+ const fallback=document.createElement('canvas');
  const fallbackContext=fallback.getContext('2d',{willReadFrequently:true});
  const guide=document.createElement('canvas'),guideContext=guide.getContext('2d',{willReadFrequently:true});
- const curve=value=>{const x=Math.max(0,Math.min(1,(value-.24)/.52));return x*x*(3-2*x);};
+ const curve=value=>{const x=Math.max(0,Math.min(1,(value-.15)/.7));return x*x*(3-2*x);};
  const lut=Uint8Array.from({length:256},(_,i)=>Math.round(curve(i/255)*255));
- let gl=null,program=null,buffer=null,textures=[],shaders=[],width=0,height=0,hasPrevious=false,disposed=false,previousPixels=null;
- const destroyGPU=()=>{if(gl){textures.forEach(texture=>gl.deleteTexture(texture));shaders.forEach(shader=>gl.deleteShader(shader));if(buffer)gl.deleteBuffer(buffer);if(program)gl.deleteProgram(program);}textures=[];shaders=[];buffer=null;program=null;gl=null;};
+ let disposed=false,previousPixels=null;
  const fallbackRefine=(source,image,w,h)=>{
   if(fallback.width!==w||fallback.height!==h){fallback.width=guide.width=w;fallback.height=guide.height=h;previousPixels=null;}
   fallbackContext.clearRect(0,0,w,h);fallbackContext.drawImage(source,0,0,w,h);guideContext.drawImage(image,0,0,w,h);
@@ -1075,65 +1171,10 @@ function meetMaskRefiner(){
   }
   previousPixels=next;fallbackContext.putImageData(frame,0,0);return fallback;
  };
- try{
-  gl=canvas.getContext('webgl',{alpha:true,premultipliedAlpha:false,antialias:false,depth:false,stencil:false,preserveDrawingBuffer:true});
-  if(!gl)throw Error('WebGL indisponível.');
-  const compile=(type,source)=>{const shader=gl.createShader(type);shaders.push(shader);gl.shaderSource(shader,source);gl.compileShader(shader);if(!gl.getShaderParameter(shader,gl.COMPILE_STATUS))throw Error('Filtro de recorte incompatível.');return shader;};
-  program=gl.createProgram();
-  gl.attachShader(program,compile(gl.VERTEX_SHADER,'attribute vec2 position;varying vec2 uv;void main(){uv=position*.5+.5;gl_Position=vec4(position,0.,1.);}'));
-  gl.attachShader(program,compile(gl.FRAGMENT_SHADER,`
-   precision mediump float;
-   varying vec2 uv;
-   uniform sampler2D maskTexture,guideTexture,previousMask,previousGuide;
-   uniform vec2 stepSize;
-   uniform float previousReady;
-   void main(){
-    vec3 center=texture2D(guideTexture,uv).rgb;
-    float original=texture2D(maskTexture,uv).a;
-    float sum=0.,weights=0.;
-    if(original>.01&&original<.99){
-     for(int y=-2;y<=2;y++)for(int x=-2;x<=2;x++){
-      vec2 offset=vec2(float(x),float(y)),point=uv+offset*stepSize;
-      vec3 difference=texture2D(guideTexture,point).rgb-center;
-      float weight=exp(-dot(offset,offset)*.22-dot(difference,difference)*55.);
-      sum+=texture2D(maskTexture,point).a*weight;weights+=weight;
-     }
-    }else{sum=original;weights=1.;}
-    float alpha=smoothstep(.24,.76,sum/max(weights,.001));
-    float oldAlpha=texture2D(previousMask,uv).a;
-    vec3 movement=center-texture2D(previousGuide,uv).rgb;
-    float stable=(1.-smoothstep(.001,.012,dot(movement,movement)))*(1.-smoothstep(.035,.13,abs(alpha-oldAlpha)));
-    alpha=mix(alpha,oldAlpha,.22*stable*previousReady);
-    gl_FragColor=vec4(1.,1.,1.,alpha);
-   }
-  `));
-  gl.linkProgram(program);if(!gl.getProgramParameter(program,gl.LINK_STATUS))throw Error('Filtro de recorte incompatível.');gl.useProgram(program);
-  buffer=gl.createBuffer();gl.bindBuffer(gl.ARRAY_BUFFER,buffer);gl.bufferData(gl.ARRAY_BUFFER,new Float32Array([-1,-1,1,-1,-1,1,1,1]),gl.STATIC_DRAW);
-  const position=gl.getAttribLocation(program,'position');gl.enableVertexAttribArray(position);gl.vertexAttribPointer(position,2,gl.FLOAT,false,0,0);
-  for(const [i,name] of ['maskTexture','guideTexture','previousMask','previousGuide'].entries()){
-   const texture=gl.createTexture();textures.push(texture);gl.activeTexture(gl.TEXTURE0+i);gl.bindTexture(gl.TEXTURE_2D,texture);
-   gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.LINEAR);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,gl.LINEAR);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,gl.CLAMP_TO_EDGE);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_T,gl.CLAMP_TO_EDGE);
-   gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,1,1,0,gl.RGBA,gl.UNSIGNED_BYTE,new Uint8Array([255,255,255,0]));gl.uniform1i(gl.getUniformLocation(program,name),i);
-  }
-  gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL,true);gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL,false);gl.disable(gl.BLEND);
- }catch(_){destroyGPU();}
  return {
-  get backend(){return gl?'webgl':'canvas';},
-  refine(source,image,w,h){
-   if(disposed)throw Error('O filtro de recorte foi encerrado.');
-   if(gl&&!gl.isContextLost())try{
-    const upload=(index,value)=>{gl.activeTexture(gl.TEXTURE0+index);gl.bindTexture(gl.TEXTURE_2D,textures[index]);gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,gl.RGBA,gl.UNSIGNED_BYTE,value);};
-    // Copia a máscara anterior antes de limpar o canvas de saída.
-    if(hasPrevious&&width===w&&height===h)upload(2,canvas);else hasPrevious=false;
-    if(width!==w||height!==h){width=canvas.width=w;height=canvas.height=h;gl.viewport(0,0,w,h);}
-    upload(0,source);upload(1,image);if(!hasPrevious)upload(3,image);
-    gl.uniform2f(gl.getUniformLocation(program,'stepSize'),2/w,2/h);gl.uniform1f(gl.getUniformLocation(program,'previousReady'),hasPrevious?1:0);
-    gl.drawArrays(gl.TRIANGLE_STRIP,0,4);if(gl.getError()!==gl.NO_ERROR)throw Error('O filtro não produziu uma máscara.');
-    upload(3,image);hasPrevious=true;return canvas;
-   }catch(_){destroyGPU();}
-   if(gl)destroyGPU();return fallbackRefine(source,image,w,h);
-  },
-  close(){if(disposed)return;disposed=true;destroyGPU();previousPixels=null;}
+  get backend(){return 'canvas';},
+  refine(source,image,w,h){if(disposed)throw Error('O filtro foi encerrado.');return fallbackRefine(source,image,w,h);},
+  close(){disposed=true;previousPixels=null;}
  };
 }
 
@@ -1249,14 +1290,14 @@ class MeetMedia {
   const image=mode==='image'?await meetBackgroundImage(imageUrl||this.backgroundImageUrl||''):null;
   if(this.destroyed||request!==this.backgroundRequest)return;
   // Trocar o fundo ou sua intensidade conserva o modelo e a faixa transmitida.
-  if(current&&current===this.effectState&&!current.stopped){current.mode=mode;current.image=image;current.backgroundDirty=true;this.settings.background=mode;this.backgroundStatus='Fundo aplicado à sua câmera.'+(current.segmentationModel==='multiclass'?' Recorte detalhado ativo.':' Recorte compatível ativo.');this.onChange();return;}
+  if(current&&current===this.effectState&&!current.stopped){current.mode=mode;current.image=image;current.backgroundDirty=true;this.settings.background=mode;this.backgroundStatus='Fundo aplicado à sua câmera.'+(current.segmentationModel==='person'?' Recorte detalhado ativo.':' Recorte compatível ativo.');this.onChange();return;}
   this.stopEffect();this.settings.background=mode;this.backgroundStatus='Carregando o fundo da câmera…';this.onChange();
   const generation=this.effectGeneration,isCurrent=()=>!this.destroyed&&generation===this.effectGeneration;
   try{
    if(this.video.readyState<2)await meetTimed(new Promise(resolve=>this.video.addEventListener('loadeddata',resolve,{once:true})),5000,'A câmera ainda não enviou imagem.');
    if(!isCurrent())return;
    const makeCanvas=alpha=>{const canvas=document.createElement('canvas');return {canvas,ctx:canvas.getContext('2d',{alpha})};};
-   const output=makeCanvas(false),foreground=makeCanvas(true),background=makeCanvas(false),blur=makeCanvas(false),input=makeCanvas(false),mask=makeCanvas(true);
+   const output=makeCanvas(false),foreground=makeCanvas(true),background=makeCanvas(false),blur=makeCanvas(false),input=makeCanvas(false),mask=makeCanvas(true),pendingFrame=makeCanvas(false),matchedFrame=makeCanvas(false);
    const cameraSettings=this.camera.getVideoTracks()[0]?.getSettings?.()||{};
    const state={mode,image,stopped:false,backgroundDirty:true,hasMask:false,processing:false,nextInference:0,inferenceMillis:0,frames:0,inferences:0,startedAt:performance.now(),fps:Math.max(12,Math.min(30,Number(cameraSettings.frameRate)||24)),renderLimit:this.settings.quality==='1080'?1920:1280,renderMillis:0};
    state.refiner=meetMaskRefiner();state.depthBlur=meetDepthBlur();state.maskRevision=0;state.modelSelection=0;this.effectState=state;
@@ -1276,6 +1317,7 @@ class MeetMedia {
     if(!isCurrent()||!result.segmentationMask)return;const source=result.segmentationMask;
     const w=input.canvas.width,h=input.canvas.height;
     if(mask.canvas.width!==w||mask.canvas.height!==h){mask.canvas.width=w;mask.canvas.height=h;}
+    matchedFrame.canvas.width=pendingFrame.canvas.width;matchedFrame.canvas.height=pendingFrame.canvas.height;matchedFrame.ctx.drawImage(pendingFrame.canvas,0,0);
     mask.ctx.clearRect(0,0,w,h);mask.ctx.drawImage(state.refiner.refine(source,input.canvas,w,h),0,0,w,h);state.hasMask=true;state.maskRevision++;state.refinementBackend=state.refiner.backend;result.segmentationMask?.close?.();result.image?.close?.();
    };
    const processor=await meetBackgroundProcessor(onResults,isCurrent,state.modelSelection);if(!processor||!isCurrent())return;
@@ -1283,7 +1325,9 @@ class MeetMedia {
    const infer=async first=>{
     if(state.processing||!isCurrent())return;state.processing=true;const start=performance.now();
     try{
-     input.ctx.drawImage(this.video,0,0,input.canvas.width,input.canvas.height);
+     pendingFrame.canvas.width=output.canvas.width;pendingFrame.canvas.height=output.canvas.height;
+     pendingFrame.ctx.drawImage(this.video,0,0,pendingFrame.canvas.width,pendingFrame.canvas.height);
+     input.ctx.drawImage(pendingFrame.canvas,0,0,input.canvas.width,input.canvas.height);
      await processor.send({image:input.canvas});state.inferences++;
      const duration=performance.now()-start;if(!first)state.inferenceMillis=state.inferenceMillis?state.inferenceMillis*.75+duration*.25:duration;
      const interval=Math.max(40,Math.min(180,(state.inferenceMillis||60)*1.1));state.nextInference=performance.now()+Math.max(0,interval-duration);
@@ -1295,10 +1339,10 @@ class MeetMedia {
     if(!resize())return;const w=output.canvas.width,h=output.canvas.height,ctx=output.ctx;
     if(state.mode==='blur'){
      const radius={light:2.1,medium:4.2,strong:7.8}[this.settings.blurLevel||'strong']||7.8,bw=blur.canvas.width,bh=blur.canvas.height;
-     blur.ctx.filter='none';blur.ctx.drawImage(this.video,0,0,bw,bh);
+     blur.ctx.filter='none';blur.ctx.drawImage(matchedFrame.canvas,0,0,bw,bh);
      const blurred=state.depthBlur.render(blur.canvas,mask.canvas,state.maskRevision,radius);
      if(blurred){ctx.drawImage(blurred,0,0,w,h);state.blurBackend='depth';}
-     else{const pad=Math.ceil(radius*3),scale=Math.max((bw+pad*2)/this.video.videoWidth,(bh+pad*2)/this.video.videoHeight),dw=this.video.videoWidth*scale,dh=this.video.videoHeight*scale;blur.ctx.filter='blur('+radius+'px)';blur.ctx.drawImage(this.video,(bw-dw)/2,(bh-dh)/2,dw,dh);blur.ctx.filter='none';ctx.drawImage(blur.canvas,0,0,w,h);state.blurBackend='compatibility';}
+     else{const pad=Math.ceil(radius*3),scale=Math.max((bw+pad*2)/matchedFrame.canvas.width,(bh+pad*2)/matchedFrame.canvas.height),dw=matchedFrame.canvas.width*scale,dh=matchedFrame.canvas.height*scale;blur.ctx.filter='blur('+radius+'px)';blur.ctx.drawImage(matchedFrame.canvas,(bw-dw)/2,(bh-dh)/2,dw,dh);blur.ctx.filter='none';ctx.drawImage(blur.canvas,0,0,w,h);state.blurBackend='compatibility';}
     }else{
      if(state.backgroundDirty){
       const bg=background.ctx;bg.fillStyle='#080808';bg.fillRect(0,0,w,h);
@@ -1307,11 +1351,11 @@ class MeetMedia {
       state.backgroundDirty=false;
      }ctx.drawImage(background.canvas,0,0,w,h);
     }
-    const fg=foreground.ctx;fg.globalCompositeOperation='source-over';fg.clearRect(0,0,w,h);fg.drawImage(this.video,0,0,w,h);fg.globalCompositeOperation='destination-in';fg.drawImage(mask.canvas,0,0,w,h);fg.globalCompositeOperation='source-over';ctx.drawImage(foreground.canvas,0,0);state.frames++;
+    const fg=foreground.ctx;fg.globalCompositeOperation='source-over';fg.clearRect(0,0,w,h);fg.drawImage(matchedFrame.canvas,0,0,w,h);fg.globalCompositeOperation='destination-in';fg.drawImage(mask.canvas,0,0,w,h);fg.globalCompositeOperation='source-over';ctx.drawImage(foreground.canvas,0,0);state.frames++;
    };
    draw();const stream=output.canvas.captureStream(state.fps),track=stream.getVideoTracks()[0];
    this.cameraOutput=stream;track.enabled=this.settings.cameraOn;try{track.contentHint='motion';}catch(_){}
-   this.backgroundCanvas=output.canvas;this.backgroundStatus='Fundo aplicado à sua câmera.'+(state.segmentationModel==='multiclass'?' Recorte detalhado ativo.':' Recorte compatível ativo.');state.startedAt=performance.now();this.onChange();track.requestFrame?.();
+   this.backgroundCanvas=output.canvas;this.backgroundStatus='Fundo aplicado à sua câmera.'+(state.segmentationModel==='person'?' Recorte detalhado ativo.':' Recorte compatível ativo.');state.startedAt=performance.now();this.onChange();track.requestFrame?.();
    let lastFrame=-1;
    const fail=()=>{if(isCurrent()){this.stopEffect();this.settings.background='none';this.backgroundStatus='';this.onChange();this.onError('O efeito de fundo foi interrompido. Escolha o fundo novamente ou use a câmera original.');}};
    const render=now=>{
@@ -7076,7 +7120,7 @@ const SupportSection = ({ user, settings }) => {
           if (redirect && platformCanGoogleRedirect()) {
               await window.platformAuthAttempt('google', () => signInWithRedirect(auth, provider));
           } else {
-              const result = await window.platformAuthAttempt('google', () => signInWithPopup(auth, provider));
+              const result = await window.platformAuthAttempt('google', () => platformWithMfa(() => signInWithPopup(auth, provider)));
               await platformEnsureGoogleProfile(result.user);
           }
         } catch (err) {
@@ -12164,7 +12208,7 @@ function InactivityGate({user,children}) {
        // 3. FLUXO NORMAL DA APLICAÇÃO (Aluno Autenticado ou Visitante)
        // 👇 AQUI A MÁGICA FINAL: O APP PASSA A LISTA DE PROMOÇÕES (promotions={promocoes}) PARA O DASHBOARD 👇
        if (user) {
-           return <InactivityGate key={user.uid} user={user}><StudentDashboard user={user} settings={genSettings} certificates={certificados} promotions={promocoes} onLogout={() => { if(auth) signOut(auth); else setUser(null); }} /></InactivityGate>;
+           return <StudentMfaGate key={user.uid} user={user}><InactivityGate key={user.uid} user={user}><StudentDashboard user={user} settings={genSettings} certificates={certificados} promotions={promocoes} onLogout={() => { if(auth) signOut(auth); else setUser(null); }} /></InactivityGate></StudentMfaGate>;
        }
        
        if (showAuth) {
