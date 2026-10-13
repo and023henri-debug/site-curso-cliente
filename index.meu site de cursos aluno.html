@@ -781,6 +781,8 @@ function platformMoney(value){if(typeof value==='number')return Number.isFinite(
     };
     const platformEnsureGoogleProfile = async user => {
         if (!db || !user) return;
+        const session=await getIdTokenResult(user);
+        if(session.claims.firebase?.sign_in_second_factor!=='totp')return;
         const ref = doc(db, 'users', user.uid);
         await inactivityTransaction(db, async tx => {
             const snap = await tx.get(ref);
@@ -851,7 +853,7 @@ function StudentMfaGate({user,children}){
   await reload(user);
   const token=await getIdTokenResult(user,true);
   if(!alive.current)return;
-  if(token.claims.firebase?.sign_in_second_factor==='totp'){setSecret(null);setState('ready');return;}
+  if(token.claims.firebase?.sign_in_second_factor==='totp'){await platformEnsureGoogleProfile(user);if(!alive.current)return;setSecret(null);setState('ready');return;}
   if(!user.emailVerified){setState('email');return;}
   setState(multiFactor(user).enrolledFactors.length?'signin':'enroll');
  };
@@ -861,6 +863,8 @@ function StudentMfaGate({user,children}){
    const attempt=++revision;
    if(!current||current.uid!==user.uid){setState('checking');return;}
    try{const token=await getIdTokenResult(current);if(!alive.current||attempt!==revision)return;
+    if(token.claims.firebase?.sign_in_second_factor==='totp')await platformEnsureGoogleProfile(current);
+    if(!alive.current||attempt!==revision)return;
     setState(token.claims.firebase?.sign_in_second_factor==='totp'?'ready':!current.emailVerified?'email':multiFactor(current).enrolledFactors.length?'signin':'enroll');
    }catch(error){if(alive.current){setMessage(platformMfaMessage(error));setState('error');}}
   });
@@ -875,7 +879,7 @@ function StudentMfaGate({user,children}){
  });};
  if(state==='ready')return children;
  const button='w-full rounded-xl px-4 py-3 bg-indigo-600 text-white font-bold disabled:opacity-50 mt-3';
- return <main className="min-h-screen flex items-center justify-center p-5 bg-slate-950 text-slate-100"><section className="w-full max-w-lg rounded-2xl border border-slate-700 bg-slate-900 p-7" aria-label="Segurança da conta">
+ return <main style={{fontFamily:"Inter,system-ui,sans-serif"}} className="min-h-screen flex items-center justify-center p-5 bg-slate-950 text-slate-100"><section className="w-full max-w-lg rounded-2xl border border-slate-700 bg-slate-900 p-7" aria-label="Segurança da conta">
   <p className="text-indigo-300 text-sm mb-3">SEGURANÇA DA CONTA</p><h1 className="text-2xl font-bold mb-4">Verificação em duas etapas</h1>
   {state==='checking'&&<p role="status">Conferindo sua sessão segura…</p>}
   {state==='email'&&<><p className="leading-relaxed">Primeiro, confirme seu e-mail: <strong>{user.email}</strong>. Abra o link recebido e volte a esta página.</p><button className={button} disabled={busy} onClick={send}>Enviar confirmação por e-mail</button><button className={button} disabled={busy} onClick={()=>run(inspect)}>Já confirmei meu e-mail</button></>}
@@ -883,7 +887,7 @@ function StudentMfaGate({user,children}){
    {!secret?<button className={button} disabled={busy} onClick={generate}>Ativar autenticador</button>:<form onSubmit={enroll}>
     <label className="block mt-4">No aplicativo, escolha adicionar chave de configuração, selecione “baseada no tempo” e copie esta chave:<input aria-label="Chave de configuração do autenticador" readOnly value={secret.secretKey} onFocus={e=>e.target.select()} className="w-full bg-slate-950 border border-slate-600 rounded-lg p-3 my-3 font-mono"/></label>
     <p className="text-sm text-slate-300">Guarde a chave em um local seguro. Ela permite recuperar os códigos se você trocar de celular. Não compartilhe.</p>
-    <label className="block mt-4">Código de seis dígitos<input autoComplete="one-time-code" inputMode="numeric" pattern="[0-9]{6}" maxLength={6} required value={code} onChange={e=>setCode(e.target.value.replace(/\D/g,''))} className="block w-full bg-slate-950 border border-slate-600 rounded-lg p-3 mt-2"/></label><button className={button} disabled={busy}>Confirmar ativação</button>
+    <label className="block mt-4">Código de seis dígitos<input autoComplete="one-time-code" inputMode="numeric" pattern="[0-9]{6}" maxLength={6} required value={code} onChange={e=>setCode(e.target.value.replace(/\D/g,''))} className="block w-full bg-slate-950 border border-slate-600 rounded-lg p-3 mt-2"/></label><button className={button} disabled={busy}>Confirmar ativação</button><button type="button" className="w-full mt-3 text-slate-300 underline" disabled={busy} onClick={()=>{setSecret(null);setCode('');setMessage('');}}>Recomeçar configuração</button>
    </form>}
   </>}
   {state==='signin'&&<><p className="leading-relaxed">Seu autenticador está cadastrado. Entre novamente com sua senha ou Google e confirme o código do aplicativo. Depois, você continuará conectado enquanto sua sessão permanecer válida.</p><button className={button} disabled={busy} onClick={()=>run(()=>signOut(auth))}>Ir para o login seguro</button></>}
@@ -7072,7 +7076,7 @@ const SupportSection = ({ user, settings }) => {
              const cred = await window.platformAuthAttempt('registration', () => createUserWithEmailAndPassword(auth, formData.email.trim(), formData.password));
              await updateProfile(cred.user, { displayName: formData.name });
              
-             if (db) {
+             if (db && (await getIdTokenResult(cred.user)).claims.firebase?.sign_in_second_factor === 'totp') {
                  await inactivityTransaction(db, async tx => {
                      const ref=doc(db, 'users', cred.user.uid), existing=await tx.get(ref);
                      tx.set(ref, {name:formData.name, email:cred.user.email, role:'student',
