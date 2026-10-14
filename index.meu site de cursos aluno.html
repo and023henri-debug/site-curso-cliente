@@ -2950,7 +2950,7 @@ var qrcode = function() {
     import { initializeApp } from 'firebase/app';
 import { runTransaction as meetTransaction, limit as meetLimit } from 'firebase/firestore';
 import { runTransaction as inactivityTransaction, query as inactivityQuery, orderBy as inactivityOrderBy, documentId as inactivityDocumentId, limit as inactivityLimit, startAfter as inactivityStartAfter } from 'firebase/firestore';
-    import { getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, onAuthStateChanged, updateProfile, GoogleAuthProvider, signInWithPopup, signInWithRedirect, getRedirectResult, multiFactor, TotpMultiFactorGenerator, getMultiFactorResolver, sendEmailVerification, reload, getIdTokenResult, onIdTokenChanged, deleteUser } from 'firebase/auth';
+    import { getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut as platformFirebaseSignOut, onAuthStateChanged, updateProfile, GoogleAuthProvider, signInWithPopup, signInWithRedirect, getRedirectResult, multiFactor, TotpMultiFactorGenerator, getMultiFactorResolver, sendEmailVerification, reload, getIdTokenResult, onIdTokenChanged, deleteUser , signInWithCustomToken } from 'firebase/auth';
     import { getDocFromServer, getFirestore, doc, getDoc, getDocs, setDoc, collection, addDoc, query, orderBy, onSnapshot, serverTimestamp, updateDoc, arrayUnion, arrayRemove, deleteDoc, where, limit } from 'firebase/firestore';
     import { jsPDF } from "jspdf";
     import { pipeline, env } from 'transformers';
@@ -3113,7 +3113,7 @@ function platformMoney(value){if(typeof value==='number')return Number.isFinite(
     const platformEnsureGoogleProfile = async user => {
         if (!db || !user) return;
         const session=await getIdTokenResult(user);
-        if(session.claims.firebase?.sign_in_second_factor!=='totp')return;
+        if(!platformHasAdditionalProof(session.claims))return;
         const ref = doc(db, 'users', user.uid);
         await inactivityTransaction(db, async tx => {
             const snap = await tx.get(ref);
@@ -3177,57 +3177,119 @@ function platformResolveMfa(error){
   form.append(title,help,select,label,notice,submit,cancel);overlay.append(form);document.body.append(overlay);document.addEventListener('keydown',keys,true);input.focus();
  });
 }
+// A decisão de acesso vem do token assinado e do serviço interno, nunca do armazenamento local.
+function platformHasAdditionalProof(claims={}){
+ if(claims.email_verified!==true)return false;
+ if(claims.firebase?.sign_in_second_factor==='totp')return true;
+ return claims.platform_auth_method==='email_otp'&&/^[a-f0-9]{64}$/.test(claims.platform_auth_session||'')
+  &&Number.isInteger(claims.platform_auth_expires_at)&&claims.platform_auth_expires_at>Math.floor(Date.now()/1000);
+}
+async function platformAuthRequest(payload,expectedUid,settings=window.platformPublicSettings||{}){
+ const current=platformAssertCurrentAccount(expectedUid);let url;
+ try{
+  const configured=settings.authBackendUrl||window.PLATFORM_AUTH_BACKEND_URL;
+  const sibling=settings.identityBackendUrl||window.PLATFORM_IDENTITY_BACKEND_URL||settings.paymentBackendUrl;
+  url=configured?new URL(configured,location.href):sibling?new URL('./auth',new URL(sibling,location.href)):new URL('./api/auth',location.href);
+ }catch(_){throw Error('O endereço do serviço de autenticação é inválido.');}
+ if(url.username||url.password||url.protocol!=='https:'&&!(url.protocol==='http:'&&['localhost','127.0.0.1','[::1]'].includes(url.hostname)))throw Error('Configure HTTPS para o serviço de autenticação.');
+ const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),payload.action==='revoke'?3000:30000);
+ try{
+  const token=await current.getIdToken();platformAssertCurrentAccount(current.uid);
+  const response=await fetch(url.href,{method:'POST',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},body:JSON.stringify(payload),signal:controller.signal,cache:'no-store'}),data=await response.json().catch(()=>({}));
+  if(!response.ok)throw Object.assign(Error(data.error||(response.status===404?'O serviço de códigos por e-mail ainda não foi publicado. O administrador deve configurar o pacote 08.':'Não foi possível confirmar esta sessão.')),{code:data.code||'platform/auth-error',retryAfterSeconds:data.retryAfterSeconds||0});
+  platformAssertCurrentAccount(current.uid);return data;
+ }catch(error){if(error.name==='AbortError')throw Error('O serviço não respondeu a tempo. Confira sua conexão e tente novamente.');throw error;}
+ finally{clearTimeout(timer);}
+}
+async function signOut(authClient){
+ const current=authClient?.currentUser;
+ try{if(current){const token=await getIdTokenResult(current);if(token.claims.platform_auth_method==='email_otp')await platformAuthRequest({action:'revoke'},current.uid);}}catch(_){}
+ finally{await platformFirebaseSignOut(authClient);}
+}
+async function platformLoadSecuritySettings(){
+ // O administrador recarregado precisa conhecer o endpoint antes de abrir o painel.
+ // Somente configuração pública; nenhum segredo do serviço fica neste documento.
+ if(!db)return;
+ try{const snapshot=await getDocFromServer(doc(db,'config','general_settings'));if(snapshot.exists())window.platformPublicSettings={...(window.platformPublicSettings||{}),...platformCleanSettings(snapshot.data())};}catch(_){}
+}
 function PlatformMfaGate({user,children,student=false}){
- const [state,setState]=useState('checking'),[busy,setBusy]=useState(false),[message,setMessage]=useState(''),[secret,setSecret]=useState(null),[code,setCode]=useState(''),[resendAt,setResendAt]=useState(0);
- const alive=useRef(true);
- const inspect=async()=>{
-  await reload(user);
-  const token=await getIdTokenResult(user,true);
-  if(!alive.current)return;
-  if(token.claims.firebase?.sign_in_second_factor==='totp'){if(student)await platformEnsureGoogleProfile(user);if(!alive.current)return;setSecret(null);setState('ready');return;}
-  if(!user.emailVerified){setState('email');return;}
-  setState(multiFactor(user).enrolledFactors.length?'signin':'enroll');
+ const [state,setState]=React.useState('checking'),[busy,setBusy]=React.useState(false),[message,setMessage]=React.useState(''),[code,setCode]=React.useState(''),[challenge,setChallenge]=React.useState(null),[email,setEmail]=React.useState(''),[now,setNow]=React.useState(Date.now()),[retryAt,setRetryAt]=React.useState(0);
+ const alive=React.useRef(true),operating=React.useRef(false),challengeRef=React.useRef(null),revision=React.useRef(0),expiresRef=React.useRef(null);
+ const inspect=async current=>{
+  const attempt=++revision.current;setState('checking');
+  try{
+   const data=await platformAuthRequest({action:'status'},current.uid);
+   if(!alive.current||attempt!==revision.current)return;
+   if(data.ready){
+    const token=await getIdTokenResult(current);if(!platformHasAdditionalProof(token.claims))throw Error('A sessão não possui a confirmação exigida. Entre novamente.');
+    if(student)await platformEnsureGoogleProfile(current);
+    if(!alive.current||attempt!==revision.current)return;
+    expiresRef.current=data.expiresAt||null;challengeRef.current=null;setChallenge(null);setCode('');setMessage('');setState('ready');
+   }else{expiresRef.current=null;setEmail(data.emailMasked||'seu e-mail cadastrado');setState(challengeRef.current?'code':'email');}
+  }catch(error){if(alive.current&&attempt===revision.current){setMessage(error.message||'Não foi possível verificar a sessão.');setState(error.code==='platform/relogin-required'?'relogin':'error');}}
  };
- useEffect(()=>{
-  alive.current=true;let revision=0;
+ React.useEffect(()=>{
+  alive.current=true;let initialized=false;
   const unsubscribe=onIdTokenChanged(auth,async current=>{
-   const attempt=++revision;
-   if(!current||current.uid!==user.uid){setState('checking');return;}
-   try{const token=await getIdTokenResult(current);if(!alive.current||attempt!==revision)return;
-    if(token.claims.firebase?.sign_in_second_factor==='totp')if(student)await platformEnsureGoogleProfile(current);
-    if(!alive.current||attempt!==revision)return;
-    if(token.claims.firebase?.sign_in_second_factor==='totp'){setSecret(null);setCode('');}
-    setState(token.claims.firebase?.sign_in_second_factor==='totp'?'ready':!current.emailVerified?'email':multiFactor(current).enrolledFactors.length?'signin':'enroll');
-   }catch(error){if(alive.current){setMessage(platformMfaMessage(error));setState('error');}}
+   if(!current||current.uid!==user.uid){revision.current++;setState('checking');return;}
+   if(!initialized){initialized=true;await platformLoadSecuritySettings();}
+   if(alive.current&&auth.currentUser?.uid===current.uid)await inspect(current);
   });
-  return()=>{alive.current=false;unsubscribe();};
+  const tick=setInterval(()=>{
+   const time=Date.now();setNow(time);
+   if(expiresRef.current&&time>=expiresRef.current){expiresRef.current=null;setState('relogin');setMessage('A confirmação desta sessão expirou. Entre novamente para receber outro código.');}
+  },1000);
+  const focus=()=>{if(!operating.current&&auth.currentUser?.uid===user.uid)inspect(auth.currentUser);};
+  window.addEventListener('focus',focus);
+  return()=>{alive.current=false;revision.current++;clearInterval(tick);unsubscribe();window.removeEventListener('focus',focus);};
  },[user.uid]);
- const run=async action=>{if(busy)return;setBusy(true);setMessage('');try{await action();}catch(error){if(alive.current)setMessage(platformMfaMessage(error));}finally{if(alive.current)setBusy(false);}};
- const send=()=>run(async()=>{if(Date.now()<resendAt){setMessage('Aguarde um minuto antes de reenviar.');return;}auth.languageCode='pt-BR';await sendEmailVerification(user);setResendAt(Date.now()+60000);setMessage('Enviamos um link para '+user.email+'. Confira também a pasta de spam.');});
- const generate=()=>run(async()=>{await reload(user);if(!user.emailVerified){setState('email');return;}const session=await multiFactor(user).getSession();const value=await TotpMultiFactorGenerator.generateSecret(session);if(alive.current)setSecret(value);});
- const enroll=e=>{e.preventDefault();if(!secret||!/^\d{6}$/.test(code))return;run(async()=>{
-  await multiFactor(user).enroll(TotpMultiFactorGenerator.assertionForEnrollment(secret,code),student?'Autenticador do aluno':'Autenticador da plataforma');
-  setSecret(null);setCode('');setState('signin');setMessage('Autenticador ativado. Entre novamente para concluir o primeiro acesso seguro.');
- });};
+ const run=async action=>{
+  if(operating.current)return;operating.current=true;setBusy(true);setMessage('');
+  try{await action();}catch(error){
+   if(alive.current){setMessage(error.message||'Não foi possível concluir.');if(error.retryAfterSeconds)setRetryAt(Date.now()+error.retryAfterSeconds*1000);if(error.code==='platform/relogin-required')setState('relogin');}
+  }finally{operating.current=false;if(alive.current)setBusy(false);}
+ };
+ const send=()=>run(async()=>{
+  if(Date.now()<retryAt)return;
+  const data=await platformAuthRequest({action:'request-code'},user.uid);
+  if(!data.challengeId||!Number.isFinite(data.expiresAt))throw Error('O servidor não retornou uma tentativa válida. Procure o suporte.');
+  challengeRef.current=data;setChallenge(data);setEmail(data.emailMasked);setCode('');setRetryAt(Date.now()+(data.retryAfterSeconds||60)*1000);setNow(Date.now());setState('code');setMessage('Código enviado. Confira também Spam e Lixo eletrônico.');
+ });
+ const confirm=event=>{event.preventDefault();if(!challenge||!/^\d{6}$/.test(code)||Date.now()>=challenge.expiresAt)return;
+  run(async()=>{
+   const data=await platformAuthRequest({action:'verify-code',challengeId:challenge.challengeId,code},user.uid);
+   if(typeof data.customToken!=='string'||!data.customToken)throw Error('O servidor não liberou uma sessão válida. Procure o suporte.');
+   const result=await signInWithCustomToken(auth,data.customToken);
+   if(result.user.uid!==user.uid){await signOut(auth);throw Error('A sessão não corresponde à sua conta. Entre novamente.');}
+   if(!platformHasAdditionalProof((await getIdTokenResult(result.user)).claims))throw Error('Não foi possível validar a confirmação da sessão. Entre novamente.');
+   await inspect(result.user);
+  });
+ };
  if(state==='ready')return children;
+ const countdown=Math.max(0,Math.ceil((retryAt-now)/1000)),remaining=challenge?Math.max(0,Math.ceil((challenge.expiresAt-now)/1000)):0;
  const button='w-full rounded-xl px-4 py-3 bg-blue-600 text-white font-bold disabled:opacity-50 mt-3';
- return <main style={{fontFamily:"Inter,system-ui,sans-serif"}} className="min-h-screen flex items-center justify-center p-5 bg-slate-950 text-slate-100"><section className="w-full max-w-lg rounded-2xl border border-slate-700 bg-slate-900 p-7" aria-label="Segurança da conta">
-  <p className="text-blue-300 text-sm mb-3">SEGURANÇA DA CONTA</p><h1 className="text-2xl font-bold mb-4">Verificação em duas etapas</h1>
-  <PlatformAuthenticatorNotice setupActive={!!secret}/>
-  {state==='checking'&&<p role="status">Conferindo sua sessão segura…</p>}
-  {state==='email'&&<><p className="leading-relaxed">Primeiro, confirme seu e-mail: <strong>{user.email}</strong>. Abra o link recebido e volte a esta página.</p><button className={button} disabled={busy} onClick={send}>Enviar confirmação por e-mail</button><button className={button} disabled={busy} onClick={()=>run(inspect)}>Já confirmei meu e-mail</button></>}
-  {state==='enroll'&&<><p className="leading-relaxed">Adicione esta conta ao Google Authenticator, Microsoft Authenticator ou outro aplicativo compatível no seu celular. Ele gera os códigos sem SMS.</p>
-   {!secret?<button className={button} disabled={busy} onClick={generate}>Ativar autenticador</button>:<form onSubmit={enroll}>
-    <PlatformTotpSetup secret={secret} user={user}/>
-    <label className="block mt-4">Código de seis dígitos<input autoComplete="one-time-code" inputMode="numeric" pattern="[0-9]{6}" maxLength={6} required value={code} aria-label="Código de seis dígitos para ativar autenticador" onChange={e=>setCode(e.target.value.replace(/\D/g,''))} className="block w-full bg-slate-950 border border-slate-600 rounded-lg p-3 mt-2"/></label><button className={button} disabled={busy}>Confirmar ativação</button><button type="button" className="w-full mt-3 text-slate-300 underline" disabled={busy} onClick={()=>{setSecret(null);setCode('');setMessage('');}}>Recomeçar configuração</button>
-   </form>}
-  </>}
-  {state==='signin'&&<><p className="leading-relaxed">Seu autenticador está cadastrado. Entre novamente com sua senha ou Google e confirme o código do aplicativo. Depois, você continuará conectado enquanto sua sessão permanecer válida.</p><button className={button} disabled={busy} onClick={()=>run(()=>signOut(auth))}>Ir para o login seguro</button></>}
-  {state==='error'&&<button className={button} disabled={busy} onClick={()=>run(inspect)}>Tentar novamente</button>}
-  {message&&<p role="status" className="mt-4 text-amber-200 leading-relaxed">{message}</p>}
-  <button className="w-full mt-5 text-slate-300 underline" disabled={busy} onClick={()=>run(()=>signOut(auth))}>Sair da conta</button>
+ return <main style={{fontFamily:'Inter,system-ui,sans-serif'}} className="min-h-screen flex items-center justify-center p-5 bg-black text-slate-100"><section className="w-full max-w-md rounded-3xl border border-slate-800 bg-[#080b12] p-7" aria-label="Segurança da conta">
+  <div className="mb-5 grid h-12 w-12 place-items-center rounded-2xl bg-blue-950 text-blue-300"><svg width="25" height="25" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><rect x="2" y="4" width="20" height="16" rx="3"/><path d="m3 6 9 7 9-7"/></svg></div>
+  <p className="text-blue-300 text-xs font-bold tracking-widest mb-3">PROTEÇÃO DA CONTA</p><h1 className="text-2xl font-bold mb-3">Confirme seu acesso</h1>
+  <p className="text-sm text-slate-300 leading-relaxed mb-5">Por política de segurança e preservação de dados, a plataforma exige uma confirmação adicional. Receba seis números no e-mail da sua conta e digite-os aqui.</p>
+  {state==='checking'&&<p role="status" className="text-blue-200">Conferindo sua sessão…</p>}
+  {state==='email'&&<><p className="text-sm text-slate-300">Enviar para <strong className="text-white break-all">{email}</strong></p><button type="button" className={button} disabled={busy||countdown>0} onClick={send}>{busy?'Enviando…':countdown>0?'Reenviar em '+countdown+'s':'Enviar código por e-mail'}</button></>}
+  {state==='code'&&<form onSubmit={confirm}>
+   <p className="text-sm text-slate-300 mb-4">Enviado para <strong className="text-white break-all">{email}</strong></p>
+   <label className="block text-sm font-semibold" htmlFor="platform-email-code">Código de seis números</label>
+   <input id="platform-email-code" aria-label="Código recebido por e-mail" type="text" autoComplete="one-time-code" inputMode="numeric" pattern="[0-9]{6}" maxLength={6} required autoFocus value={code} onChange={event=>setCode(event.target.value.replace(/\D/g,''))} className="block w-full bg-black border border-slate-700 rounded-xl p-4 mt-2 text-center text-2xl tracking-[.3em] text-white"/>
+   <p className="mt-3 text-xs text-slate-400" role="status">{remaining>0?'Validade: '+Math.floor(remaining/60)+':'+String(remaining%60).padStart(2,'0'):'Código expirado. Peça outro código.'}</p>
+   <button type="submit" className={button} disabled={busy||code.length!==6||remaining===0}>{busy?'Conferindo…':'Verificar e entrar'}</button>
+   <button type="button" onClick={send} disabled={busy||countdown>0} className="w-full mt-4 text-sm text-blue-300 disabled:text-slate-500">{countdown>0?'Reenviar em '+countdown+'s':'Enviar outro código'}</button>
+  </form>}
+  {state==='error'&&<button type="button" className={button} disabled={busy} onClick={()=>run(()=>inspect(platformAssertCurrentAccount(user.uid)))}>Tentar novamente</button>}
+  {state==='relogin'&&<p className="text-sm text-slate-300">Sua senha ou acesso pelo Google precisa ser confirmado novamente.</p>}
+  {message&&<p role="alert" className="mt-5 text-sm text-amber-200 leading-relaxed">{message}</p>}
+  <p className="mt-6 text-xs text-slate-500 leading-relaxed">O código é pessoal. Não compartilhe. Nenhum aplicativo autenticador é necessário para esta etapa.</p>
+  <button type="button" className="w-full mt-5 text-sm text-slate-300 underline" disabled={busy} onClick={()=>run(()=>signOut(auth))}>Sair e voltar ao login</button>
  </section></main>;
 }
+
 
     // --- UI COMPONENTS CORPORATIVOS (PREMIUM & MINIMALISTAS) ---
 
@@ -9511,7 +9573,7 @@ const SupportSection = ({ user, settings }) => {
                     </div>
                 )}
 
-                <div className="mb-4 text-xs text-slate-400 leading-relaxed">Por política de segurança e preservação de dados, o acesso exige verificação em duas etapas. Após entrar, você poderá instalar o autenticador e adicionar sua conta por QR code.</div><form onSubmit={handleSubmit} className="space-y-5">
+                <div className="mb-4 text-xs text-slate-400 leading-relaxed">Por política de segurança e preservação de dados, o acesso exige verificação em duas etapas. Após entrar, confirme o código de seis números enviado ao e-mail da sua conta.</div><form onSubmit={handleSubmit} className="space-y-5">
                     <div className="space-y-4 stagger-item delay-3">
                         
                         {!isLogin && (
@@ -14599,7 +14661,7 @@ async function platformIdentityRequest(payload,settings=window.platformPublicSet
 }
 async function platformAssertPurchaseIdentity(expectedUid){
  const current=platformAssertCurrentAccount(expectedUid),token=await getIdTokenResult(current);
- if(token.claims.firebase?.sign_in_second_factor!=='totp')throw Error('Entre com o código do autenticador antes de realizar uma compra.');
+ if(!platformHasAdditionalProof(token.claims))throw Error('Confirme seu acesso antes de realizar uma compra.');
  const data=await platformIdentityRequest({action:'check'},undefined,current.uid);
  if(data.uid!==current.uid||!platformCpfValid(data.cpfNormalized))throw Error('O CPF não está vinculado ao seu perfil. Complete seu cadastro antes de comprar.');
  return data;
