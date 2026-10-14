@@ -3213,15 +3213,19 @@ async function platformLoadSecuritySettings(){
  try{const snapshot=await getDocFromServer(doc(db,'config','general_settings'));if(snapshot.exists())window.platformPublicSettings={...(window.platformPublicSettings||{}),...platformCleanSettings(snapshot.data())};}catch(_){}
 }
 function PlatformMfaGate({user,children,student=false}){
- const [state,setState]=React.useState('checking'),[busy,setBusy]=React.useState(false),[message,setMessage]=React.useState(''),[code,setCode]=React.useState(''),[challenge,setChallenge]=React.useState(null),[email,setEmail]=React.useState(''),[now,setNow]=React.useState(Date.now()),[retryAt,setRetryAt]=React.useState(0);
+ const [state,setState]=React.useState('checking'),[busy,setBusy]=React.useState(false),[message,setMessage]=React.useState(''),[code,setCode]=React.useState(''),[challenge,setChallenge]=React.useState(null),[email,setEmail]=React.useState(''),[now,setNow]=React.useState(Date.now()),[retryAt,setRetryAt]=React.useState(0),[method,setMethod]=React.useState('email');
  const alive=React.useRef(true),operating=React.useRef(false),challengeRef=React.useRef(null),revision=React.useRef(0),expiresRef=React.useRef(null);
  const inspect=async current=>{
   const attempt=++revision.current;setState('checking');
   try{
-   const data=await platformAuthRequest({action:'status'},current.uid);
+   const token=await getIdTokenResult(current);
+   // O TOTP nativo já está comprovado no token emitido pelo Firebase.
+   // A etapa por e-mail exige também a confirmação da sessão no servidor interno.
+   const native=token.claims.email_verified===true&&token.claims.firebase?.sign_in_second_factor==='totp';
+   const data=native?{ready:true,method:'totp',expiresAt:null}:await platformAuthRequest({action:'status'},current.uid);
    if(!alive.current||attempt!==revision.current)return;
    if(data.ready){
-    const token=await getIdTokenResult(current);if(!platformHasAdditionalProof(token.claims))throw Error('A sessão não possui a confirmação exigida. Entre novamente.');
+    if(!platformHasAdditionalProof(token.claims))throw Error('A sessão não possui a confirmação exigida. Entre novamente.');
     if(student)await platformEnsureGoogleProfile(current);
     if(!alive.current||attempt!==revision.current)return;
     expiresRef.current=data.expiresAt||null;challengeRef.current=null;setChallenge(null);setCode('');setMessage('');setState('ready');
@@ -3266,6 +3270,7 @@ function PlatformMfaGate({user,children,student=false}){
   });
  };
  if(state==='ready')return children;
+ if(method==='app')return <PlatformNativeMfaGate user={user} student={student} onUseEmail={()=>{setMethod('email');inspect(platformAssertCurrentAccount(user.uid));}}>{children}</PlatformNativeMfaGate>;
  const countdown=Math.max(0,Math.ceil((retryAt-now)/1000)),remaining=challenge?Math.max(0,Math.ceil((challenge.expiresAt-now)/1000)):0;
  const button='w-full rounded-xl px-4 py-3 bg-blue-600 text-white font-bold disabled:opacity-50 mt-3';
  return <main style={{fontFamily:'Inter,system-ui,sans-serif'}} className="min-h-screen flex items-center justify-center p-5 bg-black text-slate-100"><section className="w-full max-w-md rounded-3xl border border-slate-800 bg-[#080b12] p-7" aria-label="Segurança da conta">
@@ -3285,8 +3290,64 @@ function PlatformMfaGate({user,children,student=false}){
   {state==='error'&&<button type="button" className={button} disabled={busy} onClick={()=>run(()=>inspect(platformAssertCurrentAccount(user.uid)))}>Tentar novamente</button>}
   {state==='relogin'&&<p className="text-sm text-slate-300">Sua senha ou acesso pelo Google precisa ser confirmado novamente.</p>}
   {message&&<p role="alert" className="mt-5 text-sm text-amber-200 leading-relaxed">{message}</p>}
+  {state!=='checking'&&<button type="button" disabled={busy} onClick={()=>setMethod('app')} className="w-full mt-5 rounded-xl border border-blue-800 px-4 py-3 text-sm text-blue-200 disabled:opacity-50">Usar aplicativo autenticador</button>}
   <p className="mt-6 text-xs text-slate-500 leading-relaxed">O código é pessoal. Não compartilhe. Nenhum aplicativo autenticador é necessário para esta etapa.</p>
   <button type="button" className="w-full mt-5 text-sm text-slate-300 underline" disabled={busy} onClick={()=>run(()=>signOut(auth))}>Sair e voltar ao login</button>
+ </section></main>;
+}
+
+
+// Alternativa nativa: enrollment e confirmação feitos pelo Firebase Auth.
+function PlatformNativeMfaGate({user,children,student=false,onUseEmail}){
+ const [state,setState]=useState('checking'),[busy,setBusy]=useState(false),[message,setMessage]=useState(''),[secret,setSecret]=useState(null),[code,setCode]=useState(''),[resendAt,setResendAt]=useState(0);
+ const alive=useRef(true);
+ const inspect=async()=>{
+  await reload(user);
+  const token=await getIdTokenResult(user,true);
+  if(!alive.current)return;
+  if(token.claims.firebase?.sign_in_second_factor==='totp'){if(student)await platformEnsureGoogleProfile(user);if(!alive.current)return;setSecret(null);setState('ready');return;}
+  if(!user.emailVerified){setState('email');return;}
+  setState(multiFactor(user).enrolledFactors.length?'signin':'enroll');
+ };
+ useEffect(()=>{
+  alive.current=true;let revision=0;
+  const unsubscribe=onIdTokenChanged(auth,async current=>{
+   const attempt=++revision;
+   if(!current||current.uid!==user.uid){setState('checking');return;}
+   try{const token=await getIdTokenResult(current);if(!alive.current||attempt!==revision)return;
+    if(token.claims.firebase?.sign_in_second_factor==='totp')if(student)await platformEnsureGoogleProfile(current);
+    if(!alive.current||attempt!==revision)return;
+    if(token.claims.firebase?.sign_in_second_factor==='totp'){setSecret(null);setCode('');}
+    setState(token.claims.firebase?.sign_in_second_factor==='totp'?'ready':!current.emailVerified?'email':multiFactor(current).enrolledFactors.length?'signin':'enroll');
+   }catch(error){if(alive.current){setMessage(platformMfaMessage(error));setState('error');}}
+  });
+  return()=>{alive.current=false;unsubscribe();};
+ },[user.uid]);
+ const run=async action=>{if(busy)return;setBusy(true);setMessage('');try{await action();}catch(error){if(alive.current)setMessage(platformMfaMessage(error));}finally{if(alive.current)setBusy(false);}};
+ const send=()=>run(async()=>{if(Date.now()<resendAt){setMessage('Aguarde um minuto antes de reenviar.');return;}auth.languageCode='pt-BR';await sendEmailVerification(user);setResendAt(Date.now()+60000);setMessage('Enviamos um link para '+user.email+'. Confira também a pasta de spam.');});
+ const generate=()=>run(async()=>{await reload(user);if(!user.emailVerified){setState('email');return;}const session=await multiFactor(user).getSession();const value=await TotpMultiFactorGenerator.generateSecret(session);if(alive.current)setSecret(value);});
+ const enroll=e=>{e.preventDefault();if(!secret||!/^\d{6}$/.test(code))return;run(async()=>{
+  await multiFactor(user).enroll(TotpMultiFactorGenerator.assertionForEnrollment(secret,code),student?'Autenticador do aluno':'Autenticador da plataforma');
+  setSecret(null);setCode('');setState('signin');setMessage('Autenticador ativado. Entre novamente para concluir o primeiro acesso seguro.');
+ });};
+ if(state==='ready')return children;
+ const button='w-full rounded-xl px-4 py-3 bg-blue-600 text-white font-bold disabled:opacity-50 mt-3';
+ return <main style={{fontFamily:"Inter,system-ui,sans-serif"}} className="min-h-screen flex items-center justify-center p-5 bg-black text-slate-100"><section className="w-full max-w-lg rounded-2xl border border-slate-700 bg-slate-900 p-7" aria-label="Segurança da conta">
+  <p className="text-blue-300 text-sm mb-3">SEGURANÇA DA CONTA</p><h1 className="text-2xl font-bold mb-4">Verificação em duas etapas</h1>
+  <PlatformAuthenticatorNotice setupActive={!!secret}/>
+  {state==='checking'&&<p role="status">Conferindo sua sessão segura…</p>}
+  {state==='email'&&<><p className="leading-relaxed">Primeiro, confirme seu e-mail: <strong>{user.email}</strong>. Abra o link recebido e volte a esta página.</p><button className={button} disabled={busy} onClick={send}>Enviar confirmação por e-mail</button><button className={button} disabled={busy} onClick={()=>run(inspect)}>Já confirmei meu e-mail</button></>}
+  {state==='enroll'&&<><p className="leading-relaxed">Adicione esta conta ao Google Authenticator, Microsoft Authenticator ou outro aplicativo compatível no seu celular. Ele gera os códigos sem SMS.</p>
+   {!secret?<button className={button} disabled={busy} onClick={generate}>Ativar autenticador</button>:<form onSubmit={enroll}>
+    <PlatformTotpSetup secret={secret} user={user}/>
+    <label className="block mt-4">Código de seis dígitos<input autoComplete="one-time-code" inputMode="numeric" pattern="[0-9]{6}" maxLength={6} required value={code} aria-label="Código de seis dígitos para ativar autenticador" onChange={e=>setCode(e.target.value.replace(/\D/g,''))} className="block w-full bg-black border border-slate-600 rounded-lg p-3 mt-2"/></label><button className={button} disabled={busy}>Confirmar ativação</button><button type="button" className="w-full mt-3 text-slate-300 underline" disabled={busy} onClick={()=>{setSecret(null);setCode('');setMessage('');}}>Recomeçar configuração</button>
+   </form>}
+  </>}
+  {state==='signin'&&<><p className="leading-relaxed">Seu autenticador está cadastrado. Entre novamente com sua senha ou Google e confirme o código do aplicativo. Depois, você continuará conectado enquanto sua sessão permanecer válida.</p><button className={button} disabled={busy} onClick={()=>run(()=>signOut(auth))}>Ir para o login seguro</button></>}
+  {state==='error'&&<button className={button} disabled={busy} onClick={()=>run(inspect)}>Tentar novamente</button>}
+  {message&&<p role="status" className="mt-4 text-amber-200 leading-relaxed">{message}</p>}
+  {onUseEmail&&<button type="button" disabled={busy} onClick={onUseEmail} className="w-full mt-5 text-sm text-blue-300 underline">Voltar à confirmação por e-mail</button>}
+  <button className="w-full mt-5 text-slate-300 underline" disabled={busy} onClick={()=>run(()=>signOut(auth))}>Sair da conta</button>
  </section></main>;
 }
 
@@ -15188,65 +15249,4 @@ JSON Permitidos (Siga exatamente estes formatos):
                             break;
                         case 'take_notes':
                             const noteRes = await window.AemGlobalAPI.takeNotesAutomated(cmdObj.courseName, cmdObj.notes);
-                            if(noteRes === 'sucesso') { aiReply += `<br><br><small style='color:#4ade80'>Anotação criada e salva no seu diário de bordo premium deste curso!</small>`; commandExecuted = true; }
-                            else aiReply += "<br><br><small style='color:#f87171'>Não encontrei o curso para salvar a anotação.</small>";
-                            break;
-                    }
-                }
-
-                if (commandExecuted) {
-                    aiReply += "<br><br><small style='color:#4ade80'><i class='fa-solid fa-bolt'></i> Ação concluída com sucesso!</small>";
-                    if (shouldCloseWidget) {
-                        setTimeout(() => { window.AemIaWidget.closeWidget(); }, 2000);
-                    }
-                }
-            } else {
-                aiReply = aiReply.replace(/```[\s\S]*?```/g, '').trim();
-            }
-            
-            appendMessage(aiReply.trim(), false);
-            
-            // 💾 SALVA A RESPOSTA DA IA NO HISTÓRICO PARA ELA LEMBRAR DEPOIS
-            chatHistory.push(`${nomeDaIA}: ${aiReply.replace(/<[^>]*>?/gm, '')}`); // Remove HTML antes de salvar
-            localStorage.setItem('aem_ia_chat_history', JSON.stringify(chatHistory));
-            
-        } catch (err) {
-            typing.classList.add('hidden');
-            if (err.name !== "AbortError" && window.AemIaWidget.canShow()) appendMessage("⚠️ Sistema offline ou falha na conexão.", false);
-        } finally {
-            iaRequests.delete(requestController);
-        }
-    });
-    }
-    
-    // 👇 INÍCIO DA LÓGICA DO BOTÃO NOVA CONVERSA 👇
-    const btnRestartIa = document.getElementById('aem-ia-restart-btn');
-    if (btnRestartIa) {
-        btnRestartIa.addEventListener('click', () => {
-            // 1. Limpa visualmente as mensagens da tela 
-            const chatBody = document.getElementById('aem-chat-box-normal');
-            if (chatBody) {
-                chatBody.innerHTML = ''; 
-            }
-            
-            // 2. Limpa a memória salva no navegador
-            localStorage.removeItem('aem_ia_chat_history'); 
-            
-            // 3. Adiciona um feedback visual no botão de rodar
-            btnRestartIa.classList.add('animate-spin');
-            setTimeout(() => btnRestartIa.classList.remove('animate-spin'), 500);
-
-            // 4. Manda a IA dar as boas-vindas oficiais puxadas do Banco de Dados
-            setTimeout(() => {
-                const msgOficial = window.AemIaWelcomeMsg || "Olá! Como posso te ajudar hoje?";
-                appendMessage(msgOficial, false);
-            }, 300);
-        });
-    }
-    
-    
-    window.AemIaWidget.syncVisibility();
-})();
-  </script>
-</body>
-</html>
+       
