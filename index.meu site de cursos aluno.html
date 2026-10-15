@@ -2950,7 +2950,7 @@ var qrcode = function() {
     import { initializeApp } from 'firebase/app';
 import { runTransaction as meetTransaction, limit as meetLimit } from 'firebase/firestore';
 import { runTransaction as inactivityTransaction, query as inactivityQuery, orderBy as inactivityOrderBy, documentId as inactivityDocumentId, limit as inactivityLimit, startAfter as inactivityStartAfter } from 'firebase/firestore';
-    import { getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut as platformFirebaseSignOut, onAuthStateChanged, updateProfile, GoogleAuthProvider, signInWithPopup, signInWithRedirect, getRedirectResult, multiFactor, TotpMultiFactorGenerator, getMultiFactorResolver, sendEmailVerification, reload, getIdTokenResult, onIdTokenChanged, deleteUser  } from 'firebase/auth';
+    import { getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut as platformFirebaseSignOut, onAuthStateChanged, updateProfile, GoogleAuthProvider, signInWithPopup, signInWithRedirect, getRedirectResult, onIdTokenChanged, deleteUser  } from 'firebase/auth';
     import { getDocFromServer, getFirestore, doc, getDoc, getDocs, setDoc, collection, addDoc, query, orderBy, onSnapshot, serverTimestamp, updateDoc, arrayUnion, arrayRemove, deleteDoc, where, limit } from 'firebase/firestore';
     import { jsPDF } from "jspdf";
     import { pipeline, env } from 'transformers';
@@ -3112,8 +3112,6 @@ function platformMoney(value){if(typeof value==='number')return Number.isFinite(
     };
     const platformEnsureGoogleProfile = async user => {
         if (!db || !user) return;
-        const session=await getIdTokenResult(user);
-        if(!platformHasAdditionalProof(session.claims))return;
         const ref = doc(db, 'users', user.uid);
         await inactivityTransaction(db, async tx => {
             const snap = await tx.get(ref);
@@ -3127,143 +3125,9 @@ function platformMoney(value){if(typeof value==='number')return Number.isFinite(
     const platformGoogleRedirectResult = auth ? getRedirectResult(auth).then(async result => {
         if (result?.user) await platformEnsureGoogleProfile(result.user);
         return { result, error: null };
-    }).catch(async error => {if(error.code==='auth/multi-factor-auth-required'){try {const result=await platformResolveMfa(error);await platformEnsureGoogleProfile(result.user);return {result,error:null};}catch(failure){return {result:null,error:failure};}}return {result:null,error};}) : Promise.resolve({ result: null, error: null });
+    }).catch(error => ({result:null,error})) : Promise.resolve({ result: null, error: null });
 
-// Segundo fator validado pelo Firebase; nenhuma aprovação é guardada no navegador.
-function platformMfaMessage(error){
- const messages={
-  'auth/invalid-verification-code':'Código inválido. Use o código atual do seu aplicativo autenticador.',
-  'auth/code-expired':'O código expirou. Digite o novo código do aplicativo.',
-  'auth/invalid-multi-factor-session':'A tentativa expirou. Entre novamente.',
-  'auth/requires-recent-login':'Por segurança, saia e entre novamente para configurar o autenticador.',
-  'auth/too-many-requests':'Muitas tentativas. Aguarde alguns minutos e tente novamente.',
-  'auth/network-request-failed':'Confira sua conexão e tente novamente.',
-  'auth/operation-not-allowed':'A autenticação em duas etapas ainda precisa ser ativada pelo administrador no Firebase.',
-  'auth/unsupported-first-factor':'Este método de acesso não permite cadastrar o autenticador. Entre com e-mail e senha ou Google.',
-  'auth/unverified-email':'Confirme seu e-mail antes de cadastrar o autenticador.',
-  'auth/mfa-cancelled':'Verificação cancelada. Entre novamente quando estiver com seu autenticador.',
-  'auth/invalid-totp-secret':'A configuração expirou. Recomece para gerar uma nova chave.',
-  'auth/second-factor-already-in-use':'Este autenticador já está cadastrado. Saia e entre novamente.',
-  'auth/admin-restricted-operation':'O segundo fator por aplicativo precisa ser habilitado no projeto Milton Site.',
-  'auth/quota-exceeded':'O limite gratuito de autenticação foi atingido. Tente mais tarde.'
- };
- return messages[error?.code]||('Não foi possível concluir a verificação. Informe ao suporte: '+(error?.code||'erro de autenticação'));
-}
-async function platformWithMfa(operation){
- try{return await operation();}catch(error){if(error.code==='auth/multi-factor-auth-required')return platformResolveMfa(error);throw error;}
-}
-function platformResolveMfa(error){
- const resolver=getMultiFactorResolver(auth,error),factors=resolver.hints.filter(f=>f.factorId===TotpMultiFactorGenerator.FACTOR_ID);
- if(!factors.length)throw Error('Esta conta usa um segundo fator incompatível com esta versão. Contate o administrador para recuperar o acesso.');
- return new Promise((resolve,reject)=>{
-  const previous=document.activeElement,overlay=document.createElement('div');
-  overlay.style.cssText='position:fixed;inset:0;z-index:2147483647;background:#030712eb;display:grid;place-items:center;padding:20px;color:#f8fafc;font-family:system-ui';
-  const form=document.createElement('form');form.setAttribute('role','dialog');form.setAttribute('aria-modal','true');form.setAttribute('aria-label','Verificação em duas etapas');
-  form.style.cssText='max-width:440px;width:100%;background:#111827;padding:28px;border:1px solid #475569;border-radius:20px';
-  const title=document.createElement('h2');title.textContent='Verificação em duas etapas';title.style.cssText='font-size:24px;font-weight:700;margin-bottom:14px';
-  const help=document.createElement('p');help.textContent='A verificação em duas etapas é obrigatória para proteger os dados da plataforma. Abra seu aplicativo autenticador e digite o código de seis dígitos para entrar.';help.style.marginBottom='18px';
-  const select=document.createElement('select');select.setAttribute('aria-label','Autenticador');select.style.cssText='width:100%;padding:10px;background:#1e293b;color:white;margin-bottom:12px';
-  factors.forEach((f,i)=>{const option=document.createElement('option');option.value=String(i);option.textContent=f.displayName||'Autenticador '+(i+1);select.append(option);});select.hidden=factors.length===1;
-  const label=document.createElement('label');label.textContent='Código do autenticador';
-  const input=document.createElement('input');input.type='text';input.inputMode='numeric';input.autocomplete='one-time-code';input.pattern='[0-9]{6}';input.maxLength=6;input.required=true;input.addEventListener('input',()=>{input.value=input.value.replace(/\D/g,'').slice(0,6);});input.setAttribute('aria-label','Código de seis dígitos');input.style.cssText='width:100%;box-sizing:border-box;padding:14px;background:#030712;color:white;border:1px solid #64748b;border-radius:10px;font-size:24px;letter-spacing:.3em;margin:8px 0 16px';label.append(input);
-  const notice=document.createElement('p');notice.setAttribute('role','alert');notice.style.cssText='color:#fda4af;line-height:1.5;margin-bottom:12px';
-  const submit=document.createElement('button'),cancel=document.createElement('button');submit.type='submit';submit.textContent='Verificar e entrar';cancel.type='button';cancel.textContent='Cancelar';
-  for(const b of [submit,cancel])b.style.cssText='padding:12px 16px;margin:4px;border-radius:10px;border:1px solid #64748b;background:#1d4ed8;color:white;cursor:pointer';
-  let busy=false,closed=false;
-  const finish=(value,failure)=>{if(closed)return;closed=true;document.removeEventListener('keydown',keys,true);overlay.remove();previous?.focus();failure?reject(failure):resolve(value);};
-  const abort=()=>{if(!busy)finish(null,Object.assign(Error('Verificação cancelada. Entre novamente para continuar.'),{code:'auth/mfa-cancelled'}));};
-  const keys=e=>{if(e.key==='Escape'){e.preventDefault();abort();}if(e.key==='Tab'){const items=[...form.querySelectorAll('input,select,button')].filter(el=>!el.hidden&&!el.disabled),first=items[0],last=items.at(-1);if(e.shiftKey&&document.activeElement===first){e.preventDefault();last.focus();}else if(!e.shiftKey&&document.activeElement===last){e.preventDefault();first.focus();}}};
-  cancel.onclick=abort;
-  form.onsubmit=async e=>{e.preventDefault();if(busy||!/^\d{6}$/.test(input.value))return;busy=true;submit.disabled=cancel.disabled=true;notice.textContent='';
-   try{const assertion=TotpMultiFactorGenerator.assertionForSignIn(factors[Number(select.value)||0].uid,input.value);finish(await resolver.resolveSignIn(assertion));}
-   catch(failure){notice.textContent=platformMfaMessage(failure);input.value='';input.focus();}
-   finally{busy=false;submit.disabled=cancel.disabled=false;}
-  };
-  form.append(title,help,select,label,notice,submit,cancel);overlay.append(form);document.body.append(overlay);document.addEventListener('keydown',keys,true);input.focus();
- });
-}
-// A decisão de acesso vem do token assinado e do serviço interno, nunca do armazenamento local.
-function platformHasAdditionalProof(claims={}){
- return claims.email_verified===true&&claims.firebase?.sign_in_second_factor==='totp';
-}
 async function signOut(authClient){await platformFirebaseSignOut(authClient);}
-function PlatformMfaGate({user,children,student=false}){
- return <PlatformNativeMfaGate key={user.uid} user={user} student={student}>{children}</PlatformNativeMfaGate>;
-}
-
-// O Firebase valida o segundo fator; o navegador nunca aprova uma sessão sozinho.
-function PlatformNativeMfaGate({user,children,student=false}){
- const [state,setState]=React.useState('checking'),[busy,setBusy]=React.useState(false),[message,setMessage]=React.useState(''),[secret,setSecret]=React.useState(null),[code,setCode]=React.useState(''),[resendAt,setResendAt]=React.useState(0),[now,setNow]=React.useState(Date.now());
- const alive=React.useRef(true),operating=React.useRef(false),revision=React.useRef(0);
- const inspect=async(current,refresh=false)=>{
-  const attempt=++revision.current;
-  if(refresh)await reload(current);
-  const token=await getIdTokenResult(current,refresh);
-  if(!alive.current||attempt!==revision.current||auth.currentUser?.uid!==current.uid)return;
-  if(platformHasAdditionalProof(token.claims)){
-   if(student)await platformEnsureGoogleProfile(current);
-   if(!alive.current||attempt!==revision.current||auth.currentUser?.uid!==current.uid)return;
-   setSecret(null);setCode('');setState('ready');return;
-  }
-  setState(!current.emailVerified?'email':multiFactor(current).enrolledFactors.length?'signin':'enroll');
- };
- React.useEffect(()=>{
-  alive.current=true;
-  const unsubscribe=onIdTokenChanged(auth,async current=>{
-   if(!current||current.uid!==user.uid){revision.current++;setState('checking');return;}
-   try{await inspect(current);}catch(error){if(alive.current&&auth.currentUser?.uid===user.uid){setMessage(platformMfaMessage(error));setState('error');}}
-  });
-  const timer=setInterval(()=>setNow(Date.now()),1000);
-  return()=>{alive.current=false;revision.current++;unsubscribe();clearInterval(timer);};
- },[user.uid]);
- const run=async action=>{
-  if(operating.current)return;operating.current=true;setBusy(true);setMessage('');
-  try{platformAssertCurrentAccount(user.uid);await action();}
-  catch(error){if(alive.current){setMessage(platformMfaMessage(error));if(['auth/requires-recent-login','auth/invalid-user-token','auth/user-token-expired','auth/invalid-multi-factor-session'].includes(error.code)){setSecret(null);setCode('');setState('signin');}}}
-  finally{operating.current=false;if(alive.current)setBusy(false);}
- };
- const send=()=>run(async()=>{
-  if(Date.now()<resendAt)return;
-  auth.languageCode='pt-BR';await sendEmailVerification(user);
-  if(alive.current){setResendAt(Date.now()+60000);setMessage('Enviamos um link para '+user.email+'. Confira também a pasta de spam. Este link confirma seu e-mail; os códigos de login serão gerados no autenticador.');}
- });
- const generate=()=>run(async()=>{
-  await reload(user);platformAssertCurrentAccount(user.uid);
-  if(!user.emailVerified){setState('email');return;}
-  if(multiFactor(user).enrolledFactors.length){setState('signin');return;}
-  const session=await multiFactor(user).getSession();
-  const value=await TotpMultiFactorGenerator.generateSecret(session);
-  if(alive.current&&auth.currentUser?.uid===user.uid){setCode('');setSecret(value);}
- });
- const enroll=event=>{event.preventDefault();if(!secret||!/^\d{6}$/.test(code))return;run(async()=>{
-  await multiFactor(user).enroll(TotpMultiFactorGenerator.assertionForEnrollment(secret,code),student?'Milton Site — aluno':'Milton Site — administrador');
-  if(alive.current){setSecret(null);setCode('');setState('signin');setMessage('Autenticador ativado. Entre novamente e informe o código do aplicativo para concluir o acesso.');}
- });};
- if(state==='ready')return children;
- const countdown=Math.max(0,Math.ceil((resendAt-now)/1000));
- const deadline=secret?.enrollmentCompletionDeadline?Date.parse(secret.enrollmentCompletionDeadline):null;
- const expired=Number.isFinite(deadline)&&now>=deadline;
- const button='w-full rounded-xl px-4 py-3 bg-blue-600 text-white font-bold disabled:opacity-50 mt-3';
- return <main style={{fontFamily:'Inter,system-ui,sans-serif'}} className="min-h-screen flex items-center justify-center p-5 bg-black text-slate-100"><section className="w-full max-w-lg rounded-2xl border border-slate-700 bg-slate-900 p-7" aria-label="Segurança da conta">
-  <p className="text-blue-300 text-sm mb-3">MILTON SITE · PROTEÇÃO DA CONTA</p><h1 className="text-2xl font-bold mb-4">Verificação em duas etapas</h1>
-  {state==='enroll'&&<PlatformAuthenticatorNotice setupActive={!!secret}/>}
-  {state==='checking'&&<p role="status">Conferindo sua sessão segura…</p>}
-  {state==='email'&&<><p className="leading-relaxed">Primeiro, confirme seu e-mail: <strong>{user.email}</strong>. Abra o link recebido e volte a esta página. Depois, você configurará o aplicativo autenticador.</p><button type="button" className={button} disabled={busy||countdown>0} onClick={send}>{countdown>0?'Reenviar em '+countdown+'s':'Enviar link de confirmação'}</button><button type="button" className={button} disabled={busy} onClick={()=>run(()=>inspect(user,true))}>Já confirmei meu e-mail</button></>}
-  {state==='enroll'&&<><p className="leading-relaxed">O código de seis números será gerado no aplicativo autenticador do seu celular, sem envio por e-mail ou SMS.</p>
-   {!secret?<button type="button" className={button} disabled={busy} onClick={generate}>{busy?'Preparando…':'Configurar meu autenticador'}</button>:<form onSubmit={enroll}>
-    {!expired&&<PlatformTotpSetup secret={secret} user={user}/>}
-    {expired?<p role="alert" className="mt-4 text-amber-200">Esta configuração expirou. Recomece para gerar uma nova chave.</p>:<label className="block mt-4">Código do aplicativo<input type="text" autoComplete="one-time-code" inputMode="numeric" pattern="[0-9]{6}" maxLength={6} required value={code} aria-label="Código de seis dígitos para ativar autenticador" onChange={e=>setCode(e.target.value.replace(/\D/g,''))} className="block w-full bg-black border border-slate-600 rounded-lg p-3 mt-2"/></label>}
-    <button type="submit" className={button} disabled={busy||expired||code.length!==6}>{busy?'Conferindo…':'Confirmar ativação'}</button><button type="button" className="w-full mt-3 text-slate-300 underline" disabled={busy} onClick={()=>{setSecret(null);setCode('');setMessage('');}}>Recomeçar configuração</button>
-   </form>}
-  </>}
-  {state==='signin'&&<><p className="leading-relaxed">Entre novamente com sua senha ou Google e confirme o código gerado no aplicativo autenticador. O painel só será aberto após essa confirmação.</p><button type="button" className={button} disabled={busy} onClick={()=>run(()=>signOut(auth))}>Ir para o login seguro</button></>}
-  {state==='error'&&<button type="button" className={button} disabled={busy} onClick={()=>run(()=>inspect(user,true))}>Tentar novamente</button>}
-  {message&&<p role="alert" className="mt-4 text-amber-200 leading-relaxed">{message}</p>}
-  <p className="mt-5 text-xs text-slate-400">Mantenha o relógio do celular no modo automático. Se perder o acesso ao autenticador, contate o administrador para recuperar sua conta.</p>
-  <button type="button" className="w-full mt-5 text-slate-300 underline" disabled={busy} onClick={()=>run(()=>signOut(auth))}>Sair da conta</button>
- </section></main>;
-}
-
 
     // --- UI COMPONENTS CORPORATIVOS (PREMIUM & MINIMALISTAS) ---
 
@@ -3325,7 +3189,7 @@ const usePlatformDomains = () => {
     return value;
 };
 
-const guardedPasswordSignIn = (instance, email, password) => window.platformAuthAttempt('password', () => platformWithMfa(() => signInWithEmailAndPassword(instance, String(email || '').trim(), password)));
+const guardedPasswordSignIn = (instance, email, password) => window.platformAuthAttempt('password', () => signInWithEmailAndPassword(instance, String(email || '').trim(), password));
 
 const platformVideoId = value => {
     try {
@@ -9479,7 +9343,7 @@ const SupportSection = ({ user, settings }) => {
           if (redirect && platformCanGoogleRedirect()) {
               await window.platformAuthAttempt('google', () => signInWithRedirect(auth, provider));
           } else {
-              const result = await window.platformAuthAttempt('google', () => platformWithMfa(() => signInWithPopup(auth, provider)));
+              const result = await window.platformAuthAttempt('google', () => signInWithPopup(auth, provider));
               await platformEnsureGoogleProfile(result.user);
           }
         } catch (err) {
@@ -9547,7 +9411,7 @@ const SupportSection = ({ user, settings }) => {
                     </div>
                 )}
 
-                <div className="mb-4 text-xs text-slate-400 leading-relaxed">Por política de segurança e preservação de dados, o acesso exige verificação em duas etapas. Após entrar, confirme o código de seis números enviado ao e-mail da sua conta.</div><form onSubmit={handleSubmit} className="space-y-5">
+                <form onSubmit={handleSubmit} className="space-y-5">
                     <div className="space-y-4 stagger-item delay-3">
                         
                         {!isLogin && (
@@ -14493,7 +14357,7 @@ function InactivityGate({user,children}) {
        // 3. FLUXO NORMAL DA APLICAÇÃO (Aluno Autenticado ou Visitante)
        // 👇 AQUI A MÁGICA FINAL: O APP PASSA A LISTA DE PROMOÇÕES (promotions={promocoes}) PARA O DASHBOARD 👇
        if (user) {
-           return <PlatformMfaGate key={user.uid} user={user} student><PlatformStudentIdentityGate key={user.uid} user={user}><InactivityGate key={user.uid} user={user}><StudentDashboard user={user} settings={genSettings} certificates={certificados} promotions={promocoes} onLogout={() => { if(auth) signOut(auth); else setUser(null); }} /></InactivityGate></PlatformStudentIdentityGate></PlatformMfaGate>;
+           return <PlatformStudentIdentityGate key={user.uid} user={user}><InactivityGate key={user.uid} user={user}><StudentDashboard user={user} settings={genSettings} certificates={certificados} promotions={promocoes} onLogout={() => { if(auth) signOut(auth); else setUser(null); }} /></InactivityGate></PlatformStudentIdentityGate>;
        }
        
        if (showAuth) {
@@ -14533,11 +14397,6 @@ function InactivityGate({user,children}) {
   
   
   
-// O QR é calculado localmente. A chave TOTP nunca vai para serviços de imagens.
-const PLATFORM_AUTHENTICATOR_STORES={
- android:'https://play.google.com/store/apps/details?id=com.google.android.apps.authenticator2',
- ios:'https://apps.apple.com/br/app/google-authenticator/id388497605'
-};
 function platformCpfDigits(value){return String(value||'').replace(/\D/g,'');}
 function platformCpfValid(value){
  const cpf=platformCpfDigits(value);
@@ -14549,69 +14408,6 @@ function platformCpfValid(value){
  }return true;
 }
 function platformCpfFormat(value){return platformCpfDigits(value).slice(0,11).replace(/(\d{3})(\d)/,'$1.$2').replace(/(\d{3})(\d)/,'$1.$2').replace(/(\d{3})(\d{1,2})$/,'$1-$2');}
-function PlatformLocalQr({value,label,size=224}){
- const canvas=React.useRef(null),[error,setError]=React.useState(false);
- React.useEffect(()=>{
-  setError(false);const target=canvas.current;if(!target||!value)return;
-  try{
-   const qr=window.qrcode(0,'M');qr.addData(String(value),'Byte');qr.make();
-   const count=qr.getModuleCount(),quiet=4,cell=Math.max(4,Math.ceil(size/(count+quiet*2)));
-   target.width=target.height=(count+quiet*2)*cell;const context=target.getContext('2d');
-   context.fillStyle='#fff';context.fillRect(0,0,target.width,target.height);context.fillStyle='#000';
-   for(let row=0;row<count;row++)for(let col=0;col<count;col++)if(qr.isDark(row,col))context.fillRect((col+quiet)*cell,(row+quiet)*cell,cell,cell);
-  }catch(_){setError(true);}
-  return()=>{const context=target.getContext('2d');context?.clearRect(0,0,target.width,target.height);};
- },[value,size]);
- return error?<p role="alert" className="text-amber-200 text-sm">Não foi possível desenhar o QR code. Use o link ou a chave de configuração abaixo.</p>:<canvas ref={canvas} role="img" aria-label={label} style={{width:size,height:'auto',aspectRatio:'1 / 1',maxWidth:'100%',imageRendering:'pixelated',background:'#fff',borderRadius:8}}/>;
-}
-function PlatformAuthenticatorNotice({setupActive=false}){
- const [store,setStore]=React.useState(/iPad|iPhone|iPod/.test(navigator.userAgent)?'ios':'android');
- return <aside className="mt-4 mb-5 rounded-xl border border-blue-500/40 bg-blue-950/40 p-4" aria-label="Política de segurança da plataforma">
-  <h2 className="text-sm font-bold text-blue-200">Autenticador obrigatório para proteger seus dados</h2>
-  <p className="text-sm leading-relaxed text-slate-200 mt-2">A verificação em duas etapas faz parte da política de segurança e preservação de dados da plataforma. Instale o Google Authenticator, Microsoft Authenticator ou outro aplicativo compatível antes de continuar.</p>
-  <div className="flex gap-2 flex-wrap mt-3">
-   <a href={PLATFORM_AUTHENTICATOR_STORES.android} target="_blank" rel="noopener noreferrer" className="rounded-lg border border-slate-600 bg-black px-3 py-2 text-sm text-white">Baixar para Android</a>
-   <a href={PLATFORM_AUTHENTICATOR_STORES.ios} target="_blank" rel="noopener noreferrer" className="rounded-lg border border-slate-600 bg-black px-3 py-2 text-sm text-white">Baixar para iPhone</a>
-  </div>
-  {!setupActive&&<details className="mt-3 text-sm"><summary className="cursor-pointer text-blue-200">QR code para baixar o aplicativo</summary><div className="mt-3 flex flex-col items-center gap-3">
-   <label className="w-full">Seu celular<select aria-label="Loja do autenticador" value={store} onChange={e=>setStore(e.target.value)} className="block w-full bg-slate-950 text-white border border-slate-600 rounded-lg p-2 mt-2"><option value="android">Android — Google Play</option><option value="ios">iPhone — App Store</option></select></label>
-   <PlatformLocalQr value={PLATFORM_AUTHENTICATOR_STORES[store]} label="QR code para baixar Google Authenticator" size={176}/>
-   <p className="text-slate-300">Este QR abre a loja. O QR da sua conta aparece ao iniciar a configuração abaixo.</p>
-  </div></details>}
- </aside>;
-}
-function platformTotpProvisioning(secret,user,brand='Plataforma de Ensino'){
- // RFC 3986: espaços são %20. Não usar URLSearchParams, que os troca por +.
- const encode=value=>encodeURIComponent(value).replace(/[!'()*]/g,c=>'%'+c.charCodeAt(0).toString(16).toUpperCase());
- const label=value=>String(value||'').normalize('NFKC').replace(/[:\u0000-\u001f\u007f\u200b-\u200f\u202a-\u202e\u2066-\u2069\ufeff]/g,' ').replace(/\s+/g,' ').trim();
- const issuer=Array.from(label(brand)||'Plataforma de Ensino').slice(0,64).join(''),account=label(user.email||user.uid)||'Minha conta';
- const key=String(secret?.secretKey||'').replace(/\s/g,'').replace(/=+$/,'').toUpperCase();
- const algorithm=String(secret?.hashingAlgorithm||'SHA1').replace(/-/g,'').toUpperCase(),digits=Number(secret?.codeLength||6),period=Number(secret?.codeIntervalSeconds||30);
- if(!/^[A-Z2-7]+$/.test(key)||![6,8].includes(digits)||!['SHA1','SHA256','SHA512'].includes(algorithm)||!Number.isInteger(period)||period<1||period>86400)throw Error('A chave de configuração não veio em um formato compatível. Clique em Recomeçar configuração para gerar um novo QR code.');
- const uri='otpauth://totp/'+encode(issuer)+':'+encode(account)+'?secret='+encode(key)+'&issuer='+encode(issuer)+'&algorithm='+algorithm+'&digits='+digits+'&period='+period;
- return {uri,key,issuer,account};
-}
-function PlatformTotpSetup({secret,user}){
- const brand=window.platformPublicSettings?.siteName||window.platformPublicSettings?.platformName||'Plataforma de Ensino';
- const provisioning=React.useMemo(()=>{try{return platformTotpProvisioning(secret,user,brand);}catch(error){return {error:error.message,key:secret?.secretKey||''};}},[secret,user.uid,user.email,brand]);
- const [copyMessage,setCopyMessage]=React.useState('');
- const copy=async()=>{try{await navigator.clipboard.writeText(provisioning.key);setCopyMessage('Chave copiada. No aplicativo, escolha inserir chave e selecione baseada no tempo.');}catch(_){setCopyMessage('Selecione a chave no campo abaixo e use a opção Copiar do seu navegador.');}};
- return <div className="mt-5">
-  <h2 className="font-bold text-white">Escaneie para adicionar sua conta</h2>
-  <p className="text-sm text-slate-300 leading-relaxed mt-2">No Google Authenticator, toque em + e escolha “Ler QR code”. Leia o código abaixo para adicionar esta conta da plataforma.</p>
-  <p className="mt-3 text-sm text-blue-200 break-all">Conta: <strong>{user.email||'Sua conta na plataforma'}</strong></p>
-  {provisioning.error?<p role="alert" className="mt-4 text-sm text-amber-200">{provisioning.error}</p>:<>
-   <div className="flex justify-center my-5"><PlatformLocalQr value={provisioning.uri} size={256} label="QR code para configurar a verificação em duas etapas desta conta"/></div>
-   <p className="text-center text-xs text-slate-300 mb-4">Este QR adiciona a conta. Depois, use nesta página o código de seis números gerado pelo aplicativo.</p>
-   <a href={provisioning.uri} referrerPolicy="no-referrer" className="block text-center text-blue-300 underline text-sm">Estou no mesmo celular: tentar abrir no autenticador</a>
-  </>}
-  <details className="mt-4 text-sm"><summary className="cursor-pointer text-slate-300">Não consigo escanear: usar chave manual</summary>
-   <label className="block mt-3">Escolha uma conta “baseada no tempo” e informe esta chave:<input aria-label="Chave de configuração do autenticador" readOnly value={provisioning.key} onFocus={e=>e.target.select()} className="w-full bg-slate-950 border border-slate-600 rounded-lg p-3 my-3 font-mono"/></label>
-   <button type="button" onClick={copy} className="px-3 py-2 rounded-lg border border-slate-600 text-blue-200">Copiar chave de configuração</button>{copyMessage&&<p role="status" className="mt-3 text-slate-300">{copyMessage}</p>}
-  </details>
-  <p className="mt-3 text-xs text-slate-400 leading-relaxed">O QR code e a chave são privados. Não compartilhe nem envie uma captura de tela. Mantenha o aplicativo e o relógio do celular atualizados.</p>
- </div>;
-}
 function platformAssertCurrentAccount(expectedUid){
  const current=auth?.currentUser;
  if(!current||expectedUid&&current.uid!==expectedUid)throw Object.assign(Error('Esta operação só pode ser feita no perfil da conta conectada. Entre no seu próprio perfil.'),{code:'platform/account-mismatch'});
@@ -14634,8 +14430,7 @@ async function platformIdentityRequest(payload,settings=window.platformPublicSet
  finally{clearTimeout(timeout);}
 }
 async function platformAssertPurchaseIdentity(expectedUid){
- const current=platformAssertCurrentAccount(expectedUid),token=await getIdTokenResult(current);
- if(!platformHasAdditionalProof(token.claims))throw Error('Confirme seu acesso antes de realizar uma compra.');
+ const current=platformAssertCurrentAccount(expectedUid);
  const data=await platformIdentityRequest({action:'check'},undefined,current.uid);
  if(data.uid!==current.uid||!platformCpfValid(data.cpfNormalized))throw Error('O CPF não está vinculado ao seu perfil. Complete seu cadastro antes de comprar.');
  return data;
