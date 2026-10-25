@@ -2,6 +2,7 @@
 <!-- SITE CURSOS — COMPATIBILIDADE COM OS HTMLS ANTIGOS — 23/10/2026
 Abas, telas e recursos dos arquivos enviados foram preservados.
 Revisão v10: Programador, cargos da equipe e permissões de inatividade alinhados às regras.
+Revisão v13: Face ID A&M com motor OpenCV local, fotos por aluno e limites individuais.
 Conexão padrão: site-cursos-a8ee1. Login direto por e-mail/senha ou Google.
 Não há cadastro de autenticador nem desafio TOTP/SMS nesta versão.
 As permissões de equipe e o cadastro de CPF/celular continuam ativos.
@@ -31,7 +32,7 @@ Nenhum provedor de videoconferência é incorporado nesta aba. Capacidade: 8 pes
 Fundos são processados localmente com MediaPipe; câmera externa depende do sistema operacional.
 Gravações baixadas localmente podem ser enviadas ao R2 pelo administrador.
 -->
-<!-- Revisão v12: reconhecimento facial opcional; requer servidor Python configurado. -->
+<!-- Revisão v14: cadastro facial obrigatório, Memória/R2, quota e controle de anexos. Requer serviço Python configurado. -->
 <html lang="pt-BR" class="dark">
 <head>
   <meta name="referrer" content="strict-origin-when-cross-origin">
@@ -2967,7 +2968,7 @@ var qrcode = function() {
 import { runTransaction as meetTransaction, limit as meetLimit } from 'firebase/firestore';
 import { runTransaction as inactivityTransaction, query as inactivityQuery, orderBy as inactivityOrderBy, documentId as inactivityDocumentId, limit as inactivityLimit, startAfter as inactivityStartAfter } from 'firebase/firestore';
     import { getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut as platformFirebaseSignOut, onAuthStateChanged, updateProfile, GoogleAuthProvider, signInWithPopup, signInWithRedirect, getRedirectResult, onIdTokenChanged, deleteUser  } from 'firebase/auth';
-    import { getDocFromServer, getFirestore, doc, getDoc, getDocs, setDoc, collection, addDoc, query, orderBy, onSnapshot, serverTimestamp, updateDoc, arrayUnion, arrayRemove, deleteDoc, where, limit } from 'firebase/firestore';
+    import { getDocFromServer, getFirestore, doc, getDoc, getDocs, setDoc as platformRawSetDoc, collection, addDoc, query, orderBy, onSnapshot, serverTimestamp, updateDoc as platformRawUpdateDoc, arrayUnion, arrayRemove, deleteDoc as platformRawDeleteDoc, where, limit } from 'firebase/firestore';
     import { jsPDF } from "jspdf";
     import { pipeline, env } from 'transformers';
 function platformFirestoreData(value){
@@ -3027,9 +3028,62 @@ async function certificateRenderCanvas(template,data){
 }
 function certificateDownload(url,name){const link=document.createElement('a');link.href=url;link.download=(name||'Certificado').replace(/[\\/:*?"<>|]/g,'_')+'.jpg';document.body.append(link);link.click();link.remove();}
 
-// BEGIN SITE CURSOS FACIAL v12
+// BEGIN SITE CURSOS BOOTSTRAP v15
+/* Public presentation settings. Authentication and biometrics stay independent. */
+const PLATFORM_PUBLIC_SETTINGS_PATH='general_settings_public';
+const PLATFORM_PUBLIC_DEFAULTS=Object.freeze({siteName:'Plataforma de Cursos',heroTitle:'Seu próximo passo começa aqui',heroSubtitle:'Entre na sua conta para acessar seus cursos.',heroButtonText:'Acessar minha conta',colorPrimary:'#3b82f6'});
+const PLATFORM_STUDENT_SETTINGS_KEYS=['aiCustomText','aiDocuments','aiKnowledgeBlocks','aiKnowledgeUrl','aiLinks','aiLinksList','aiToneFreedom','aiToneIntensity','aiToneSavage','aiToneSincerity','aiToneUnfiltered'];
+function platformSettingsWithoutSecrets(input){
+ const privateKey=/access.?token|refresh.?token|secret|password|senha|private.?key|access.?key|api.?key|credential|service.?account/i;
+ const clean=(value,key='',depth=0)=>{
+  if(privateKey.test(key)||depth>15||value===undefined)return undefined;
+  if(value===null||typeof value==='boolean'||typeof value==='number')return value;
+  if(typeof value==='string'){
+   if(/^https?:\/\//i.test(value)){try{const url=new URL(value);if(url.username||url.password||[...url.searchParams.keys()].some(name=>/^(token|key|secret|password|api_?key|access_?token|signature)$/i.test(name)))return undefined;}catch(_){return undefined;}}
+   return value;
+  }
+  if(Array.isArray(value))return value.map(item=>clean(item,'',depth+1)).filter(item=>item!==undefined);
+  if(typeof value==='object'&&Object.getPrototypeOf(value)===Object.prototype){const output={};for(const [name,item]of Object.entries(value)){const safe=clean(item,name,depth+1);if(safe!==undefined)output[name]=safe;}return output;}
+  return undefined;
+ };
+ return clean(input)||{};
+}
+function platformPublicSettingsProjection(input){
+ const clean=platformSettingsWithoutSecrets(input);for(const key of [...PLATFORM_STUDENT_SETTINGS_KEYS,'lastAuthor','updatedAt','adminPanelName','adminSidebarTitle'])delete clean[key];return clean;
+}
+function platformStudentSettingsProjection(input){
+ const clean=platformSettingsWithoutSecrets(input);return Object.fromEntries(PLATFORM_STUDENT_SETTINGS_KEYS.filter(key=>clean[key]!==undefined).map(key=>[key,clean[key]]));
+}
+function PlatformStudentSettingsBridge({user,onSettings,children}){
+ React.useEffect(()=>{let alive=true;if(!db)return;const stop=onSnapshot(doc(db,'platformStudentSettings','current'),snapshot=>{if(!alive||auth?.currentUser?.uid!==user.uid||!snapshot.exists())return;try{const value=platformStudentSettingsProjection(JSON.parse(snapshot.data().settingsJson||'{}'));onSettings(value);Promise.resolve(platformHydrateAIConfiguration(value)).then(hydrated=>{if(alive&&auth?.currentUser?.uid===user.uid)onSettings(platformStudentSettingsProjection(hydrated));}).catch(()=>{});}catch(_){}},()=>{});return()=>{alive=false;stop();};},[user.uid]);
+ return children;
+}
+function platformStartPublicSettings({listenPublic,listenLegacy,onSettings,onState,onHydrated,hydrate=async value=>value,schedule=setTimeout,cancel=clearTimeout,timeoutMs=8000}){
+ let closed=false,publicAvailable=false,version=0,legacyStop=null,publicStop=null;
+ const publish=(raw,source,error='')=>{
+  if(closed)return;const current=++version;
+  const safe={...PLATFORM_PUBLIC_DEFAULTS,...platformPublicSettingsProjection(raw)};
+  onSettings(safe);onState({ready:true,source,error});cancel(timer);
+  Promise.resolve().then(()=>hydrate(safe)).then(value=>{if(!closed&&current===version)onHydrated?.({...safe,...platformPublicSettingsProjection(value)});}).catch(()=>{});
+ };
+ const fallback=error=>publish({},'fallback',error);
+ const timer=schedule(()=>fallback('A configuração demorou para responder. Você pode entrar na sua conta ou tentar novamente.'),timeoutMs);
+ const legacy=()=>{
+  if(legacyStop||closed||publicAvailable)return;
+  try{legacyStop=listenLegacy(snapshot=>{if(publicAvailable||closed)return;snapshot.exists()?publish(snapshot.data(),'legacy'):fallback('A apresentação da plataforma ainda não foi publicada.');},()=>{if(!publicAvailable)fallback('Não foi possível carregar a apresentação. A tela de acesso continua disponível.');});}
+  catch(_){fallback('Não foi possível consultar as configurações da plataforma.');}
+ };
+ try{publicStop=listenPublic(snapshot=>{if(closed)return;if(snapshot.exists()){publicAvailable=true;legacyStop?.();legacyStop=null;publish(snapshot.data(),'public');}else legacy();},()=>legacy());}
+ catch(_){legacy();}
+ return()=>{closed=true;version++;cancel(timer);publicStop?.();legacyStop?.();};
+}
+function platformPublicSettingsNotice(state){return state?.error||'';}
+
+// END SITE CURSOS BOOTSTRAP v15
+
+// BEGIN SITE CURSOS FACIAL v15
 /* Embedded in both complete pages. The Python server is the sole issuer of grants. */
-const PLATFORM_FACE_DEFAULTS={enabled:false,requireOnLogin:true,inactiveDays:10,purchaseMode:'inactive',purchaseFreshMinutes:10,sessionMinutes:360,requireAdminApproval:true,backendUrl:'',revision:0};
+const PLATFORM_FACE_DEFAULTS={enabled:false,requireOnLogin:true,inactiveDays:10,purchaseMode:'inactive',purchaseFreshMinutes:10,sessionMinutes:360,requireAdminApproval:true,maxVerificationsPerDay:30,maxAttempts15m:5,maxPhotos:30,retentionDays:30,backendUrl:'',revision:0};
 let platformFaceKnownPolicy=null;
 function platformFaceBase(value){
  let url;try{url=new URL(String(value||'').trim());}catch(_){throw Error('Informe o endereço HTTPS do servidor de reconhecimento facial.');}
@@ -3038,7 +3092,7 @@ function platformFaceBase(value){
 }
 async function platformFacePolicy(uid){
  platformAssertCurrentFaceUser(uid);
- const snap=await getDocFromServer(doc(db,'facePolicy','current'));
+ let timer;const snap=await Promise.race([getDocFromServer(doc(db,'facePolicy','current')),new Promise((_,reject)=>{timer=setTimeout(()=>reject(Error('A configuração facial demorou para responder. Tente novamente.')),12000);})]).finally(()=>clearTimeout(timer));
  platformAssertCurrentFaceUser(uid);
  const policy={...PLATFORM_FACE_DEFAULTS,...(snap.exists()?snap.data():{})};
  platformFaceKnownPolicy={uid,policy};return policy;
@@ -3096,13 +3150,13 @@ function PlatformFaceCapture({user,base,purpose='portal',consentText='',consentV
  };
  const pose=challenge?.sequence?.[step],instruction=pose==='front'?'Olhe de frente para a câmera':pose==='left'?'Vire levemente o rosto para a esquerda da imagem ←':'Vire levemente o rosto para a direita da imagem →';
  return <section className="space-y-4" aria-label={enrolling?'Cadastro facial':'Confirmar meu rosto'}>
-  <p className="text-sm text-slate-400">Use boa iluminação, sem outras pessoas na imagem. Serão capturados três quadros do seu rosto ao vivo.</p>
+  <p className="text-sm text-slate-400">Face ID da A&amp;M Produções. Use boa iluminação, sem outras pessoas na imagem. Serão capturados três quadros do seu rosto ao vivo, com comparação facial e teste de presença.</p>
   {enrolling&&<label className="flex gap-3 text-sm rounded-xl border border-slate-600 p-4"><input type="checkbox" checked={accepted} disabled={busy||cameraReady} onChange={e=>setAccepted(e.target.checked)}/><span>{consentText||'Autorizo guardar um modelo facial e uma miniatura criptografados para confirmar o acesso da minha própria conta. Posso excluir o cadastro e solicitar ajuda.'}</span></label>}
   <video ref={video} autoPlay playsInline muted aria-label="Sua câmera" className={'w-full aspect-[4/3] object-contain rounded-xl bg-black '+(cameraReady?'':'hidden')}/>
   {cameraReady&&<p role="status" className="text-lg font-bold text-center">Etapa {step+1} de 3 · {instruction}</p>}
   {error&&<p role="alert" className="text-red-300 rounded-lg border border-red-900 p-3">{error}</p>}
   <div className="flex flex-wrap gap-3"><button type="button" disabled={busy||enrolling&&!accepted} onClick={cameraReady?capture:start} className="rounded-xl bg-blue-600 px-5 py-3 font-bold text-white disabled:opacity-50">{busy?'Processando…':cameraReady?'Capturar esta posição':challenge?'Tentar novamente':'Ligar câmera e iniciar'}</button><button type="button" onClick={()=>{stop();onCancel?.();}} className="rounded-xl border border-slate-600 px-4 py-3">Cancelar</button></div>
-  <p className="text-xs text-slate-400">Não usamos Google Authenticator ou código por SMS. Se a câmera não funcionar, solicite ajuda ao administrador.</p>
+  <p className="text-xs text-slate-400">Fotos de cadastro e verificações ficam criptografadas na pasta da sua conta, acessível à administração autorizada, dentro dos limites informados. Não usamos Google Authenticator ou SMS. Solicite ajuda se a câmera não funcionar.</p>
  </section>;
 }
 
@@ -3120,7 +3174,7 @@ function platformFaceShowPurchase(user,base,status){
 }
 async function platformFaceAuthorizePurchase(payload){
  const user=auth?.currentUser;if(!user)throw Error('Entre novamente antes de comprar.');
- const policy=await platformFacePolicy(user.uid);if(!policy.enabled||policy.purchaseMode==='off')return payload;
+ const policy=await platformFacePolicy(user.uid);if(!policy.backendUrl)throw Error('A verificação facial está temporariamente indisponível. Peça ajuda ao administrador antes de comprar.');
  const body={action:payload.action,itemType:payload.itemType,itemId:String(payload.itemId||''),requestId:String(payload.requestId||'')};
  let result;try{result=await platformFaceApi(policy.backendUrl,'/purchase-ticket',{method:'POST',uid:user.uid,body});}
  catch(error){if(error.code!=='face/purchase-required')throw error;await platformFaceShowPurchase(user,policy.backendUrl);result=await platformFaceApi(policy.backendUrl,'/purchase-ticket',{method:'POST',uid:user.uid,body});}
@@ -3137,7 +3191,8 @@ function PlatformFaceGate({user,children}){
  const refresh=async(silent=false)=>{
   if(running.current)return;running.current=true;
   try{
-   const policy=await platformFacePolicy(user.uid);let status=policy.enabled?await platformFaceApi(policy.backendUrl,'/status',{uid:user.uid}):{enabled:false,allowed:true,policy};
+   const policy=await platformFacePolicy(user.uid);let status=policy.backendUrl?await platformFaceApi(policy.backendUrl,'/status',{uid:user.uid}):{enabled:false,allowed:false,servicePaused:true,enrollmentRequired:true,policy};
+   if(status.enabled!==true&&!status.staffExempt)status={...status,allowed:false,servicePaused:true};
    if(alive.current){setState({...status,loading:false});ready.current=true;}
   }catch(e){if(alive.current){setState({loading:false,error:e.message});ready.current=true;}}
   finally{running.current=false;}
@@ -3146,24 +3201,97 @@ function PlatformFaceGate({user,children}){
  const base=state.policy?.backendUrl;
  const requestHelp=async()=>{if(requesting)return;setRequesting(true);setMessage('');try{await platformFaceApi(base,'/recovery',{method:'POST',uid:user.uid,body:{reason}});if(alive.current)setMessage('Pedido enviado. Aguarde a análise do administrador e clique em Consultar novamente.');}catch(e){if(alive.current)setMessage(e.message);}finally{if(alive.current)setRequesting(false);}};
  const remove=async()=>{
-  if(!await window.platformConfirm('Excluir seu modelo facial e sua miniatura? Você precisará de um novo cadastro para acessar enquanto a exigência estiver ativa.'))return;
+  if(!await window.platformConfirm('Excluir seu cadastro facial e suas fotos? O cadastro facial é obrigatório para navegar. Será necessário cadastrar o rosto novamente e aguardar aprovação para voltar à plataforma.'))return;
   try{await platformFaceApi(base,'/enrollment',{method:'DELETE',uid:user.uid});setPrivacy(false);setCapture(false);refresh();}catch(e){setMessage(e.message);}
  };
  if(state.loading)return <div role="status" className="min-h-screen grid place-items-center bg-slate-950 text-slate-200">Consultando acesso…</div>;
- if(state.allowed&&!privacy&&!capture)return <>{children}{state.policy?.backendUrl&&!state.staffExempt&&<button type="button" onClick={()=>setPrivacy(true)} className="fixed bottom-3 left-3 z-[999] px-3 py-2 rounded-xl border border-slate-600 bg-slate-950 text-white text-xs shadow-lg">Meu cadastro facial</button>}</>;
- const pending=state.enrollmentStatus==='pending';
+ if(state.allowed&&(state.enabled===true||state.staffExempt===true)&&!privacy&&!capture)return <>{children}{state.policy?.backendUrl&&!state.staffExempt&&<button type="button" onClick={()=>setPrivacy(true)} className="fixed bottom-3 left-3 z-[999] px-3 py-2 rounded-xl border border-slate-600 bg-slate-950 text-white text-xs shadow-lg">Meu cadastro facial</button>}</>;
+ const pending=state.enrollmentStatus==='pending',newAccount=window.platformFaceRegistration?.uid===user.uid;
  return <main className="min-h-screen bg-slate-950 text-white flex items-center justify-center p-5"><section className="w-full max-w-xl rounded-2xl border border-slate-700 bg-slate-900 p-6 sm:p-8 space-y-5">
-  <div><p className="text-xs uppercase tracking-widest text-blue-400 mb-2">Acesso à sua conta</p><h1 className="text-2xl font-bold">{privacy?'Meu cadastro facial':pending?'Cadastro aguardando aprovação':state.needsEnrollment?'Cadastre seu rosto':'Confirme seu rosto'}</h1></div>
+  <div><p className="text-xs uppercase tracking-widest text-blue-400 mb-2">Face ID da A&amp;M Produções</p><h1 className="text-2xl font-bold">{privacy?'Meu cadastro facial':pending?'Cadastro aguardando aprovação':state.servicePaused?'Preparando seu acesso seguro':state.needsEnrollment?newAccount?'Última etapa: cadastre seu rosto':'Ative a proteção da sua conta':'Confirme seu rosto'}</h1></div>
   {state.error?<p role="alert" className="text-red-300">{state.error} Verifique sua conexão ou peça ao administrador para conferir o servidor e as regras do Firebase.</p>:<>
-   {privacy?<><p className="text-sm text-slate-300">O cadastro contém uma miniatura e um modelo facial criptografados. As imagens completas da câmera são descartadas. Status: {state.enrollmentStatus}.</p><button type="button" onClick={remove} className="rounded-lg border border-red-700 text-red-300 px-4 py-3">Excluir cadastro e retirar autorização</button>{state.allowed&&<button type="button" onClick={()=>setPrivacy(false)} className="block text-blue-300 underline">Voltar à plataforma</button>}</>:pending?<p className="text-slate-300">Seu rosto foi cadastrado. O administrador precisa aprovar o cadastro antes de você confirmar o acesso.</p>:capture?<PlatformFaceCapture key={user.uid} user={user} base={base} purpose={state.needsEnrollment?'enroll':'portal'} consentText={state.consentText} consentVersion={state.consentVersion} onFinished={()=>{setCapture(false);refresh();}} onCancel={()=>setCapture(false)}/>:<><p className="text-slate-300">{state.inactivityDue?'Seu período de inatividade exige uma nova confirmação.':'Confirme o rosto cadastrado para liberar esta sessão.'}</p><button type="button" onClick={()=>setCapture(true)} className="bg-blue-600 font-bold px-5 py-3 rounded-xl">{state.needsEnrollment?'Iniciar cadastro facial':'Verificar com a câmera'}</button></>}
-   {!capture&&<details className="rounded-xl border border-slate-700 p-4"><summary className="cursor-pointer font-bold">Preciso de ajuda com o acesso</summary><p className="text-sm text-slate-400 my-3">Descreva o problema. O administrador pode revisar o cadastro ou autorizar acesso temporário ao portal. Compras exigidas pela política continuam dependendo da conferência do rosto.</p><label className="block text-sm">Motivo<textarea maxLength="500" minLength="5" value={reason} onChange={e=>setReason(e.target.value)} className="w-full mt-2 p-3 rounded-lg bg-slate-950 border border-slate-600"/></label><button type="button" disabled={requesting||reason.trim().length<5} onClick={requestHelp} className="mt-3 px-4 py-2 border border-slate-500 rounded-lg disabled:opacity-50">{requesting?'Enviando…':'Solicitar revisão'}</button></details>}
+   {privacy?<><p className="text-sm text-slate-300">Modelo e fotos de cadastro e verificações ficam criptografados na pasta da sua conta. Status: {state.enrollmentStatus||'sem cadastro'}. A exclusão remove seu modelo e as fotos; registros de segurança sem imagens seguem a retenção informada.</p><button type="button" onClick={remove} className="rounded-lg border border-red-700 text-red-300 px-4 py-3">Excluir cadastro e retirar autorização</button>{state.allowed&&<button type="button" onClick={()=>setPrivacy(false)} className="block text-blue-300 underline">Voltar à plataforma</button>}</>:state.servicePaused?<p className="text-slate-300">O cadastro facial é obrigatório para acessar a plataforma. A câmera está temporariamente indisponível enquanto a equipe prepara ou revisa o serviço. Seus dados continuam salvos. Consulte novamente em instantes ou entre em contato com a equipe.</p>:state.legacyEnrollment?<p className="text-amber-200">Seu cadastro pertence ao motor anterior. Solicite revisão ao administrador para remover o cadastro antigo e autorizar um novo.</p>:pending?<p className="text-slate-300">Seu rosto foi cadastrado com sucesso! Agora nossa equipe vai conferir sua identidade e aprovar o cadastro. Assim que for aprovado, confirme seu rosto para começar a navegar. Você não precisa cadastrar outra conta.</p>:capture?<PlatformFaceCapture key={user.uid} user={user} base={base} purpose={state.needsEnrollment?'enroll':'portal'} consentText={state.consentText} consentVersion={state.consentVersion} onFinished={()=>{setCapture(false);refresh();}} onCancel={()=>setCapture(false)}/>:<><p className="text-slate-300">{state.needsEnrollment?newAccount?'Falta só proteger sua nova conta! Depois dos seus dados, cadastre seu rosto para concluir o cadastro. Essa etapa é obrigatória para navegar e ajuda a manter seus cursos e suas compras seguros.':'Olá! Para cuidar da segurança da sua conta, precisamos ativar a verificação em duas etapas por reconhecimento facial. Seu login continua o mesmo. Cadastre seu próprio rosto para liberar a navegação na plataforma. Essa ativação é obrigatória e nossa equipe vai conferir o primeiro cadastro.':state.inactivityDue?'Seu período de inatividade exige uma nova confirmação.':'Confirme o rosto cadastrado para liberar esta sessão.'}</p>{state.needsEnrollment&&<p className="text-sm text-slate-400">Você escolhe quando ligar a câmera e autoriza o uso das imagens antes da captura. Se não puder usar a câmera, peça ajuda à equipe. O portal permanece protegido até a liberação.</p>}<button type="button" onClick={()=>setCapture(true)} className="bg-blue-600 font-bold px-5 py-3 rounded-xl">{state.needsEnrollment?'Ativar reconhecimento facial obrigatório':'Verificar com a câmera'}</button></>}
+   {state.policy&&<p className="text-xs text-slate-400">Retenção de até {state.policy.retentionDays} dias e {state.policy.maxPhotos} fotos. Limite de {state.policy.maxVerificationsPerDay} confirmações por dia ({state.timeZone||'horário configurado'}). Cada foto recebe um identificador e conferência de integridade.</p>}
+   {!capture&&base&&<details className="rounded-xl border border-slate-700 p-4"><summary className="cursor-pointer font-bold">Preciso de ajuda com o acesso</summary><p className="text-sm text-slate-400 my-3">Descreva o problema. O administrador pode revisar o cadastro ou autorizar acesso temporário ao portal de um cadastro já aprovado. Compras exigidas pela política continuam dependendo da conferência do rosto.</p><label className="block text-sm">Motivo<textarea maxLength="500" minLength="5" value={reason} onChange={e=>setReason(e.target.value)} className="w-full mt-2 p-3 rounded-lg bg-slate-950 border border-slate-600"/></label><button type="button" disabled={requesting||reason.trim().length<5} onClick={requestHelp} className="mt-3 px-4 py-2 border border-slate-500 rounded-lg disabled:opacity-50">{requesting?'Enviando…':'Solicitar revisão'}</button></details>}
   </>}
   {message&&<p role="status" className="text-sm text-amber-200">{message}</p>}
+  {!privacy&&!capture&&base&&['pending','active'].includes(state.enrollmentStatus)&&<button type="button" onClick={()=>setPrivacy(true)} className="text-sm text-blue-300 underline">Consultar ou excluir meu cadastro facial</button>}
   <div className="flex flex-wrap gap-4 text-sm"><button type="button" onClick={()=>refresh()} className="text-blue-300 underline">Consultar novamente</button><button type="button" onClick={()=>signOut(auth)} className="text-slate-300 underline">Sair da conta</button></div>
  </section></main>;
 }
 
-// END SITE CURSOS FACIAL v12
+// END SITE CURSOS FACIAL v15
+
+// BEGIN SITE CURSOS STORAGE v14
+// SITE CURSOS v14 — shared R2 service, no S3 credentials in student requests.
+function platformStorageEndpoint(settings=window.platformPublicSettings||{}){
+ const value=String(settings.uploadBackendUrl||settings.r2UploadBackendUrl||'').trim();
+ if(!value)throw Object.assign(Error('Informe o endereço do servidor de arquivos abaixo. As chaves do R2 e o endereço público do bucket não substituem esse serviço.'),{code:'storage/missing-endpoint'});
+ let url;try{url=new URL(value,location.href);}catch(_){throw Error('Configure o servidor de arquivos em Programador → Arquivos e R2.');}
+ if(url.username||url.password||url.search||url.hash||(url.protocol!=='https:'&&!(url.protocol==='http:'&&['localhost','127.0.0.1','[::1]'].includes(url.hostname))))throw Error('O servidor de arquivos precisa de um endereço HTTPS sem senha ou parâmetros.');
+ if(/(^|\.)(r2\.cloudflarestorage\.com|r2\.dev)$/i.test(url.hostname))throw Error('Este é o endereço do bucket R2. Informe o endereço HTTPS do serviço de arquivos, que termina em /api/uploads.');
+ if(url.pathname==='/'||!url.pathname)url.pathname='/api/uploads';
+ if(!/\/api\/uploads\/?$/.test(url.pathname))throw Error('O endereço do serviço de arquivos deve terminar em /api/uploads.');
+ return url;
+}
+async function platformStorageRequest(path,{method='GET',body,settings,signal,timeoutMs=180000}={}){
+ const endpoint=platformStorageEndpoint(settings),url=new URL(endpoint.href);url.pathname=url.pathname.replace(/\/api\/uploads\/?$/,'/api/storage')+path.split('?')[0];url.search=path.includes('?')?'?'+path.split('?').slice(1).join('?'):'';
+ const user=auth?.currentUser;if(!user)throw Error('Entre novamente para consultar os arquivos.');
+ const uid=user.uid,token=await user.getIdToken();if(auth?.currentUser?.uid!==uid)throw Error('A conta mudou. Entre novamente.');
+ const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),timeoutMs),abort=()=>controller.abort();signal?.addEventListener('abort',abort,{once:true});
+ try{const response=await fetch(url.href,{method,headers:{Authorization:'Bearer '+token,...(body?{'Content-Type':'application/json'}:{})},body:body?JSON.stringify(body):undefined,signal:controller.signal,redirect:'error',credentials:'omit',cache:'no-store'});const data=await response.json().catch(()=>({}));if(auth?.currentUser?.uid!==uid)throw Error('A conta mudou durante a consulta.');if(!response.ok)throw Object.assign(Error(data.error||(response.status===404?'O endereço respondeu, mas o serviço de armazenamento atualizado não está publicado nesse servidor.':'O serviço de armazenamento não respondeu. Confira o endereço e a configuração do serviço.')),{code:data.code,status:response.status});return data;}catch(error){if(error.name==='AbortError')throw Error('A conferência do R2 não foi concluída. Tente novamente.');if(error instanceof TypeError)throw Object.assign(Error('Não foi possível alcançar o servidor de arquivos. Confira o endereço HTTPS e o CORS para este site.'),{code:'storage/network-error'});throw error;}finally{clearTimeout(timer);signal?.removeEventListener('abort',abort);}
+}
+async function platformStorageConnect(values){
+ const fields={accountId:values.r2AccountId,bucket:values.r2BucketName,publicDomain:values.r2PublicDomain,accessKeyId:values.r2AccessKeyId,secretAccessKey:values.r2SecretAccessKey};
+ if(Object.values(fields).some(value=>!value))throw Error('Preencha as credenciais e o domínio do R2 no cofre do Programador antes de conectar.');
+ return platformStorageRequest('/connection',{method:'POST',body:fields,settings:values});
+}
+async function platformManagedUpload(file,folder,settings,signal){
+ const endpoint=platformStorageEndpoint(settings),user=auth?.currentUser;if(!user)throw Error('Entre novamente antes de enviar.');
+ const uid=user.uid,token=await user.getIdToken();if(auth?.currentUser?.uid!==uid)throw Error('A conta mudou.');
+ const send=async(url,options)=>{const response=await fetch(url,{...options,headers:{...options.headers,Authorization:'Bearer '+token},redirect:'error',credentials:'omit',cache:'no-store'});const data=await response.json().catch(()=>({}));if(!response.ok)throw Object.assign(Error(data.error||'O serviço não concluiu o envio. Confira o R2 na aba Memória.'),{code:data.code,status:response.status});if(auth?.currentUser?.uid!==uid)throw Error('A conta mudou durante o envio.');return data;};
+ let ticket;
+ try{
+  const reserved=await send(endpoint.href,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:file.name||'arquivo',size:file.size,contentType:file.type||'application/octet-stream',folder:folder.endsWith('/')?folder:folder+'/',expectedBucket:settings?.r2BucketName||'',expectedAccountId:settings?.r2AccountId||''}),signal});
+  if(reserved.managedStorage!==true||reserved.requiresAuthorization!==true||!reserved.uploadId||!reserved.uploadUrl)throw Error('O servidor atual ainda não possui a proteção de 9,9 GB. Instale o serviço de arquivos atualizado antes de enviar.');
+  ticket=reserved.uploadId;const target=new URL(reserved.uploadUrl,endpoint.href);
+  if(target.origin!==endpoint.origin||target.pathname!==endpoint.pathname.replace(/\/$/,'')+'/'+encodeURIComponent(ticket)||target.search||target.hash)throw Error('O endereço de envio retornado não pertence ao serviço de arquivos.');
+  const completed=await send(target.href,{method:'PUT',headers:{'Content-Type':reserved.contentType||file.type||'application/octet-stream'},body:file,signal});
+  if(completed.managedStorage!==true||!completed.url||completed.size!==file.size)throw Error('O R2 não confirmou o arquivo completo.');
+  return {...completed,type:file.type.startsWith('video/')?'video':file.type.startsWith('audio/')?'audio':file.type.startsWith('image/')?'image':'file'};
+ }catch(error){
+  if(ticket&&auth?.currentUser?.uid===uid){const cancel=new AbortController(),timer=setTimeout(()=>cancel.abort(),5000);try{await fetch(endpoint.href.replace(/\/$/,'')+'/'+encodeURIComponent(ticket),{method:'DELETE',headers:{Authorization:'Bearer '+token},signal:cancel.signal,redirect:'error',credentials:'omit'});}catch(_){}finally{clearTimeout(timer);}}
+  throw error;
+ }
+}
+function platformStorageHasReferences(value){
+ const base=String(window.platformPublicSettings?.r2PublicDomain||'').replace(/\/$/,'')+'/';if(base==='/')return false;
+ if(typeof value==='string')return value.includes('https://');
+ if(Array.isArray(value))return value.some(platformStorageHasReferences);
+ return !!value&&typeof value==='object'&&Object.values(value).some(platformStorageHasReferences);
+}
+async function platformStorageBeforeWrite(ref){
+ if(!ref?.path||/^(face[A-Z]|storage[A-Z]|programmerConfig)/.test(ref.path)||/^config\/(general_settings|general_settings_public|youtube_upload|chat_upload_policy)$/.test(ref.path))return;
+ let old;try{old=await getDocFromServer(ref);}catch(error){if(error.code==='permission-denied')return;throw error;}
+ if(old.exists()&&platformStorageHasReferences(old.data()))await platformStorageRequest('/before-write',{method:'POST',body:{document:ref.path}});
+}
+async function platformStorageWrite(action,ref,...args){
+ await platformStorageBeforeWrite(ref);
+ return ({setDoc:platformRawSetDoc,updateDoc:platformRawUpdateDoc,deleteDoc:platformRawDeleteDoc})[action](ref,...args);
+}
+const setDoc=(ref,...args)=>platformStorageWrite('setDoc',ref,...args);
+const updateDoc=(ref,...args)=>platformStorageWrite('updateDoc',ref,...args);
+const deleteDoc=(ref,...args)=>platformStorageWrite('deleteDoc',ref,...args);
+function platformStorageBatch(batch){
+ const refs=new globalThis.Map();let proxy;
+ proxy=new Proxy(batch,{get(target,key){if(['set','update','delete'].includes(key))return(ref,...args)=>{if(ref?.path)refs.set(ref.path,ref);target[key](ref,...args);return proxy;};if(key==='commit')return async()=>{for(const ref of refs.values())await platformStorageBeforeWrite(ref);return target.commit();};const value=target[key];return typeof value==='function'?value.bind(target):value;}});return proxy;
+}
+async function platformStorageFirestore(){
+ const sdk=await import('https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore.js');
+ return {...sdk,setDoc,updateDoc,deleteDoc,writeBatch:db=>platformStorageBatch(sdk.writeBatch(db))};
+}
+
+// END SITE CURSOS STORAGE v14
 
 async function platformBackendRequest(kind,payload={},settings=window.platformPublicSettings||{}){
  const endpoint=kind==='uploads'?(settings.uploadBackendUrl||settings.r2UploadBackendUrl):settings.paymentBackendUrl;
@@ -3181,8 +3309,9 @@ async function platformBackendRequest(kind,payload={},settings=window.platformPu
 async function platformSignedUpload(file,folder='Community/',settings=window.platformPublicSettings||{}){
  if(!file)return null;if(isConversationUpload(folder))await assertConversationUploads();
  const controller=new AbortController(),stop=watchConversationUpload({abort:()=>controller.abort()},folder);
- try{const result=await platformBackendRequest('uploads',{name:file.name||'arquivo',size:file.size,contentType:file.type||'application/octet-stream',folder},settings);if(!result.uploadUrl||!result.url)throw Error('O servidor não retornou o endereço de envio.');const response=await fetch(result.uploadUrl,{method:'PUT',headers:{'Content-Type':result.contentType||file.type||'application/octet-stream'},body:file,signal:controller.signal});if(!response.ok)throw Error('O R2 não aceitou o arquivo. Confira as permissões CORS do bucket.');return {url:result.url,name:result.name||file.name,type:file.type.startsWith('video/')?'video':file.type.startsWith('audio/')?'audio':file.type.startsWith('image/')?'image':'file'};}finally{stop();}
+ try{return await platformManagedUpload(file,folder,settings,controller.signal);}finally{stop();}
 }
+
 function platformCleanSettings(value={}){
  const result={};for(const [key,item] of Object.entries(value))if(!/(access.?token|secret.?access.?key|access.?key.?id|private.?key|webhook.?secret|aiApiKey|emailApiKey|youtubeApiKey)/i.test(key))result[key]=item;return result;
 }
@@ -3271,10 +3400,13 @@ function platformMoney(value){if(typeof value==='number')return Number.isFinite(
         const ref = doc(db, 'users', user.uid);
         await inactivityTransaction(db, async tx => {
             const snap = await tx.get(ref);
-            if (!snap.exists()) tx.set(ref, {
-                name: user.displayName || '', email: user.email || '', role: 'student',
-                createdAt: serverTimestamp(), photoBase64: user.photoURL || '', profileComplete: false
-            });
+            if (!snap.exists()) {
+                window.platformFaceRegistration={uid:user.uid};
+                tx.set(ref, {
+                    name: user.displayName || '', email: user.email || '', role: 'student',
+                    createdAt: serverTimestamp(), photoBase64: user.photoURL || '', profileComplete: false
+                });
+            }
         });
     };
     // Executa uma vez por carregamento; o observador de autenticação cuida da navegação.
@@ -3292,7 +3424,7 @@ async function signOut(authClient){const user=authClient?.currentUser;try{if(use
 
 // Controle compartilhado de anexos: somente conversas e publicações da comunidade.
 const CHAT_UPLOAD_MESSAGE = 'Envio de áudios e arquivos suspenso pelo administrador. Mensagens de texto continuam disponíveis.';
-const isConversationUpload = (folder = '') => /^(Chat\/|ChatSuporte\/|AffiliateChats\/|Community\/$)/i.test(folder.replace(/^\/+/, ''));
+const isConversationUpload = (folder = '') => /^(Chat\/|ChatSuporte\/|AffiliateChats\/|Community\/)/i.test(folder.replace(/^\/+/, ''));
 const assertConversationUploads = async () => {
     let snap;
     try { snap = await getDocFromServer(doc(db, 'config', 'chat_upload_policy')); }
@@ -3316,7 +3448,9 @@ const useConversationUploads = () => {
             setPolicy({
                 enabled: confirmed && snap.exists() && snap.data().enabled === true,
                 ready: confirmed,
-                error: false
+                error: false,
+                maxFileSizeMB: snap.data()?.maxFileSizeMB || 0,
+                maxUploadsPerDay: snap.data()?.maxUploadsPerDay || 0
             });
         }, () => setPolicy({ enabled: false, ready: true, error: true }));
     }, []);
@@ -9470,7 +9604,8 @@ const SupportSection = ({ user, settings }) => {
      await platformIdentityRequest({action:'reserve',cpf:platformCpfDigits(formData.cpf)},settings,created.uid);
      await updateProfile(created,{displayName:formData.name.trim()});
      window.platformPendingCpf={uid:created.uid,cpf:platformCpfFormat(formData.cpf)};
-     onLogin(created);
+     window.platformFaceRegistration={uid:created.uid};
+      onLogin(created);
     }catch(error){
      if(created){
       // Apaga somente a credencial que acabou de ser criada nesta tentativa.
@@ -9586,6 +9721,7 @@ const SupportSection = ({ user, settings }) => {
                     </div>
                 )}
 
+                {!isLogin&&<div className="mb-5 rounded-xl border border-blue-500/30 p-4 text-left text-sm text-slate-300"><strong>Seu cadastro em 3 etapas</strong><p className="mt-2">1. Dados da conta · 2. Completar perfil · 3. Cadastrar seu rosto</p><p className="mt-2">O reconhecimento facial é obrigatório para navegar. Você autoriza a captura antes de ligar a câmera; nossa equipe confere o primeiro cadastro.</p></div>}
                 <form onSubmit={handleSubmit} className="space-y-5">
                     <div className="space-y-4 stagger-item delay-3">
                         
@@ -9639,7 +9775,7 @@ const SupportSection = ({ user, settings }) => {
                             className="w-full h-12 bg-primary hover:bg-primary-hover text-white font-bold text-base shadow-lg hover:shadow-xl rounded-xl transition-all duration-300 flex items-center justify-center gap-2"
                             disabled={loading}
                         >
-                            {loading ? 'Processando...' : (isLogin ? 'Entrar na Plataforma' : 'Criar Minha Conta')}
+                            {loading ? 'Processando...' : (isLogin ? 'Entrar na Plataforma' : 'Criar conta e continuar')}
                         </button>
                     </div>
                 </form>
@@ -9717,7 +9853,7 @@ const SupportSection = ({ user, settings }) => {
                             <ShieldCheck size={32} />
                         </div>
                         <h2 className="text-2xl font-bold text-slate-800 dark:text-white">Finalize seu Cadastro</h2>
-                        <p className="text-slate-500 dark:text-slate-400 mt-2">Identificamos que faltam alguns dados obrigatórios. Complete abaixo para liberar seu acesso.</p>
+                        <p className="text-slate-500 dark:text-slate-400 mt-2">Complete seus dados para continuar. Na próxima etapa, você cadastrará seu rosto. O cadastro facial é obrigatório para liberar a navegação.</p>
                     </div>
 
                     {error&&<p role="alert" className="mb-4 text-sm text-red-400">{error}</p>}<p className="text-xs text-slate-400 mb-4">Informe seu próprio CPF. Ele será vinculado a esta conta e não poderá ser substituído para realizar compras em nome de outra pessoa.</p><form onSubmit={handleSave} className="space-y-4">
@@ -9740,7 +9876,7 @@ const SupportSection = ({ user, settings }) => {
                         </div>
 
                         <Button type="submit" disabled={loading} className="w-full h-12 text-base mt-4 shadow-lg bg-indigo-600 hover:bg-indigo-700">
-                            {loading ? 'Salvando...' : 'Confirmar e Acessar'}
+                            {loading ? 'Salvando...' : 'Salvar dados e continuar para o Face ID'}
                         </Button>
                     </form>
                 </div>
@@ -14202,7 +14338,8 @@ function InactivityGate({user,children}) {
        const [genSettings, setGenSettings] = useState(null);
        const [certificados, setCertificados] = useState([]);
        const [cursos, setCursos] = useState([]); 
-       const [bgLoaded, setBgLoaded] = useState(false);
+       const [bgLoaded, setBgLoaded] = useState(true);
+       const [settingsState,setSettingsState]=useState({ready:false,error:''});
        const [promocoes, setPromocoes] = useState([]); // <-- ESTADO DE PROMOÇÕES
       
       
@@ -14363,60 +14500,29 @@ function InactivityGate({user,children}) {
           [settings.siteNameFont, settings.heroTitleFont, settings.heroSubtitleFont, settings.bodyFont].forEach(loadGoogleFont);
       };
 
-      // 1. CARREGAMENTO EM TEMPO REAL DO BANCO DE DADOS
-      useEffect(() => {
-          let unsubSettings;
-          
-          if (typeof isFirebaseAvailable !== 'undefined' && isFirebaseAvailable && db) {
-              const docRef = doc(db, "config", "general_settings");
-              unsubSettings = onSnapshot(docRef, (docSnap) => {
-                  if (docSnap.exists()) {
-                      const data=platformCleanSettings(docSnap.data());window.platformPublicSettings=data;setGenSettings(data);platformHydrateAIConfiguration(data).then(hydrated=>{if(window.platformPublicSettings===data)setGenSettings(hydrated);});
-
-                      // Atualiza o tema e o manifesto
-                      if (window.applyTheme) window.applyTheme(data);
-                      if (window.applyPwaManifest) window.applyPwaManifest(data);
-
-                      setTimeout(() => {
-                          if (window.initMeusCursosCarousel) {
-                              window.initMeusCursosCarousel(true, data.landingVideos);
-                          }
-                      }, 500);
-
-                      const heroImgUrl = data.heroBgUrl || data.heroBackground;
-                      if (heroImgUrl) {
-                          const img = new Image();
-                          img.src = heroImgUrl;
-                          img.onload = () => setBgLoaded(true);
-                          img.onerror = () => setBgLoaded(true); 
-                      } else {
-                          setBgLoaded(true);
-                      }
-                  }
-              }, (error) => console.warn("Erro ao ouvir config em tempo real:", error));
-          }
-
-          if (typeof isFirebaseAvailable !== 'undefined' && isFirebaseAvailable && db) {
-              try {
-                 const unsubCerts = onSnapshot(collection(db, "certificates"), (snap) => {
-                     setCertificados(snap.docs.map(d => ({id: d.id, ...d.data()})));
-                 }, (error) => console.log("Erro Certificados:", error));
-
-                 const qCourses = query(collection(db, "courses"), where("ativo", "==", true));
-                 const unsubCourses = onSnapshot(qCourses, (snap) => {
-                     setCursos(snap.docs.map(d => ({id: d.id, ...d.data()})));
-                 });
-
-                 // 👇 BUSCA PROMOÇÕES AQUI PARA O APP INTEIRO 👇
-                 const qPromos = query(collection(db, "promotions"), where("active", "==", true));
-                 const unsubPromos = onSnapshot(qPromos, (snap) => {
-                     setPromocoes(snap.docs.map(d => ({id: d.id, ...d.data()})));
-                 });
-
-                 return () => { unsubCerts(); unsubCourses(); unsubPromos(); if(unsubSettings) unsubSettings(); };
-              } catch(e) { console.log("Erro listeners firestore", e); }
-          }
-      }, [user?.uid]);
+      // Presentation loading has a bounded fallback. It never authorizes a student.
+      useEffect(()=>{
+          if(!isFirebaseAvailable||!db){setGenSettings({...PLATFORM_PUBLIC_DEFAULTS});setSettingsState({ready:true,error:'Sem conexão com o Firebase. Você pode tentar novamente.'});return;}
+          setGenSettings(window.platformPublicSettings||{...PLATFORM_PUBLIC_DEFAULTS});
+          const stop=platformStartPublicSettings({
+              listenPublic:(next,error)=>onSnapshot(doc(db,'config',PLATFORM_PUBLIC_SETTINGS_PATH),next,error),
+              listenLegacy:(next,error)=>onSnapshot(doc(db,'config','general_settings'),next,error),
+              onSettings:data=>{window.platformPublicSettings=data;setGenSettings(previous=>user?{...previous,...data}:data);setBgLoaded(true);applyThemeToDOM(data);window.applyPwaManifest?.(data);},
+              onState:setSettingsState,
+              hydrate:platformHydrateAIConfiguration,
+              onHydrated:data=>{window.platformPublicSettings=data;setGenSettings(previous=>user?{...previous,...data}:data);}
+          });
+          return stop;
+      },[user?.uid]);
+      useEffect(()=>{
+          if(!isFirebaseAvailable||!db)return;
+          const stops=[];
+          const listen=(reference,apply)=>{try{stops.push(onSnapshot(reference,snapshot=>apply(snapshot.docs.map(d=>({id:d.id,...d.data()}))),()=>apply([])));}catch(_){apply([]);}};
+          listen(collection(db,'certificates'),setCertificados);
+          listen(query(collection(db,'courses'),where('ativo','==',true)),setCursos);
+          listen(query(collection(db,'promotions'),where('active','==',true)),setPromocoes);
+          return()=>stops.forEach(stop=>stop());
+      },[user?.uid]);
 
       // 2. MODO PREVIEW AO VIVO E HANDSHAKE (Gatilho Inteligente)
       useEffect(() => {
@@ -14520,23 +14626,16 @@ function InactivityGate({user,children}) {
        // 3. FLUXO NORMAL DA APLICAÇÃO (Aluno Autenticado ou Visitante)
        // 👇 AQUI A MÁGICA FINAL: O APP PASSA A LISTA DE PROMOÇÕES (promotions={promocoes}) PARA O DASHBOARD 👇
        if (user) {
-           return <PlatformStudentIdentityGate key={user.uid} user={user}><PlatformFaceGate key={user.uid} user={user}><InactivityGate key={user.uid} user={user}><StudentDashboard user={user} settings={genSettings} certificates={certificados} promotions={promocoes} onLogout={() => { if(auth) signOut(auth); else setUser(null); }} /></InactivityGate></PlatformFaceGate></PlatformStudentIdentityGate>;
+           return <PlatformStudentIdentityGate key={user.uid} user={user}><PlatformFaceGate key={user.uid} user={user}><PlatformStudentSettingsBridge user={user} onSettings={value=>setGenSettings(previous=>({...previous,...value}))}><InactivityGate key={user.uid} user={user}><StudentDashboard user={user} settings={genSettings} certificates={certificados} promotions={promocoes} onLogout={() => { if(auth) signOut(auth); else setUser(null); }} /></InactivityGate></PlatformStudentSettingsBridge></PlatformFaceGate></PlatformStudentIdentityGate>;
        }
        
        if (showAuth) {
            return <AuthScreen onLogin={(u) => setUser(u)} onBack={() => setShowAuth(false)} settings={genSettings} />;
        }
        
-       // 4. TRAVA DE SEGURANÇA CONTRA TELA PISCANDO
-       if (!genSettings || (!user && !showAuth && !bgLoaded)) {
-           return (
-               <div className="flex flex-col items-center justify-center min-h-screen bg-[#050505]">
-                   <div className="w-8 h-8 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin mb-4"></div>
-               </div>
-           );
-       }
-
-       return <PublicLanding onLoginClick={() => setShowAuth(true)} settings={genSettings} courses={cursos} promotions={promocoes} />;
+       // Images and presentation errors cannot trap visitors in a second spinner.
+       const presentation=genSettings||PLATFORM_PUBLIC_DEFAULTS;
+       return <>{settingsState.error&&<div role="status" className="fixed bottom-4 left-4 right-4 z-[9999] mx-auto max-w-xl rounded-xl border border-amber-500/40 bg-slate-950 p-4 text-sm text-slate-200 shadow-xl"><p>{settingsState.error}</p><div className="mt-3 flex gap-4"><button type="button" onClick={()=>setShowAuth(true)} className="font-bold text-blue-300 underline">Entrar na minha conta</button><button type="button" onClick={()=>window.location.reload()} className="text-slate-300 underline">Tentar novamente</button></div></div>}<PublicLanding onLoginClick={()=>setShowAuth(true)} settings={presentation} courses={cursos} promotions={promocoes}/></>;
        // 👆 FIM DO BLOCO DE CARREGAMENTO E ROTEAMENTO 👆
     };
     
