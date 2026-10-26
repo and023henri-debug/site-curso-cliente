@@ -2967,7 +2967,7 @@ var qrcode = function() {
     import { initializeApp } from 'firebase/app';
 import { runTransaction as meetTransaction, limit as meetLimit } from 'firebase/firestore';
 import { runTransaction as inactivityTransaction, query as inactivityQuery, orderBy as inactivityOrderBy, documentId as inactivityDocumentId, limit as inactivityLimit, startAfter as inactivityStartAfter } from 'firebase/firestore';
-    import { getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut as platformFirebaseSignOut, onAuthStateChanged, updateProfile, GoogleAuthProvider, signInWithPopup, signInWithRedirect, getRedirectResult, onIdTokenChanged, deleteUser  } from 'firebase/auth';
+    import { getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut as platformFirebaseSignOut, onAuthStateChanged, updateProfile, GoogleAuthProvider, signInWithPopup, signInWithRedirect, getRedirectResult, onIdTokenChanged, deleteUser  , EmailAuthProvider, reauthenticateWithCredential, reauthenticateWithPopup, reauthenticateWithRedirect, browserPopupRedirectResolver } from 'firebase/auth';
     import { getDocFromServer, getFirestore, doc, getDoc, getDocs, setDoc as platformRawSetDoc, collection, addDoc, query, orderBy, onSnapshot, serverTimestamp, updateDoc as platformRawUpdateDoc, arrayUnion, arrayRemove, deleteDoc as platformRawDeleteDoc, where, limit } from 'firebase/firestore';
     import { jsPDF } from "jspdf";
     import { pipeline, env } from 'transformers';
@@ -3081,7 +3081,7 @@ function platformPublicSettingsNotice(state){return state?.error||'';}
 
 // END SITE CURSOS BOOTSTRAP v15
 
-// BEGIN SITE CURSOS FACIAL v20
+// BEGIN SITE CURSOS FACIAL v22
 /* Embedded in both complete pages. The Python server is the sole issuer of grants. */
 const PLATFORM_FACE_DEFAULTS={enabled:false,requireOnLogin:true,inactiveDays:10,purchaseMode:'inactive',purchaseFreshMinutes:10,sessionMinutes:360,requireAdminApproval:true,maxVerificationsPerDay:30,maxAttempts15m:5,maxPhotos:30,retentionDays:30,backendUrl:'',revision:0};
 let platformFaceKnownPolicy=null;
@@ -3172,9 +3172,66 @@ async function platformCreateFaceScanner(){
 function platformDrawFaceMesh(canvas,result,ready){
  if(!canvas)return;const ctx=canvas.getContext('2d');ctx.clearRect(0,0,canvas.width,canvas.height);if(result.faces.length!==1)return;const p=result.faces[0];ctx.lineWidth=.65;ctx.strokeStyle=ready?'rgba(52,211,153,.55)':'rgba(96,165,250,.45)';ctx.beginPath();for(const [a,b]of result.connections){if(!p[a]||!p[b])continue;ctx.moveTo(p[a].x*canvas.width,p[a].y*canvas.height);ctx.lineTo(p[b].x*canvas.width,p[b].y*canvas.height);}ctx.stroke();
 }
-function PlatformFaceCapture({user,base,purpose='portal',consentText='',consentVersion='',onFinished,onCancel}){
+function platformFaceNeedsRecentLogin(error){
+ return ['face/recent-login-required','auth/requires-recent-login','auth/credential-too-old-login-again'].includes(error?.code);
+}
+function platformFaceAuthenticationMessage(error){
+ const code=error?.code||'';
+ if(code==='face/account-changed'||code==='auth/user-mismatch')return 'A conta mudou durante a confirmação. Entre na mesma conta para continuar.';
+ if(['auth/invalid-credential','auth/wrong-password','auth/invalid-login-credentials','auth/user-not-found'].includes(code))return 'Não foi possível confirmar a senha. Confira a senha desta conta e tente novamente.';
+ if(code==='auth/too-many-requests')return 'Houve muitas tentativas. Aguarde um pouco antes de confirmar novamente.';
+ if(code==='auth/network-request-failed')return 'Confira sua conexão com a internet e tente confirmar novamente.';
+ if(code==='auth/popup-blocked')return 'O navegador bloqueou a janela do Google. Você pode continuar nesta mesma aba.';
+ if(['auth/popup-closed-by-user','auth/cancelled-popup-request'].includes(code))return 'A confirmação com o Google foi fechada. Tente novamente quando quiser continuar.';
+ if(code==='auth/user-disabled')return 'Esta conta está bloqueada. Entre em contato com a equipe da plataforma.';
+ if(code==='face/unsupported-provider')return 'Use o mesmo método de entrada da sua conta. Você também pode voltar à tela de acesso e entrar novamente.';
+ return 'Não foi possível confirmar sua conta. Tente novamente.';
+}
+async function platformFaceConfirmAccount(uid,{method,password}={}){
+ const current=platformAssertCurrentFaceUser(uid),providers=current.providerData||[];
+ let result;
+ if(method==='password'){
+  if(!current.email||!providers.some(value=>value.providerId==='password'))throw Object.assign(Error('Método de entrada indisponível.'),{code:'face/unsupported-provider'});
+  if(typeof password!=='string'||!password.length)throw Object.assign(Error('Informe sua senha.'),{code:'auth/invalid-credential'});
+  const credential=EmailAuthProvider.credential(current.email,password);
+  result=await reauthenticateWithCredential(current,credential);
+ }else if(method==='google'||method==='google-redirect'){
+  if(!providers.some(value=>value.providerId==='google.com'))throw Object.assign(Error('Método de entrada indisponível.'),{code:'face/unsupported-provider'});
+  const provider=new GoogleAuthProvider();provider.setCustomParameters({prompt:'select_account',...(current.email?{login_hint:current.email}:{})});
+  if(method==='google-redirect'){await reauthenticateWithRedirect(current,provider,browserPopupRedirectResolver);return {redirecting:true};}
+  result=await reauthenticateWithPopup(current,provider,browserPopupRedirectResolver);
+ }else throw Object.assign(Error('Método de entrada indisponível.'),{code:'face/unsupported-provider'});
+ platformAssertCurrentFaceUser(uid);
+ if(auth.currentUser!==current||result?.user?.uid!==uid)throw Object.assign(Error('A conta mudou.'),{code:'face/account-changed'});
+ const token=await current.getIdTokenResult(true);platformAssertCurrentFaceUser(uid);
+ if(auth.currentUser!==current||!Number.isInteger(token.claims?.auth_time)||token.claims.auth_time<=0)throw Object.assign(Error('A sessão não foi confirmada.'),{code:'face/account-changed'});
+ return {uid};
+}
+function PlatformFaceAccountConfirmation({uid,onConfirmed,onCancel}){
+ const [password,setPassword]=React.useState(''),[busy,setBusy]=React.useState(false),[error,setError]=React.useState(''),[redirect,setRedirect]=React.useState(false);
+ const alive=React.useRef(true),lock=React.useRef(false);
+ React.useEffect(()=>{alive.current=true;return()=>{alive.current=false;};},[uid]);
+ const current=auth?.currentUser,same=current?.uid===uid,providers=same?(current.providerData||[]):[],hasPassword=providers.some(value=>value.providerId==='password'),hasGoogle=providers.some(value=>value.providerId==='google.com');
+ const confirm=async method=>{
+  if(lock.current)return;lock.current=true;setBusy(true);setError('');const entered=password;setPassword('');
+  try{const value=await platformFaceConfirmAccount(uid,{method,...(method==='password'?{password:entered}:{})});if(alive.current&&!value.redirecting)onConfirmed?.();}
+  catch(e){if(alive.current){setError(platformFaceAuthenticationMessage(e));if(e.code==='auth/popup-blocked')setRedirect(true);}}
+  finally{lock.current=false;if(alive.current)setBusy(false);}
+ };
+ return <section className="am-face-confirm" aria-label="Confirmar conta para cadastrar o rosto"><style>{'.am-face-confirm{border:1px solid #35517b;border-radius:14px;background:#0d192c;padding:22px;color:#e6edf9;font-family:Inter,system-ui,-apple-system,sans-serif}.am-face-confirm h2{font-size:20px;line-height:1.35;font-weight:650;margin:0 0 12px}.am-face-confirm p{font-size:13px;line-height:1.7;color:#a8b8d1;margin:0 0 18px}.am-face-confirm label{display:block;font-size:12px;font-weight:600;color:#b8c7df;margin:16px 0 0}.am-face-confirm input{display:block;width:100%;box-sizing:border-box;background:#081221;border:1px solid #3c5270;border-radius:8px;padding:12px;color:#eef4ff;font:inherit;font-size:14px;margin:8px 0 0;min-width:0}.am-face-confirm input:focus-visible,.am-face-confirm button:focus-visible{outline:2px solid #9bc1ff;outline-offset:3px}.am-face-confirm .am-confirm-email{overflow-wrap:anywhere;color:#c0cee3;font-size:12px;margin-top:0}.am-face-confirm .am-confirm-actions{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:20px}.am-face-confirm button{font:inherit;font-size:13px;font-weight:600;border-radius:8px;padding:12px 15px;background:#2563eb;color:white;border:1px solid #417cec;cursor:pointer}.am-face-confirm button:disabled{opacity:.5;cursor:default}.am-face-confirm .am-confirm-secondary{background:transparent;border-color:#3a4d69;color:#b6c8e1}.am-face-confirm .am-confirm-google{background:#182c48;border-color:#3c5f8d;color:#d5e5ff}.am-face-confirm .am-confirm-error{border:1px solid #84464f;border-radius:8px;background:#281b27;color:#ffbcc5;padding:11px 13px;font-size:12px;margin-top:16px}.am-face-confirm .am-confirm-note{font-size:11px;color:#8ea3c0;margin:18px 0 0}@media(max-width:600px){.am-face-confirm{padding:18px 15px}.am-face-confirm h2{font-size:19px}.am-face-confirm .am-confirm-actions button{width:100%}}'}</style>
+ <h2>Confirme sua conta para continuar</h2><p>Para cadastrar seu rosto com segurança, precisamos confirmar sua entrada. Você continua nesta tela e seus dados de cadastro ficam salvos.</p>
+ {same&&<p className="am-confirm-email">Conta: {current.email||'sua conta conectada'}</p>}
+ {hasPassword&&<form onSubmit={event=>{event.preventDefault();confirm('password');}} aria-label="Confirmar com a senha da conta"><label>Senha da sua conta<input aria-label="Senha da sua conta" type="password" autoComplete="current-password" value={password} maxLength={4096} disabled={busy} required onChange={event=>setPassword(event.target.value)}/></label><div className="am-confirm-actions"><button type="submit" disabled={busy||!password.length}>{busy?'Confirmando…':'Confirmar e continuar'}</button></div></form>}
+ {hasGoogle&&<div className="am-confirm-actions"><button type="button" className="am-confirm-google" disabled={busy} onClick={()=>confirm(redirect?'google-redirect':'google')}>{busy?'Confirmando…':redirect?'Continuar com o Google nesta aba':'Confirmar com o Google'}</button></div>}
+ {!hasPassword&&!hasGoogle&&<p>{same?'Sua conta usa outro método de entrada. Volte à tela de acesso e entre com o mesmo método para continuar.':'A conta conectada mudou. Volte à tela de acesso e confirme a conta correta.'}</p>}
+ {error&&<p role="alert" className="am-confirm-error">{error}</p>}
+ <div className="am-confirm-actions"><button type="button" className="am-confirm-secondary" disabled={busy} onClick={()=>{setPassword('');onCancel?.();}}>Voltar</button>{!hasPassword&&!hasGoogle&&<button type="button" disabled={busy} onClick={()=>signOut(auth)}>Voltar à tela de acesso</button>}</div>
+ <p className="am-confirm-note">Depois da confirmação, você poderá continuar as três fotos do seu próprio rosto.</p></section>;
+}
+
+function PlatformFaceCapture({user,base,purpose='portal',consentText='',consentVersion='',initialConsentAccepted=false,onRequireRecentLogin,onAuthenticationConfirmed,onFinished,onCancel}){
  const video=React.useRef(null),overlay=React.useRef(null),stream=React.useRef(null),scanner=React.useRef(null),alive=React.useRef(true),generation=React.useRef(0),lock=React.useRef(false),timer=React.useRef(null),attempt=React.useRef({step:0,frames:[],ready:false,scanning:false,baseline:null,readySince:0});
- const [accepted,setAccepted]=React.useState(false),[challenge,setChallenge]=React.useState(null),[step,setStep]=React.useState(0),[busy,setBusy]=React.useState(false),[error,setError]=React.useState(''),[cameraReady,setCameraReady]=React.useState(false),[status,setStatus]=React.useState(''),[scan,setScan]=React.useState({ready:false,hold:0}),[ratio,setRatio]=React.useState(4/3),[automatic,setAutomatic]=React.useState(true);const automaticRef=React.useRef(true);automaticRef.current=automatic;const enrolling=purpose==='enroll';
+ const [accepted,setAccepted]=React.useState(!!initialConsentAccepted),[needsAuthentication,setNeedsAuthentication]=React.useState(false),[challenge,setChallenge]=React.useState(null),[step,setStep]=React.useState(0),[busy,setBusy]=React.useState(false),[error,setError]=React.useState(''),[cameraReady,setCameraReady]=React.useState(false),[status,setStatus]=React.useState(''),[scan,setScan]=React.useState({ready:false,hold:0}),[ratio,setRatio]=React.useState(4/3),[automatic,setAutomatic]=React.useState(true);const automaticRef=React.useRef(true);automaticRef.current=automatic;const enrolling=purpose==='enroll';
  const stop=()=>{generation.current++;clearTimeout(timer.current);timer.current=null;platformFaceStopStream(stream.current);stream.current=null;scanner.current?.close();scanner.current=null;if(video.current)video.current.srcObject=null;attempt.current.frames.length=0;attempt.current.scanning=false;attempt.current.ready=false;};
  React.useEffect(()=>{alive.current=true;return()=>{alive.current=false;stop();};},[]);
  const capture=async()=>{
@@ -3187,7 +3244,7 @@ function PlatformFaceCapture({user,base,purpose='portal',consentText='',consentV
    const frames=a.frames.slice(),id=a.challenge.id;stop();const completionVersion=generation.current;setCameraReady(false);setBusy(true);setStatus('Conferindo as três fotos, a identidade e a presença ao vivo no servidor…');let result;
    try{result=await platformFaceApi(base,'/complete',{method:'POST',uid:user.uid,body:{challengeId:id,frames,consent:enrolling&&accepted,consentVersion:enrolling?consentVersion:''},timeoutMs:90000});}finally{frames.length=0;}
    if(alive.current&&generation.current===completionVersion)onFinished(result);
-  }catch(e){stop();if(alive.current){setChallenge(null);setCameraReady(false);setStatus('');setError(e.message);}}finally{lock.current=false;if(alive.current)setBusy(false);}
+  }catch(e){stop();if(alive.current){setChallenge(null);setCameraReady(false);setStatus('');if(platformFaceNeedsRecentLogin(e)){setNeedsAuthentication(true);setError('');onRequireRecentLogin?.({purpose,accepted,consentVersion});}else setError(e.message);}}finally{lock.current=false;if(alive.current)setBusy(false);}
  };
  const inspect=async(version)=>{
   if(!alive.current||version!==generation.current||!attempt.current.scanning)return;
@@ -3215,8 +3272,9 @@ function PlatformFaceCapture({user,base,purpose='portal',consentText='',consentV
    let expired=false,deadline;const loading=platformCreateFaceScanner().then(value=>{if(expired){value.close();throw Error('O scanner demorou para carregar.');}return value;});let detector;
    try{detector=await Promise.race([loading,new Promise((_,reject)=>{deadline=setTimeout(()=>{expired=true;reject(Error('O scanner demorou para carregar. Confira a conexão e tente novamente.'));},40000);})]);}finally{clearTimeout(deadline);}
    if(!alive.current||version!==generation.current){detector.close();return;}scanner.current=detector;attempt.current={challenge:value,step:0,frames:[],ready:false,scanning:true,baseline:null,readySince:0};lock.current=false;setBusy(false);inspect(version);
-  }catch(e){stop();if(alive.current){setChallenge(null);setCameraReady(false);setStatus('');setError(e.name==='NotAllowedError'?'A câmera não foi autorizada. Libere o acesso nas configurações do navegador.':e.name==='NotFoundError'?'Nenhuma câmera foi encontrada neste dispositivo.':e.message);}}finally{lock.current=false;if(alive.current)setBusy(false);}
+  }catch(e){stop();if(alive.current){setChallenge(null);setCameraReady(false);setStatus('');if(platformFaceNeedsRecentLogin(e)){setNeedsAuthentication(true);setError('');onRequireRecentLogin?.({purpose,accepted,consentVersion});}else setError(e.name==='NotAllowedError'?'A câmera não foi autorizada. Libere o acesso nas configurações do navegador.':e.name==='NotFoundError'?'Nenhuma câmera foi encontrada neste dispositivo.':e.message);}}finally{lock.current=false;if(alive.current)setBusy(false);}
  };
+ if(needsAuthentication)return <PlatformFaceAccountConfirmation uid={user.uid} onConfirmed={()=>{if(!alive.current)return;setNeedsAuthentication(false);setError('');setStatus('Conta confirmada. Continue o cadastro facial.');onAuthenticationConfirmed?.();}} onCancel={()=>{stop();setNeedsAuthentication(false);onCancel?.();}}/>;
  const sequence=challenge?.sequence||['front','right','left'],pose=sequence[step];
  return <section className="space-y-4" aria-label={enrolling?'Cadastro facial':'Confirmar meu rosto'}>
  <style>{'.am-scan-preview{position:relative;overflow:hidden;border-radius:18px;background:#020617;border:1px solid #334155}.am-scan-preview video,.am-scan-preview canvas{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;transform:scaleX(-1)}.am-scan-preview canvas{pointer-events:none}.am-scan-preview:after{content:"";position:absolute;inset:8% 22%;border:1px dashed #93c5fd70;border-radius:48%;pointer-events:none}.am-scan-steps{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}.am-scan-steps span{border:1px solid #334155;border-radius:12px;padding:10px 6px;text-align:center;font-size:12px}.am-scan-steps .done{border-color:#10b981;color:#6ee7b7}.am-scan-steps .current{border-color:#3b82f6;background:#172554;color:#bfdbfe}'}</style>
@@ -3258,8 +3316,8 @@ async function platformFaceBeforeLogout(user){
  finally{if(platformFaceKnownPolicy?.uid===user.uid)platformFaceKnownPolicy=null;}
 }
 function PlatformFaceGate({user,children}){
- const [state,setState]=React.useState({loading:true}),[capture,setCapture]=React.useState(false),[privacy,setPrivacy]=React.useState(false),[reason,setReason]=React.useState(''),[message,setMessage]=React.useState(''),[requesting,setRequesting]=React.useState(false);
- const alive=React.useRef(true),running=React.useRef(false),generation=React.useRef(0),sessionKey=React.useRef('');
+ const [state,setState]=React.useState({loading:true}),[capture,setCapture]=React.useState(false),[privacy,setPrivacy]=React.useState(false),[reason,setReason]=React.useState(''),[message,setMessage]=React.useState(''),[requesting,setRequesting]=React.useState(false),[captureConsent,setCaptureConsent]=React.useState(null);
+ const alive=React.useRef(true),running=React.useRef(false),generation=React.useRef(0),sessionKey=React.useRef(''),recentCapture=React.useRef(null);
  const refresh=async()=>{
   if(running.current)return;running.current=true;const request=++generation.current;
   try{
@@ -3268,21 +3326,28 @@ function PlatformFaceGate({user,children}){
    await platformFaceAssertSession(session);
    if(status.enabled!==true&&!status.staffExempt)status={...status,allowed:false,servicePaused:true};
    if(!status.staffExempt&&status.policy?.requireOnLogin!==true)status={...status,allowed:false,servicePaused:true};
-   if(alive.current&&request===generation.current){sessionKey.current=session.key;setState({...status,loading:false});}
+   if(alive.current&&request===generation.current){
+    const resume=recentCapture.current;sessionKey.current=session.key;setState({...status,loading:false});
+    if(resume&&resume.uid===user.uid&&resume.key!==session.key){
+     recentCapture.current=null;
+     setCaptureConsent(resume.accepted&&resume.purpose==='enroll'&&status.needsEnrollment&&resume.consentVersion===status.consentVersion?{uid:user.uid,version:status.consentVersion}:null);
+     setCapture(status.enabled===true&&!status.staffExempt&&!status.servicePaused&&!status.legacyEnrollment&&status.enrollmentStatus!=='pending'&&(status.needsEnrollment||status.needsVerification));
+    }
+   }
   }catch(e){if(alive.current&&request===generation.current)setState({loading:false,error:e.message});}
   finally{if(request===generation.current)running.current=false;}
  };
  React.useEffect(()=>{
-  alive.current=true;setState({loading:true});sessionKey.current='';refresh();
+  alive.current=true;recentCapture.current=null;setCaptureConsent(null);setState({loading:true});sessionKey.current='';refresh();
   const unsubscribe=onIdTokenChanged(auth,async current=>{
    if(!alive.current)return;
-   if(!current||current.uid!==user.uid){generation.current++;running.current=false;setState({loading:true});setCapture(false);platformFacePurchaseDialog?.cancel();return;}
+   if(!current||current.uid!==user.uid){recentCapture.current=null;setCaptureConsent(null);generation.current++;running.current=false;setState({loading:true});setCapture(false);platformFacePurchaseDialog?.cancel();return;}
    try{const session=await platformFaceSession(user.uid);if(!alive.current)return;if(sessionKey.current&&session.key!==sessionKey.current){generation.current++;running.current=false;sessionKey.current='';setState({loading:true});setCapture(false);platformFacePurchaseDialog?.cancel();refresh();}}
    catch(e){if(alive.current){generation.current++;running.current=false;setState({loading:false,error:e.message});}}
   });
   const timer=setInterval(()=>{if(document.visibilityState==='visible')refresh();},15000);
   const visible=()=>{if(document.visibilityState==='visible')refresh();};document.addEventListener('visibilitychange',visible);window.addEventListener('online',visible);
-  return()=>{alive.current=false;generation.current++;running.current=false;unsubscribe();clearInterval(timer);document.removeEventListener('visibilitychange',visible);window.removeEventListener('online',visible);platformFacePurchaseDialog?.cancel();};
+  return()=>{alive.current=false;recentCapture.current=null;generation.current++;running.current=false;unsubscribe();clearInterval(timer);document.removeEventListener('visibilitychange',visible);window.removeEventListener('online',visible);platformFacePurchaseDialog?.cancel();};
  },[user.uid]);
  React.useEffect(()=>{
   if(!state.allowed||state.staffExempt||!state.expiresAt)return;
@@ -3290,6 +3355,9 @@ function PlatformFaceGate({user,children}){
   const timer=setTimeout(()=>{if(alive.current){setState(old=>({...old,allowed:false,needsVerification:true}));refresh();}},Math.max(0,Math.min(expiry-Date.now(),2147483647)));
   return()=>clearTimeout(timer);
  },[state.allowed,state.expiresAt,state.staffExempt]);
+ const requireRecentLogin=approval=>{if(!alive.current||auth.currentUser?.uid!==user.uid)return;recentCapture.current={uid:user.uid,key:sessionKey.current,purpose:approval.purpose,accepted:approval.accepted===true,consentVersion:approval.consentVersion};};
+ const authenticationConfirmed=()=>{if(!alive.current||auth.currentUser?.uid!==user.uid)return;if(!recentCapture.current){refresh();return;}generation.current++;running.current=false;sessionKey.current='';setState({loading:true});setCapture(false);refresh();};
+ const cancelCapture=()=>{recentCapture.current=null;setCaptureConsent(null);setCapture(false);};
  const base=state.policy?.backendUrl;
  const requestHelp=async()=>{if(requesting)return;setRequesting(true);setMessage('');try{await platformFaceApi(base,'/recovery',{method:'POST',uid:user.uid,body:{reason}});if(alive.current)setMessage('Pedido enviado. Aguarde a análise do administrador e clique em Consultar novamente.');}catch(e){if(alive.current)setMessage(e.message);}finally{if(alive.current)setRequesting(false);}};
  const remove=async()=>{
@@ -3302,7 +3370,7 @@ function PlatformFaceGate({user,children}){
  return <main className="min-h-screen bg-slate-950 text-white flex items-center justify-center p-5"><section className="w-full max-w-xl rounded-2xl border border-slate-700 bg-slate-900 p-6 sm:p-8 space-y-5">
   <div><p className="text-xs text-slate-400 mb-3">✓ CPF e celular · 2. Confirmação facial</p><p className="text-xs uppercase tracking-widest text-blue-400 mb-2">Face ID da A&amp;M Produções</p><h1 className="text-2xl font-bold">{privacy?'Meu cadastro facial':pending?'Cadastro aguardando aprovação':state.servicePaused?'Preparando seu acesso seguro':state.needsEnrollment?newAccount?'Última etapa: cadastre seu rosto':'Ative a proteção da sua conta':'Confirme seu rosto'}</h1></div>
   {state.error?<p role="alert" className="text-red-300">{state.error} Verifique sua conexão ou peça ao administrador para conferir o servidor e as regras do Firebase.</p>:<>
-   {privacy?<><p className="text-sm text-slate-300">Modelo e fotos de cadastro e verificações ficam criptografados na pasta da sua conta. Status: {state.enrollmentStatus||'sem cadastro'}. A exclusão remove seu modelo e as fotos; registros de segurança sem imagens seguem a retenção informada.</p><button type="button" onClick={remove} className="rounded-lg border border-red-700 text-red-300 px-4 py-3">Excluir cadastro e retirar autorização</button>{state.allowed&&<button type="button" onClick={()=>setPrivacy(false)} className="block text-blue-300 underline">Voltar à plataforma</button>}</>:state.servicePaused?<p className="text-slate-300">O cadastro facial é obrigatório para acessar a plataforma. A câmera está temporariamente indisponível enquanto a equipe prepara ou revisa o serviço. Seus dados continuam salvos. Consulte novamente em instantes ou entre em contato com a equipe.</p>:state.legacyEnrollment?<p className="text-amber-200">Seu cadastro pertence ao motor anterior. Solicite revisão ao administrador para remover o cadastro antigo e autorizar um novo.</p>:pending?<p className="text-slate-300">Seu rosto foi cadastrado com sucesso! Agora nossa equipe vai conferir sua identidade e aprovar o cadastro. Assim que for aprovado, confirme seu rosto para começar a navegar. Você não precisa cadastrar outra conta.</p>:capture?<PlatformFaceCapture key={user.uid} user={user} base={base} purpose={state.needsEnrollment?'enroll':'portal'} consentText={state.consentText} consentVersion={state.consentVersion} onFinished={()=>{setCapture(false);refresh();}} onCancel={()=>setCapture(false)}/>:<><p className="text-slate-300">{state.needsEnrollment?newAccount?'Falta só proteger sua nova conta! Depois dos seus dados, cadastre seu rosto para concluir o cadastro. Essa etapa é obrigatória para navegar e ajuda a manter seus cursos e suas compras seguros.':'Olá! Para cuidar da segurança da sua conta, precisamos ativar a verificação em duas etapas por reconhecimento facial. Seu login continua o mesmo. Cadastre seu próprio rosto para liberar a navegação na plataforma. Essa ativação é obrigatória e nossa equipe vai conferir o primeiro cadastro.':state.inactivityDue?'Seu período de inatividade exige uma nova confirmação.':'Confirme o rosto cadastrado para liberar esta sessão.'}</p>{state.needsEnrollment&&<p className="text-sm text-slate-400">Você escolhe quando ligar a câmera e autoriza o uso das imagens antes da captura. Se não puder usar a câmera, peça ajuda à equipe. O portal permanece protegido até a liberação.</p>}<button type="button" onClick={()=>setCapture(true)} className="bg-blue-600 font-bold px-5 py-3 rounded-xl">{state.needsEnrollment?'Ativar reconhecimento facial obrigatório':'Verificar com a câmera'}</button></>}
+   {privacy?<><p className="text-sm text-slate-300">Modelo e fotos de cadastro e verificações ficam criptografados na pasta da sua conta. Status: {state.enrollmentStatus||'sem cadastro'}. A exclusão remove seu modelo e as fotos; registros de segurança sem imagens seguem a retenção informada.</p><button type="button" onClick={remove} className="rounded-lg border border-red-700 text-red-300 px-4 py-3">Excluir cadastro e retirar autorização</button>{state.allowed&&<button type="button" onClick={()=>setPrivacy(false)} className="block text-blue-300 underline">Voltar à plataforma</button>}</>:state.servicePaused?<p className="text-slate-300">O cadastro facial é obrigatório para acessar a plataforma. A câmera está temporariamente indisponível enquanto a equipe prepara ou revisa o serviço. Seus dados continuam salvos. Consulte novamente em instantes ou entre em contato com a equipe.</p>:state.legacyEnrollment?<p className="text-amber-200">Seu cadastro pertence ao motor anterior. Solicite revisão ao administrador para remover o cadastro antigo e autorizar um novo.</p>:pending?<p className="text-slate-300">Seu rosto foi cadastrado com sucesso! Agora nossa equipe vai conferir sua identidade e aprovar o cadastro. Assim que for aprovado, confirme seu rosto para começar a navegar. Você não precisa cadastrar outra conta.</p>:capture?<PlatformFaceCapture key={user.uid} user={user} base={base} purpose={state.needsEnrollment?'enroll':'portal'} consentText={state.consentText} consentVersion={state.consentVersion} initialConsentAccepted={captureConsent?.uid===user.uid&&captureConsent.version===state.consentVersion} onRequireRecentLogin={requireRecentLogin} onAuthenticationConfirmed={authenticationConfirmed} onFinished={()=>{recentCapture.current=null;setCaptureConsent(null);setCapture(false);refresh();}} onCancel={cancelCapture}/>:<><p className="text-slate-300">{state.needsEnrollment?newAccount?'Falta só proteger sua nova conta! Depois dos seus dados, cadastre seu rosto para concluir o cadastro. Essa etapa é obrigatória para navegar e ajuda a manter seus cursos e suas compras seguros.':'Olá! Para cuidar da segurança da sua conta, precisamos ativar a verificação em duas etapas por reconhecimento facial. Seu login continua o mesmo. Cadastre seu próprio rosto para liberar a navegação na plataforma. Essa ativação é obrigatória e nossa equipe vai conferir o primeiro cadastro.':state.inactivityDue?'Seu período de inatividade exige uma nova confirmação.':'Confirme o rosto cadastrado para liberar esta sessão.'}</p>{state.needsEnrollment&&<p className="text-sm text-slate-400">Você escolhe quando ligar a câmera e autoriza o uso das imagens antes da captura. Se não puder usar a câmera, peça ajuda à equipe. O portal permanece protegido até a liberação.</p>}<button type="button" onClick={()=>setCapture(true)} className="bg-blue-600 font-bold px-5 py-3 rounded-xl">{state.needsEnrollment?'Ativar reconhecimento facial obrigatório':'Verificar com a câmera'}</button></>}
    {state.policy&&<p className="text-xs text-slate-400">Retenção de até {state.policy.retentionDays} dias e {state.policy.maxPhotos} fotos. Limite de {state.policy.maxVerificationsPerDay} confirmações por dia ({state.timeZone||'horário configurado'}). Cada foto recebe um identificador e conferência de integridade.</p>}
    {!capture&&base&&<details className="rounded-xl border border-slate-700 p-4"><summary className="cursor-pointer font-bold">Preciso de ajuda com o acesso</summary><p className="text-sm text-slate-400 my-3">Descreva o problema. O administrador pode revisar o cadastro ou autorizar acesso temporário ao portal de um cadastro já aprovado. Compras exigidas pela política continuam dependendo da conferência do rosto.</p><label className="block text-sm">Motivo<textarea maxLength="500" minLength="5" value={reason} onChange={e=>setReason(e.target.value)} className="w-full mt-2 p-3 rounded-lg bg-slate-950 border border-slate-600"/></label><button type="button" disabled={requesting||reason.trim().length<5} onClick={requestHelp} className="mt-3 px-4 py-2 border border-slate-500 rounded-lg disabled:opacity-50">{requesting?'Enviando…':'Solicitar revisão'}</button></details>}
   </>}
@@ -3312,7 +3380,7 @@ function PlatformFaceGate({user,children}){
  </section></main>;
 }
 
-// END SITE CURSOS FACIAL v20
+// END SITE CURSOS FACIAL v22
 
 // BEGIN SITE CURSOS STORAGE v14
 // SITE CURSOS v14 — shared R2 service, no S3 credentials in student requests.
@@ -15505,71 +15573,3 @@ JSON Permitidos (Siga exatamente estes formatos):
                             commandExecuted = true;
                             break;
                         case 'post_community':
-                            const postRes = await window.AemGlobalAPI.postToCommunity(cmdObj.text);
-                            if(postRes) aiReply += `<br><br><small style='color:#4ade80'>Mensagem publicada na comunidade!</small>`;
-                            commandExecuted = true;
-                            break;
-                        case 'take_notes':
-                            const noteRes = await window.AemGlobalAPI.takeNotesAutomated(cmdObj.courseName, cmdObj.notes);
-                            if(noteRes === 'sucesso') { aiReply += `<br><br><small style='color:#4ade80'>Anotação criada e salva no seu diário de bordo premium deste curso!</small>`; commandExecuted = true; }
-                            else aiReply += "<br><br><small style='color:#f87171'>Não encontrei o curso para salvar a anotação.</small>";
-                            break;
-                    }
-                }
-
-                if (commandExecuted) {
-                    aiReply += "<br><br><small style='color:#4ade80'><i class='fa-solid fa-bolt'></i> Ação concluída com sucesso!</small>";
-                    if (shouldCloseWidget) {
-                        setTimeout(() => { window.AemIaWidget.closeWidget(); }, 2000);
-                    }
-                }
-            } else {
-                aiReply = aiReply.replace(/```[\s\S]*?```/g, '').trim();
-            }
-            
-            appendMessage(aiReply.trim(), false);
-            
-            // 💾 SALVA A RESPOSTA DA IA NO HISTÓRICO PARA ELA LEMBRAR DEPOIS
-            chatHistory.push(`${nomeDaIA}: ${aiReply.replace(/<[^>]*>?/gm, '')}`); // Remove HTML antes de salvar
-            localStorage.setItem('aem_ia_chat_history', JSON.stringify(chatHistory));
-            
-        } catch (err) {
-            typing.classList.add('hidden');
-            if (err.name !== "AbortError" && window.AemIaWidget.canShow()) appendMessage("⚠️ Sistema offline ou falha na conexão.", false);
-        } finally {
-            iaRequests.delete(requestController);
-        }
-    });
-    }
-    
-    // 👇 INÍCIO DA LÓGICA DO BOTÃO NOVA CONVERSA 👇
-    const btnRestartIa = document.getElementById('aem-ia-restart-btn');
-    if (btnRestartIa) {
-        btnRestartIa.addEventListener('click', () => {
-            // 1. Limpa visualmente as mensagens da tela 
-            const chatBody = document.getElementById('aem-chat-box-normal');
-            if (chatBody) {
-                chatBody.innerHTML = ''; 
-            }
-            
-            // 2. Limpa a memória salva no navegador
-            localStorage.removeItem('aem_ia_chat_history'); 
-            
-            // 3. Adiciona um feedback visual no botão de rodar
-            btnRestartIa.classList.add('animate-spin');
-            setTimeout(() => btnRestartIa.classList.remove('animate-spin'), 500);
-
-            // 4. Manda a IA dar as boas-vindas oficiais puxadas do Banco de Dados
-            setTimeout(() => {
-                const msgOficial = window.AemIaWelcomeMsg || "Olá! Como posso te ajudar hoje?";
-                appendMessage(msgOficial, false);
-            }, 300);
-        });
-    }
-    
-    
-    window.AemIaWidget.syncVisibility();
-})();
-  </script>
-</body>
-</html>
