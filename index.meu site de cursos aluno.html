@@ -3081,7 +3081,7 @@ function platformPublicSettingsNotice(state){return state?.error||'';}
 
 // END SITE CURSOS BOOTSTRAP v15
 
-// BEGIN SITE CURSOS FACIAL v18
+// BEGIN SITE CURSOS FACIAL v19
 /* Embedded in both complete pages. The Python server is the sole issuer of grants. */
 const PLATFORM_FACE_DEFAULTS={enabled:false,requireOnLogin:true,inactiveDays:10,purchaseMode:'inactive',purchaseFreshMinutes:10,sessionMinutes:360,requireAdminApproval:true,maxVerificationsPerDay:30,maxAttempts15m:5,maxPhotos:30,retentionDays:30,backendUrl:'',revision:0};
 let platformFaceKnownPolicy=null;
@@ -3134,50 +3134,103 @@ async function platformFaceApi(base,path,{method='GET',body,uid=auth?.currentUse
  }finally{clearTimeout(timer);}
 }
 function platformFaceStopStream(stream){stream?.getTracks?.().forEach(track=>track.stop());}
-function PlatformFaceCapture({user,base,purpose='portal',consentText='',consentVersion='',onFinished,onCancel}){
- const video=React.useRef(null),stream=React.useRef(null),frames=React.useRef([]),alive=React.useRef(true),lock=React.useRef(false);
- const [accepted,setAccepted]=React.useState(false),[challenge,setChallenge]=React.useState(null),[step,setStep]=React.useState(0),[busy,setBusy]=React.useState(false),[error,setError]=React.useState(''),[cameraReady,setCameraReady]=React.useState(false);
- const enrolling=purpose==='enroll';
- const stop=()=>{platformFaceStopStream(stream.current);stream.current=null;frames.current=[];if(video.current)video.current.srcObject=null;};
- React.useEffect(()=>{alive.current=true;return()=>{alive.current=false;stop();};},[]);
- const start=async()=>{
-  if(lock.current)return;lock.current=true;setBusy(true);setError('');stop();setCameraReady(false);
-  try{
-   platformAssertCurrentFaceUser(user.uid);
-   if(enrolling&&!accepted)throw Error('Leia e autorize o cadastro facial.');
-   if(!window.isSecureContext||!navigator.mediaDevices?.getUserMedia)throw Error('Abra a página em HTTPS e use um navegador com acesso à câmera.');
-   const value=await platformFaceApi(base,'/challenge',{method:'POST',uid:user.uid,body:{purpose}});
-   if(!alive.current)return;
-   const media=await navigator.mediaDevices.getUserMedia({video:{facingMode:'user',width:{ideal:640,max:1280},height:{ideal:480,max:1280}},audio:false});
-   if(!alive.current||auth?.currentUser?.uid!==user.uid){platformFaceStopStream(media);return;}
-   stream.current=media;video.current.srcObject=media;await video.current.play();
-   if(!alive.current){stop();return;}setChallenge(value);setStep(0);setCameraReady(true);
-  }catch(e){stop();if(alive.current)setError(e.name==='NotAllowedError'?'A câmera não foi autorizada. Libere o acesso no navegador ou solicite ajuda.':e.message);}finally{lock.current=false;if(alive.current)setBusy(false);}
- };
- const capture=async()=>{
-  if(lock.current||!challenge)return;lock.current=true;setBusy(true);setError('');
-  try{
-   platformAssertCurrentFaceUser(user.uid);
-   const source=video.current;if(!source?.videoWidth||source.readyState<2)throw Error('Aguarde a câmera ficar pronta.');
-   const scale=Math.min(1,960/source.videoWidth,960/source.videoHeight),canvas=document.createElement('canvas');canvas.width=Math.round(source.videoWidth*scale);canvas.height=Math.round(source.videoHeight*scale);canvas.getContext('2d').drawImage(source,0,0,canvas.width,canvas.height);
-   frames.current.push(canvas.toDataURL('image/jpeg',.82));canvas.width=canvas.height=0;
-   if(step<2){setStep(step+1);return;}
-   const captured=frames.current.slice();stop();setCameraReady(false);
-   let result;try{result=await platformFaceApi(base,'/complete',{method:'POST',uid:user.uid,body:{challengeId:challenge.id,frames:captured,consent:enrolling&&accepted,consentVersion:enrolling?consentVersion:''}});}finally{captured.length=0;}
-   if(alive.current)onFinished(result);
-  }catch(e){stop();if(alive.current){setChallenge(null);setCameraReady(false);setError(e.message);}}finally{lock.current=false;if(alive.current)setBusy(false);}
- };
- const pose=challenge?.sequence?.[step],instruction=pose==='front'?'Olhe de frente para a câmera':pose==='left'?'Vire levemente o rosto para a esquerda da imagem ←':'Vire levemente o rosto para a direita da imagem →';
- return <section className="space-y-4" aria-label={enrolling?'Cadastro facial':'Confirmar meu rosto'}>
-  <p className="text-sm text-slate-400">Face ID da A&amp;M Produções. Use boa iluminação, sem outras pessoas na imagem. Serão capturados três quadros do seu rosto ao vivo, com comparação facial e teste de presença.</p>
-  {enrolling&&<label className="flex gap-3 text-sm rounded-xl border border-slate-600 p-4"><input type="checkbox" checked={accepted} disabled={busy||cameraReady} onChange={e=>setAccepted(e.target.checked)}/><span>{consentText||'Autorizo guardar um modelo facial e uma miniatura criptografados para confirmar o acesso da minha própria conta. Posso excluir o cadastro e solicitar ajuda.'}</span></label>}
-  <video ref={video} autoPlay playsInline muted aria-label="Sua câmera" className={'w-full aspect-[4/3] object-contain rounded-xl bg-black '+(cameraReady?'':'hidden')}/>
-  {cameraReady&&<p role="status" className="text-lg font-bold text-center">Etapa {step+1} de 3 · {instruction}</p>}
-  {error&&<p role="alert" className="text-red-300 rounded-lg border border-red-900 p-3">{error}</p>}
-  <div className="flex flex-wrap gap-3"><button type="button" disabled={busy||enrolling&&!accepted} onClick={cameraReady?capture:start} className="rounded-xl bg-blue-600 px-5 py-3 font-bold text-white disabled:opacity-50">{busy?'Processando…':cameraReady?'Capturar esta posição':challenge?'Tentar novamente':'Ligar câmera e iniciar'}</button><button type="button" onClick={()=>{stop();onCancel?.();}} className="rounded-xl border border-slate-600 px-4 py-3">Cancelar</button></div>
-  <p className="text-xs text-slate-400">Fotos de cadastro e verificações ficam criptografadas na pasta da sua conta, acessível à administração autorizada, dentro dos limites informados. Não usamos Google Authenticator ou SMS. Solicite ajuda se a câmera não funcionar.</p>
- </section>;
+const PLATFORM_FACE_VISION='https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14';
+const PLATFORM_FACE_MODEL='https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task';
+const platformFacePoseLabel=p=>({front:'De frente',right:'Sua direita',left:'Sua esquerda'})[p]||'De frente';
+function platformFaceReadPose(faces,expected,baseline=null){
+ if(!faces?.length)return {ready:false,message:'Não encontrei seu rosto. Olhe para a câmera e melhore a luz.'};
+ if(faces.length!==1)return {ready:false,message:'Há mais de um rosto. Fique sozinho no enquadramento.'};
+ const p=faces[0];if(p.length<363)return {ready:false,message:'Aguarde a análise do rosto.'};
+ const xs=p.map(v=>v.x),ys=p.map(v=>v.y),minX=Math.min(...xs),maxX=Math.max(...xs),minY=Math.min(...ys),maxY=Math.max(...ys);
+ if(minX<.02||maxX>.98||minY<.02||maxY>.98)return {ready:false,message:'Afaste um pouco a câmera para mostrar o rosto inteiro.'};
+ if(maxX-minX<.20||maxY-minY<.28)return {ready:false,message:'Aproxime um pouco o rosto da câmera.'};
+ const a={x:(p[33].x+p[133].x)/2,y:(p[33].y+p[133].y)/2},b={x:(p[263].x+p[362].x)/2,y:(p[263].y+p[362].y)/2},distance=Math.hypot(a.x-b.x,a.y-b.y);
+ if(distance<.035)return {ready:false,message:'Vire menos, mantendo os dois olhos visíveis.'};
+ const yaw=(p[1].x-(a.x+b.x)/2)/distance,offset=baseline===null?yaw:yaw-baseline;
+ const ready=expected==='front'?Math.abs(yaw)<=.16:expected==='right'?offset<=-.14&&offset>-.70:offset>=.14&&offset<.70;
+ return {ready,yaw,message:ready?'Posição correta. Mantenha o rosto parado.':expected==='front'?'Olhe de frente para a câmera.':'Vire levemente para a sua '+(expected==='right'?'direita':'esquerda')+', mantendo os dois olhos visíveis.'};
 }
+async function platformCreateFaceScanner(){
+ const options={baseOptions:{modelAssetPath:PLATFORM_FACE_MODEL,delegate:'CPU'},runningMode:'VIDEO',numFaces:2,minFaceDetectionConfidence:.6,minFacePresenceConfidence:.7,minTrackingConfidence:.7};
+ if(typeof Worker!=='undefined'&&typeof OffscreenCanvas!=='undefined'&&typeof createImageBitmap==='function'){
+  let worker,url;
+  try{
+   const source=`import {FaceLandmarker,FilesetResolver} from '${PLATFORM_FACE_VISION}/vision_bundle.mjs';let model;self.onmessage=async event=>{const m=event.data;try{if(m.type==='init'){const files=await FilesetResolver.forVisionTasks('${PLATFORM_FACE_VISION}/wasm');model=await FaceLandmarker.createFromOptions(files,{...m.options,canvas:new OffscreenCanvas(640,480)});self.postMessage({type:'ready',connections:FaceLandmarker.FACE_LANDMARKS_TESSELATION.map(e=>[e.start,e.end])});}else if(m.type==='frame'){try{const result=model.detectForVideo(m.image,m.at);self.postMessage({type:'result',id:m.id,faces:result.faceLandmarks.map(face=>face.map(p=>({x:p.x,y:p.y})))});}finally{m.image.close();}}}catch(error){self.postMessage({type:'error',id:m.id,message:'Não foi possível analisar a câmera.'});}};`;
+   url=URL.createObjectURL(new Blob([source],{type:'text/javascript'}));worker=new Worker(url,{type:'module'});URL.revokeObjectURL(url);url=null;
+   let connections=[],pending=null,serial=0,closed=false;
+   await new Promise((resolve,reject)=>{const timeout=setTimeout(()=>reject(Error('O scanner demorou para carregar.')),18000);worker.onerror=()=>{clearTimeout(timeout);reject(Error('Scanner indisponível neste navegador.'));};worker.onmessage=event=>{if(event.data.type==='ready'){connections=event.data.connections;clearTimeout(timeout);resolve();}else if(event.data.type==='error'){clearTimeout(timeout);reject(Error(event.data.message));}};worker.postMessage({type:'init',options});});
+   worker.onmessage=event=>{if(!pending||event.data.id!==pending.id)return;const job=pending;pending=null;clearTimeout(job.timer);event.data.type==='result'?job.resolve({faces:event.data.faces,connections}):job.reject(Error(event.data.message));};
+   worker.onerror=()=>{if(pending){clearTimeout(pending.timer);pending.reject(Error('O scanner foi interrompido. Inicie novamente.'));pending=null;}};
+   return {async detect(video){if(closed||pending)throw Error('Scanner ocupado.');const image=await createImageBitmap(video);if(closed){image.close();throw Error('Scanner encerrado.');}return new Promise((resolve,reject)=>{const id=++serial,timer=setTimeout(()=>{pending=null;reject(Error('A análise da imagem demorou demais.'));},6000);pending={id,timer,resolve,reject};worker.postMessage({type:'frame',id,image,at:performance.now()},[image]);});},close(){closed=true;if(pending){clearTimeout(pending.timer);pending.reject(Error('Scanner encerrado.'));pending=null;}worker.terminate();}};
+  }catch(_){worker?.terminate();if(url)URL.revokeObjectURL(url);}
+ }
+ const {FaceLandmarker,FilesetResolver}=await import('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs');
+ const files=await FilesetResolver.forVisionTasks(PLATFORM_FACE_VISION+'/wasm');const model=await FaceLandmarker.createFromOptions(files,{...options,canvas:document.createElement('canvas')});
+ const connections=FaceLandmarker.FACE_LANDMARKS_TESSELATION.map(e=>[e.start,e.end]);
+ return {async detect(video){return {faces:model.detectForVideo(video,performance.now()).faceLandmarks,connections};},close(){model.close();}};
+}
+function platformDrawFaceMesh(canvas,result,ready){
+ if(!canvas)return;const ctx=canvas.getContext('2d');ctx.clearRect(0,0,canvas.width,canvas.height);if(result.faces.length!==1)return;const p=result.faces[0];ctx.lineWidth=.65;ctx.strokeStyle=ready?'rgba(52,211,153,.55)':'rgba(96,165,250,.45)';ctx.beginPath();for(const [a,b]of result.connections){if(!p[a]||!p[b])continue;ctx.moveTo(p[a].x*canvas.width,p[a].y*canvas.height);ctx.lineTo(p[b].x*canvas.width,p[b].y*canvas.height);}ctx.stroke();
+}
+function PlatformFaceCapture({user,base,purpose='portal',consentText='',consentVersion='',onFinished,onCancel}){
+ const video=React.useRef(null),overlay=React.useRef(null),stream=React.useRef(null),scanner=React.useRef(null),alive=React.useRef(true),generation=React.useRef(0),lock=React.useRef(false),timer=React.useRef(null),attempt=React.useRef({step:0,frames:[],ready:false,scanning:false,baseline:null,readySince:0});
+ const [accepted,setAccepted]=React.useState(false),[challenge,setChallenge]=React.useState(null),[step,setStep]=React.useState(0),[busy,setBusy]=React.useState(false),[error,setError]=React.useState(''),[cameraReady,setCameraReady]=React.useState(false),[status,setStatus]=React.useState(''),[scan,setScan]=React.useState({ready:false,hold:0}),[ratio,setRatio]=React.useState(4/3),[automatic,setAutomatic]=React.useState(true);const automaticRef=React.useRef(true);automaticRef.current=automatic;const enrolling=purpose==='enroll';
+ const stop=()=>{generation.current++;clearTimeout(timer.current);timer.current=null;platformFaceStopStream(stream.current);stream.current=null;scanner.current?.close();scanner.current=null;if(video.current)video.current.srcObject=null;attempt.current.frames.length=0;attempt.current.scanning=false;attempt.current.ready=false;};
+ React.useEffect(()=>{alive.current=true;return()=>{alive.current=false;stop();};},[]);
+ const capture=async()=>{
+  const a=attempt.current;if(lock.current||!a.challenge||!a.ready)return;lock.current=true;setError('');
+  try{
+   platformAssertCurrentFaceUser(user.uid);const source=video.current;if(!source?.videoWidth||source.readyState<2)throw Error('Aguarde a câmera ficar pronta.');
+   const scale=Math.min(1,960/source.videoWidth,960/source.videoHeight),canvas=document.createElement('canvas');canvas.width=Math.round(source.videoWidth*scale);canvas.height=Math.round(source.videoHeight*scale);canvas.getContext('2d').drawImage(source,0,0,canvas.width,canvas.height);a.frames.push(canvas.toDataURL('image/jpeg',.85));canvas.width=canvas.height=0;
+   if(a.step===0)a.baseline=a.yaw;
+   if(a.step<2){a.step++;a.readySince=0;a.ready=false;setStep(a.step);setScan({ready:false,hold:0});setStatus('Foto registrada nesta captura. Agora: '+platformFacePoseLabel(a.challenge.sequence[a.step])+'.');return;}
+   const frames=a.frames.slice(),id=a.challenge.id;stop();const completionVersion=generation.current;setCameraReady(false);setBusy(true);setStatus('Conferindo as três fotos, a identidade e a presença ao vivo no servidor…');let result;
+   try{result=await platformFaceApi(base,'/complete',{method:'POST',uid:user.uid,body:{challengeId:id,frames,consent:enrolling&&accepted,consentVersion:enrolling?consentVersion:''},timeoutMs:90000});}finally{frames.length=0;}
+   if(alive.current&&generation.current===completionVersion)onFinished(result);
+  }catch(e){stop();if(alive.current){setChallenge(null);setCameraReady(false);setStatus('');setError(e.message);}}finally{lock.current=false;if(alive.current)setBusy(false);}
+ };
+ const inspect=async(version)=>{
+  if(!alive.current||version!==generation.current||!attempt.current.scanning)return;
+  try{
+   const source=video.current;if(!source?.videoWidth||source.readyState<2){timer.current=setTimeout(()=>inspect(version),250);return;}
+   const result=await scanner.current.detect(source);if(!alive.current||version!==generation.current)return;
+   const a=attempt.current,pose=platformFaceReadPose(result.faces,a.challenge.sequence[a.step],a.baseline);
+   const sample=document.createElement('canvas');sample.width=64;sample.height=48;const ctx=sample.getContext('2d',{willReadFrequently:true});ctx.drawImage(source,0,0,64,48);const pixels=ctx.getImageData(0,0,64,48).data;let mean=0;for(let i=0;i<pixels.length;i+=16)mean+=(pixels[i]+pixels[i+1]+pixels[i+2])/3;mean/=pixels.length/16;sample.width=sample.height=0;const light=mean>=32&&mean<=235;
+   a.ready=pose.ready&&light;a.yaw=pose.yaw;if(!a.ready)a.readySince=0;else if(!a.readySince)a.readySince=performance.now();const hold=a.ready?Math.min(1,(performance.now()-a.readySince)/850):0;
+   setScan({ready:a.ready,hold});setStatus(light?pose.message:'Melhore a iluminação para registrar o rosto.');
+   if(overlay.current){overlay.current.width=source.videoWidth;overlay.current.height=source.videoHeight;platformDrawFaceMesh(overlay.current,result,a.ready);}
+   if(hold>=1&&automaticRef.current)await capture();
+  }catch(e){if(alive.current&&version===generation.current){stop();setCameraReady(false);setChallenge(null);setError(e.message||'Inicie a câmera novamente.');}}
+  if(alive.current&&version===generation.current&&attempt.current.scanning)timer.current=setTimeout(()=>inspect(version),250);
+ };
+ const start=async()=>{
+  if(lock.current)return;lock.current=true;setBusy(true);setError('');stop();setCameraReady(false);setScan({ready:false,hold:0});const version=generation.current;
+  try{
+   platformAssertCurrentFaceUser(user.uid);if(enrolling&&!accepted)throw Error('Autorize o cadastro facial antes de ligar a câmera.');if(!window.isSecureContext||!navigator.mediaDevices?.getUserMedia)throw Error('Abra a plataforma em HTTPS e libere a câmera.');
+   setStatus('Preparando as três posições…');const value=await platformFaceApi(base,'/challenge',{method:'POST',uid:user.uid,body:{purpose}});
+   if(value.captureVersion!==2||value.directions!=='person'||value.sequence?.length!==3||value.sequence[0]!=='front'||!value.sequence.includes('right')||!value.sequence.includes('left'))throw Error('O servidor precisa da atualização das três posições. Solicite ao administrador.');
+   if(!alive.current||version!==generation.current||auth.currentUser?.uid!==user.uid)return;
+   const media=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'user'},width:{ideal:960,max:1280},height:{ideal:720,max:1280}},audio:false});if(!alive.current||version!==generation.current||auth.currentUser?.uid!==user.uid){platformFaceStopStream(media);return;}
+   stream.current=media;video.current.srcObject=media;await video.current.play();if(!alive.current||version!==generation.current)return;setRatio(video.current.videoWidth/video.current.videoHeight||4/3);setCameraReady(true);setChallenge(value);setStep(0);setStatus('Carregando a análise real do rosto…');
+   let expired=false,deadline;const loading=platformCreateFaceScanner().then(value=>{if(expired){value.close();throw Error('O scanner demorou para carregar.');}return value;});let detector;
+   try{detector=await Promise.race([loading,new Promise((_,reject)=>{deadline=setTimeout(()=>{expired=true;reject(Error('O scanner demorou para carregar. Confira a conexão e tente novamente.'));},40000);})]);}finally{clearTimeout(deadline);}
+   if(!alive.current||version!==generation.current){detector.close();return;}scanner.current=detector;attempt.current={challenge:value,step:0,frames:[],ready:false,scanning:true,baseline:null,readySince:0};lock.current=false;setBusy(false);inspect(version);
+  }catch(e){stop();if(alive.current){setChallenge(null);setCameraReady(false);setStatus('');setError(e.name==='NotAllowedError'?'A câmera não foi autorizada. Libere o acesso nas configurações do navegador.':e.name==='NotFoundError'?'Nenhuma câmera foi encontrada neste dispositivo.':e.message);}}finally{lock.current=false;if(alive.current)setBusy(false);}
+ };
+ const sequence=challenge?.sequence||['front','right','left'],pose=sequence[step];
+ return <section className="space-y-4" aria-label={enrolling?'Cadastro facial':'Confirmar meu rosto'}>
+ <style>{'.am-scan-preview{position:relative;overflow:hidden;border-radius:18px;background:#020617;border:1px solid #334155}.am-scan-preview video,.am-scan-preview canvas{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;transform:scaleX(-1)}.am-scan-preview canvas{pointer-events:none}.am-scan-preview:after{content:"";position:absolute;inset:8% 22%;border:1px dashed #93c5fd70;border-radius:48%;pointer-events:none}.am-scan-steps{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}.am-scan-steps span{border:1px solid #334155;border-radius:12px;padding:10px 6px;text-align:center;font-size:12px}.am-scan-steps .done{border-color:#10b981;color:#6ee7b7}.am-scan-steps .current{border-color:#3b82f6;background:#172554;color:#bfdbfe}'}</style>
+ <p className="text-sm text-slate-300">Registre três posições: de frente, sua direita e sua esquerda. Vire só um pouco e mantenha os dois olhos visíveis. A visualização funciona como um espelho; as fotos mantêm a orientação original da câmera.</p>
+ {enrolling&&<details open={!accepted} className="rounded-xl border border-slate-600 p-4"><summary className="font-bold text-sm cursor-pointer">Autorização para o cadastro facial</summary><p className="text-sm text-slate-300 mt-3">{consentText}</p><label className="flex gap-3 text-sm mt-4"><input type="checkbox" checked={accepted} disabled={busy||cameraReady} onChange={e=>setAccepted(e.target.checked)}/><span>Li e autorizo o cadastro facial da minha própria conta.</span></label></details>}
+ <div className="am-scan-steps" aria-label="Fotos necessárias">{sequence.map((value,i)=><span key={value} className={cameraReady&&i<step?'done':cameraReady&&i===step?'current':''}>{cameraReady&&i<step?'✓ ':i+1+'. '}{platformFacePoseLabel(value)}</span>)}</div>
+ <div className={'am-scan-preview '+(cameraReady?'':'hidden')} style={{aspectRatio:ratio,maxHeight:440}}><video ref={video} autoPlay playsInline muted aria-label="Câmera com visualização em espelho"/><canvas ref={overlay} aria-label="Pontos reais do rosto detectados ao vivo"/></div>
+ {cameraReady&&<><h3 className="text-lg font-bold text-center">{platformFacePoseLabel(pose)}</h3><div className="h-2 bg-slate-800 rounded-full overflow-hidden" role="progressbar" aria-label="Estabilidade da posição" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(scan.hold*100)}><div className="h-full bg-emerald-400 transition-all" style={{width:Math.round(scan.hold*100)+'%'}}/></div><p className="text-xs text-slate-400">A malha acompanha os pontos detectados. A identidade e a presença ao vivo são conferidas pelo servidor após as três fotos.</p></>}
+ {status&&<p role="status" className="text-sm rounded-xl border border-slate-600 p-3">{status}</p>}{error&&<p role="alert" className="text-red-300 rounded-xl border border-red-800 p-3">{error}</p>}
+ <label className="flex items-center gap-3 text-sm"><input type="checkbox" checked={automatic} disabled={busy} onChange={e=>setAutomatic(e.target.checked)}/>Capturar automaticamente quando a posição estiver estável</label>
+ <div className="flex flex-wrap gap-3"><button type="button" disabled={busy||enrolling&&!accepted||cameraReady&&!scan.ready} onClick={cameraReady?capture:start} className="rounded-xl bg-blue-600 px-5 py-3 font-bold text-white disabled:opacity-50">{busy?'Aguarde…':cameraReady?'Capturar '+platformFacePoseLabel(pose).toLowerCase():error?'Ligar câmera e tentar novamente':'Ligar câmera e iniciar scanner'}</button><button type="button" onClick={()=>{stop();onCancel?.();}} className="rounded-xl border border-slate-600 px-4 py-3">Cancelar</button></div>
+ <p className="text-xs text-slate-400">As três fotos são salvas juntas após a conferência do servidor. No primeiro cadastro, aguarde a revisão do administrador.</p></section>;
+}
+
 
 let platformFacePurchaseDialog=null;
 function platformFaceShowPurchase(user,base,status){
@@ -3244,7 +3297,7 @@ function PlatformFaceGate({user,children}){
   try{await platformFaceApi(base,'/enrollment',{method:'DELETE',uid:user.uid});setPrivacy(false);setCapture(false);refresh();}catch(e){setMessage(e.message);}
  };
  if(state.loading)return <div role="status" className="min-h-screen grid place-items-center bg-slate-950 text-slate-200 p-6"><div className="text-center space-y-3"><strong className="block">Etapa 2 de 2 · Face ID A&amp;M</strong><p>Consultando a confirmação do seu rosto…</p><p className="text-sm text-slate-400">A validação do CPF e do celular foi concluída.</p></div></div>;
- if(state.allowed&&(state.enabled===true||state.staffExempt===true)&&!privacy&&!capture)return <>{state.staffExempt&&<aside role="status" className="relative z-[1000] bg-blue-950 text-blue-100 border-b border-blue-500/40 px-5 py-3 text-sm">Você está conectado com uma conta da administração/equipe, dispensada do Face ID. Contas de alunos precisam cadastrar e confirmar o próprio rosto para acessar.</aside>}{children}{state.policy?.backendUrl&&!state.staffExempt&&<button type="button" onClick={()=>setPrivacy(true)} className="fixed bottom-3 left-3 z-[999] px-3 py-2 rounded-xl border border-slate-600 bg-slate-950 text-white text-xs shadow-lg">Meu cadastro facial</button>}</>;
+ if(state.allowed&&(state.enabled===true||state.staffExempt===true)&&!privacy&&!capture)return <>{state.staffExempt&&<aside role="status" className="relative z-[1000] bg-blue-950 text-blue-100 border-b border-blue-500/40 px-5 py-3 text-sm">Você está conectado com uma conta de administrador, dispensada do Face ID. Todas as outras contas, inclusive colaboradores, precisam cadastrar e confirmar o próprio rosto.</aside>}{children}{state.policy?.backendUrl&&!state.staffExempt&&<button type="button" onClick={()=>setPrivacy(true)} className="fixed bottom-3 left-3 z-[999] px-3 py-2 rounded-xl border border-slate-600 bg-slate-950 text-white text-xs shadow-lg">Meu cadastro facial</button>}</>;
  const pending=state.enrollmentStatus==='pending',newAccount=window.platformFaceRegistration?.uid===user.uid;
  return <main className="min-h-screen bg-slate-950 text-white flex items-center justify-center p-5"><section className="w-full max-w-xl rounded-2xl border border-slate-700 bg-slate-900 p-6 sm:p-8 space-y-5">
   <div><p className="text-xs text-slate-400 mb-3">✓ CPF e celular · 2. Confirmação facial</p><p className="text-xs uppercase tracking-widest text-blue-400 mb-2">Face ID da A&amp;M Produções</p><h1 className="text-2xl font-bold">{privacy?'Meu cadastro facial':pending?'Cadastro aguardando aprovação':state.servicePaused?'Preparando seu acesso seguro':state.needsEnrollment?newAccount?'Última etapa: cadastre seu rosto':'Ative a proteção da sua conta':'Confirme seu rosto'}</h1></div>
@@ -3259,7 +3312,7 @@ function PlatformFaceGate({user,children}){
  </section></main>;
 }
 
-// END SITE CURSOS FACIAL v18
+// END SITE CURSOS FACIAL v19
 
 // BEGIN SITE CURSOS STORAGE v14
 // SITE CURSOS v14 — shared R2 service, no S3 credentials in student requests.
