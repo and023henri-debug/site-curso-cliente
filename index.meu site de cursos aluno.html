@@ -3081,7 +3081,7 @@ function platformPublicSettingsNotice(state){return state?.error||'';}
 
 // END SITE CURSOS BOOTSTRAP v15
 
-// BEGIN SITE CURSOS FACIAL v15
+// BEGIN SITE CURSOS FACIAL v18
 /* Embedded in both complete pages. The Python server is the sole issuer of grants. */
 const PLATFORM_FACE_DEFAULTS={enabled:false,requireOnLogin:true,inactiveDays:10,purchaseMode:'inactive',purchaseFreshMinutes:10,sessionMinutes:360,requireAdminApproval:true,maxVerificationsPerDay:30,maxAttempts15m:5,maxPhotos:30,retentionDays:30,backendUrl:'',revision:0};
 let platformFaceKnownPolicy=null;
@@ -3101,18 +3101,37 @@ function platformAssertCurrentFaceUser(uid){
  if(!uid||auth?.currentUser?.uid!==uid)throw Object.assign(Error('A conta mudou. Entre novamente.'),{code:'face/account-changed'});
  return auth.currentUser;
 }
+function PlatformHostedAccessNotice({admin=false}){
+ const url='https://site-cursos-a8ee1.web.app/'+(admin?'administrador.html':'');
+ return <main className="min-h-screen bg-slate-950 text-white grid place-items-center p-6"><section className="w-full max-w-lg rounded-2xl border border-blue-500/40 bg-slate-900 p-7 space-y-5"><p className="text-xs uppercase tracking-widest text-blue-400">A&amp;M Produções · Acesso seguro</p><h1 className="text-2xl font-bold">Abra a plataforma online</h1><p className="text-slate-300">Este arquivo foi aberto pela pasta Downloads. Para proteger suas fotos, o servidor facial aceita apenas os endereços online autorizados da plataforma.</p><p className="text-slate-300">Use o botão abaixo e entre na sua conta. O cadastro com CPF e celular e a confirmação pela câmera serão feitos na página online.</p><a href={url} className="inline-block rounded-xl bg-blue-600 text-white px-5 py-3 font-bold">{admin?'Abrir administrador online':'Abrir plataforma do aluno'}</a><p className="text-xs text-slate-400">Os arquivos HTML baixados servem para atualizar a hospedagem.</p></section></main>;
+}
+async function platformFaceSession(uid){
+ const current=platformAssertCurrentFaceUser(uid),result=await current.getIdTokenResult();
+ platformAssertCurrentFaceUser(uid);
+ const time=result.claims?.auth_time;
+ if(!Number.isInteger(time)||time<=0||auth.currentUser!==current)throw Object.assign(Error('A sessão mudou. Entre novamente.'),{code:'face/account-changed'});
+ return {user:current,token:result.token,key:uid+'_'+time};
+}
+async function platformFaceAssertSession(session){
+ const current=await platformFaceSession(session.user.uid);
+ if(current.key!==session.key||current.user!==session.user)throw Object.assign(Error('A sessão mudou. Entre novamente.'),{code:'face/account-changed'});
+}
 async function platformFaceApi(base,path,{method='GET',body,uid=auth?.currentUser?.uid,blob=false,timeoutMs=45000}={}){
- const user=platformAssertCurrentFaceUser(uid),url=platformFaceBase(base)+'/api/face'+path;
- const token=await user.getIdToken();platformAssertCurrentFaceUser(uid);
+ if(location.protocol==='file:')throw Object.assign(Error('Abra a plataforma online em https://site-cursos-a8ee1.web.app para usar o Face ID. Arquivos da pasta Downloads não conectam ao servidor facial.'),{code:'face/host-required'});
+ const session=await platformFaceSession(uid),url=platformFaceBase(base)+'/api/face'+path;
  const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),timeoutMs);
  try{
-  const response=await fetch(url,{method,redirect:'error',cache:'no-store',credentials:'omit',signal:controller.signal,headers:{Authorization:'Bearer '+token,...(body?{'Content-Type':'application/json'}:{})},...(body?{body:JSON.stringify(body)}:{})});
-  platformAssertCurrentFaceUser(uid);
-  if(blob&&response.ok){const image=await response.blob();platformAssertCurrentFaceUser(uid);return image;}
-  const data=await response.json().catch(()=>({}));platformAssertCurrentFaceUser(uid);
+  const response=await fetch(url,{method,redirect:'error',cache:'no-store',credentials:'omit',signal:controller.signal,headers:{Authorization:'Bearer '+session.token,...(body?{'Content-Type':'application/json'}:{})},...(body?{body:JSON.stringify(body)}:{})});
+  await platformFaceAssertSession(session);
+  if(blob&&response.ok){const value=await response.blob();await platformFaceAssertSession(session);return value;}
+  const data=await response.json().catch(()=>({}));await platformFaceAssertSession(session);
   if(!response.ok)throw Object.assign(Error(data.error||'O servidor facial não concluiu esta operação.'),{code:data.code||'face/server-error',status:response.status});
   return data;
- }catch(error){if(error.name==='AbortError')throw Error('O reconhecimento demorou demais. Tente novamente.');throw error;}finally{clearTimeout(timer);}
+ }catch(error){
+  if(error.name==='AbortError')throw Error('O reconhecimento demorou demais. Tente novamente.');
+  if(error instanceof TypeError)throw Object.assign(Error('Não foi possível conectar ao servidor facial. Confira a internet e use a página online autorizada. Tente novamente sem fechar sua conta.'),{code:'face/connection-failed'});
+  throw error;
+ }finally{clearTimeout(timer);}
 }
 function platformFaceStopStream(stream){stream?.getTracks?.().forEach(track=>track.stop());}
 function PlatformFaceCapture({user,base,purpose='portal',consentText='',consentVersion='',onFinished,onCancel}){
@@ -3187,28 +3206,48 @@ async function platformFaceBeforeLogout(user){
 }
 function PlatformFaceGate({user,children}){
  const [state,setState]=React.useState({loading:true}),[capture,setCapture]=React.useState(false),[privacy,setPrivacy]=React.useState(false),[reason,setReason]=React.useState(''),[message,setMessage]=React.useState(''),[requesting,setRequesting]=React.useState(false);
- const alive=React.useRef(true),running=React.useRef(false),ready=React.useRef(false);
- const refresh=async(silent=false)=>{
-  if(running.current)return;running.current=true;
+ const alive=React.useRef(true),running=React.useRef(false),generation=React.useRef(0),sessionKey=React.useRef('');
+ const refresh=async()=>{
+  if(running.current)return;running.current=true;const request=++generation.current;
   try{
+   const session=await platformFaceSession(user.uid);if(request!==generation.current)return;sessionKey.current=session.key;
    const policy=await platformFacePolicy(user.uid);let status=policy.backendUrl?await platformFaceApi(policy.backendUrl,'/status',{uid:user.uid}):{enabled:false,allowed:false,servicePaused:true,enrollmentRequired:true,policy};
+   await platformFaceAssertSession(session);
    if(status.enabled!==true&&!status.staffExempt)status={...status,allowed:false,servicePaused:true};
-   if(alive.current){setState({...status,loading:false});ready.current=true;}
-  }catch(e){if(alive.current){setState({loading:false,error:e.message});ready.current=true;}}
-  finally{running.current=false;}
+   if(!status.staffExempt&&status.policy?.requireOnLogin!==true)status={...status,allowed:false,servicePaused:true};
+   if(alive.current&&request===generation.current){sessionKey.current=session.key;setState({...status,loading:false});}
+  }catch(e){if(alive.current&&request===generation.current)setState({loading:false,error:e.message});}
+  finally{if(request===generation.current)running.current=false;}
  };
- React.useEffect(()=>{alive.current=true;refresh();const timer=setInterval(()=>{if(document.visibilityState==='visible')refresh(true);},15000);const visible=()=>{if(document.visibilityState==='visible')refresh(true);};document.addEventListener('visibilitychange',visible);return()=>{alive.current=false;clearInterval(timer);document.removeEventListener('visibilitychange',visible);platformFacePurchaseDialog?.cancel();};},[user.uid]);
+ React.useEffect(()=>{
+  alive.current=true;setState({loading:true});sessionKey.current='';refresh();
+  const unsubscribe=onIdTokenChanged(auth,async current=>{
+   if(!alive.current)return;
+   if(!current||current.uid!==user.uid){generation.current++;running.current=false;setState({loading:true});setCapture(false);platformFacePurchaseDialog?.cancel();return;}
+   try{const session=await platformFaceSession(user.uid);if(!alive.current)return;if(sessionKey.current&&session.key!==sessionKey.current){generation.current++;running.current=false;sessionKey.current='';setState({loading:true});setCapture(false);platformFacePurchaseDialog?.cancel();refresh();}}
+   catch(e){if(alive.current){generation.current++;running.current=false;setState({loading:false,error:e.message});}}
+  });
+  const timer=setInterval(()=>{if(document.visibilityState==='visible')refresh();},15000);
+  const visible=()=>{if(document.visibilityState==='visible')refresh();};document.addEventListener('visibilitychange',visible);window.addEventListener('online',visible);
+  return()=>{alive.current=false;generation.current++;running.current=false;unsubscribe();clearInterval(timer);document.removeEventListener('visibilitychange',visible);window.removeEventListener('online',visible);platformFacePurchaseDialog?.cancel();};
+ },[user.uid]);
+ React.useEffect(()=>{
+  if(!state.allowed||state.staffExempt||!state.expiresAt)return;
+  const expiry=new Date(state.expiresAt).getTime();if(!Number.isFinite(expiry))return;
+  const timer=setTimeout(()=>{if(alive.current){setState(old=>({...old,allowed:false,needsVerification:true}));refresh();}},Math.max(0,Math.min(expiry-Date.now(),2147483647)));
+  return()=>clearTimeout(timer);
+ },[state.allowed,state.expiresAt,state.staffExempt]);
  const base=state.policy?.backendUrl;
  const requestHelp=async()=>{if(requesting)return;setRequesting(true);setMessage('');try{await platformFaceApi(base,'/recovery',{method:'POST',uid:user.uid,body:{reason}});if(alive.current)setMessage('Pedido enviado. Aguarde a análise do administrador e clique em Consultar novamente.');}catch(e){if(alive.current)setMessage(e.message);}finally{if(alive.current)setRequesting(false);}};
  const remove=async()=>{
   if(!await window.platformConfirm('Excluir seu cadastro facial e suas fotos? O cadastro facial é obrigatório para navegar. Será necessário cadastrar o rosto novamente e aguardar aprovação para voltar à plataforma.'))return;
   try{await platformFaceApi(base,'/enrollment',{method:'DELETE',uid:user.uid});setPrivacy(false);setCapture(false);refresh();}catch(e){setMessage(e.message);}
  };
- if(state.loading)return <div role="status" className="min-h-screen grid place-items-center bg-slate-950 text-slate-200">Consultando acesso…</div>;
- if(state.allowed&&(state.enabled===true||state.staffExempt===true)&&!privacy&&!capture)return <>{children}{state.policy?.backendUrl&&!state.staffExempt&&<button type="button" onClick={()=>setPrivacy(true)} className="fixed bottom-3 left-3 z-[999] px-3 py-2 rounded-xl border border-slate-600 bg-slate-950 text-white text-xs shadow-lg">Meu cadastro facial</button>}</>;
+ if(state.loading)return <div role="status" className="min-h-screen grid place-items-center bg-slate-950 text-slate-200 p-6"><div className="text-center space-y-3"><strong className="block">Etapa 2 de 2 · Face ID A&amp;M</strong><p>Consultando a confirmação do seu rosto…</p><p className="text-sm text-slate-400">A validação do CPF e do celular foi concluída.</p></div></div>;
+ if(state.allowed&&(state.enabled===true||state.staffExempt===true)&&!privacy&&!capture)return <>{state.staffExempt&&<aside role="status" className="relative z-[1000] bg-blue-950 text-blue-100 border-b border-blue-500/40 px-5 py-3 text-sm">Você está conectado com uma conta da administração/equipe, dispensada do Face ID. Contas de alunos precisam cadastrar e confirmar o próprio rosto para acessar.</aside>}{children}{state.policy?.backendUrl&&!state.staffExempt&&<button type="button" onClick={()=>setPrivacy(true)} className="fixed bottom-3 left-3 z-[999] px-3 py-2 rounded-xl border border-slate-600 bg-slate-950 text-white text-xs shadow-lg">Meu cadastro facial</button>}</>;
  const pending=state.enrollmentStatus==='pending',newAccount=window.platformFaceRegistration?.uid===user.uid;
  return <main className="min-h-screen bg-slate-950 text-white flex items-center justify-center p-5"><section className="w-full max-w-xl rounded-2xl border border-slate-700 bg-slate-900 p-6 sm:p-8 space-y-5">
-  <div><p className="text-xs uppercase tracking-widest text-blue-400 mb-2">Face ID da A&amp;M Produções</p><h1 className="text-2xl font-bold">{privacy?'Meu cadastro facial':pending?'Cadastro aguardando aprovação':state.servicePaused?'Preparando seu acesso seguro':state.needsEnrollment?newAccount?'Última etapa: cadastre seu rosto':'Ative a proteção da sua conta':'Confirme seu rosto'}</h1></div>
+  <div><p className="text-xs text-slate-400 mb-3">✓ CPF e celular · 2. Confirmação facial</p><p className="text-xs uppercase tracking-widest text-blue-400 mb-2">Face ID da A&amp;M Produções</p><h1 className="text-2xl font-bold">{privacy?'Meu cadastro facial':pending?'Cadastro aguardando aprovação':state.servicePaused?'Preparando seu acesso seguro':state.needsEnrollment?newAccount?'Última etapa: cadastre seu rosto':'Ative a proteção da sua conta':'Confirme seu rosto'}</h1></div>
   {state.error?<p role="alert" className="text-red-300">{state.error} Verifique sua conexão ou peça ao administrador para conferir o servidor e as regras do Firebase.</p>:<>
    {privacy?<><p className="text-sm text-slate-300">Modelo e fotos de cadastro e verificações ficam criptografados na pasta da sua conta. Status: {state.enrollmentStatus||'sem cadastro'}. A exclusão remove seu modelo e as fotos; registros de segurança sem imagens seguem a retenção informada.</p><button type="button" onClick={remove} className="rounded-lg border border-red-700 text-red-300 px-4 py-3">Excluir cadastro e retirar autorização</button>{state.allowed&&<button type="button" onClick={()=>setPrivacy(false)} className="block text-blue-300 underline">Voltar à plataforma</button>}</>:state.servicePaused?<p className="text-slate-300">O cadastro facial é obrigatório para acessar a plataforma. A câmera está temporariamente indisponível enquanto a equipe prepara ou revisa o serviço. Seus dados continuam salvos. Consulte novamente em instantes ou entre em contato com a equipe.</p>:state.legacyEnrollment?<p className="text-amber-200">Seu cadastro pertence ao motor anterior. Solicite revisão ao administrador para remover o cadastro antigo e autorizar um novo.</p>:pending?<p className="text-slate-300">Seu rosto foi cadastrado com sucesso! Agora nossa equipe vai conferir sua identidade e aprovar o cadastro. Assim que for aprovado, confirme seu rosto para começar a navegar. Você não precisa cadastrar outra conta.</p>:capture?<PlatformFaceCapture key={user.uid} user={user} base={base} purpose={state.needsEnrollment?'enroll':'portal'} consentText={state.consentText} consentVersion={state.consentVersion} onFinished={()=>{setCapture(false);refresh();}} onCancel={()=>setCapture(false)}/>:<><p className="text-slate-300">{state.needsEnrollment?newAccount?'Falta só proteger sua nova conta! Depois dos seus dados, cadastre seu rosto para concluir o cadastro. Essa etapa é obrigatória para navegar e ajuda a manter seus cursos e suas compras seguros.':'Olá! Para cuidar da segurança da sua conta, precisamos ativar a verificação em duas etapas por reconhecimento facial. Seu login continua o mesmo. Cadastre seu próprio rosto para liberar a navegação na plataforma. Essa ativação é obrigatória e nossa equipe vai conferir o primeiro cadastro.':state.inactivityDue?'Seu período de inatividade exige uma nova confirmação.':'Confirme o rosto cadastrado para liberar esta sessão.'}</p>{state.needsEnrollment&&<p className="text-sm text-slate-400">Você escolhe quando ligar a câmera e autoriza o uso das imagens antes da captura. Se não puder usar a câmera, peça ajuda à equipe. O portal permanece protegido até a liberação.</p>}<button type="button" onClick={()=>setCapture(true)} className="bg-blue-600 font-bold px-5 py-3 rounded-xl">{state.needsEnrollment?'Ativar reconhecimento facial obrigatório':'Verificar com a câmera'}</button></>}
    {state.policy&&<p className="text-xs text-slate-400">Retenção de até {state.policy.retentionDays} dias e {state.policy.maxPhotos} fotos. Limite de {state.policy.maxVerificationsPerDay} confirmações por dia ({state.timeZone||'horário configurado'}). Cada foto recebe um identificador e conferência de integridade.</p>}
@@ -3220,7 +3259,7 @@ function PlatformFaceGate({user,children}){
  </section></main>;
 }
 
-// END SITE CURSOS FACIAL v15
+// END SITE CURSOS FACIAL v18
 
 // BEGIN SITE CURSOS STORAGE v14
 // SITE CURSOS v14 — shared R2 service, no S3 credentials in student requests.
@@ -14645,7 +14684,7 @@ function InactivityGate({user,children}) {
             const root = createRoot(container);
             root.render(
                 <ErrorBoundary>
-                    <App />
+                    {location.protocol==='file:'?<PlatformHostedAccessNotice/>:<App />}
                 </ErrorBoundary>
             );
             console.log("React montado com sucesso.");
@@ -14909,7 +14948,7 @@ function PlatformStudentIdentityGate({user,children}){
  React.useEffect(()=>{let alive=true;setState(old=>({...old,loading:true,error:''}));platformIdentityRequest({action:'profile-status'},undefined,user.uid).then(data=>{if(alive)setState({loading:false,active:data.active===true,error:'',profile:data.profile||{}});}).catch(error=>{if(alive)setState({loading:false,active:false,error:error.message,profile:{}});});return()=>{alive=false;};},[user.uid,retry]);
  if(state.active)return children;
  if(!state.loading&&!state.error)return <CompleteRegistrationModal user={user} initialProfile={state.profile} onSuccess={()=>setRetry(value=>value+1)}/>;
- return <main className="min-h-screen bg-black text-white grid place-items-center p-6"><section className="max-w-lg rounded-2xl border border-slate-700 p-7 bg-slate-950"><h1 className="font-bold text-xl">Segurança do seu cadastro</h1><p role={state.error?'alert':'status'} className="mt-4 text-sm leading-relaxed text-slate-300">{state.loading?'Verificando o CPF vinculado à sua conta…':state.error}</p>{state.error&&<button type="button" className="mt-5 rounded-xl bg-blue-600 px-4 py-3 font-bold" onClick={()=>setRetry(value=>value+1)}>Tentar novamente</button>}<button type="button" className="block mt-5 text-slate-400 underline" onClick={()=>signOut(auth)}>Sair da conta</button></section></main>;
+ return <main className="min-h-screen bg-black text-white grid place-items-center p-6"><section className="max-w-lg rounded-2xl border border-slate-700 p-7 bg-slate-950"><h1 className="font-bold text-xl">Segurança do seu cadastro</h1><p role={state.error?'alert':'status'} className="mt-4 text-sm leading-relaxed text-slate-300">{state.loading?'Etapa 1 de 2: verificando seu CPF e celular. Depois, a plataforma solicitará o Face ID…':state.error}</p>{state.error&&<button type="button" className="mt-5 rounded-xl bg-blue-600 px-4 py-3 font-bold" onClick={()=>setRetry(value=>value+1)}>Tentar novamente</button>}<button type="button" className="block mt-5 text-slate-400 underline" onClick={()=>signOut(auth)}>Sair da conta</button></section></main>;
 }
 function PlatformIdentityAdminCard({settings,showNotification}){
  const [state,setState]=React.useState({loading:true,ready:false,error:'',report:null}),[busy,setBusy]=React.useState(false);
