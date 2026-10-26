@@ -3081,7 +3081,7 @@ function platformPublicSettingsNotice(state){return state?.error||'';}
 
 // END SITE CURSOS BOOTSTRAP v15
 
-// BEGIN SITE CURSOS FACIAL v22
+// BEGIN SITE CURSOS FACIAL v23
 /* Embedded in both complete pages. The Python server is the sole issuer of grants. */
 const PLATFORM_FACE_DEFAULTS={enabled:false,requireOnLogin:true,inactiveDays:10,purchaseMode:'inactive',purchaseFreshMinutes:10,sessionMinutes:360,requireAdminApproval:true,maxVerificationsPerDay:30,maxAttempts15m:5,maxPhotos:30,retentionDays:30,backendUrl:'',revision:0};
 let platformFaceKnownPolicy=null;
@@ -3229,9 +3229,17 @@ function PlatformFaceAccountConfirmation({uid,onConfirmed,onCancel}){
  <p className="am-confirm-note">Depois da confirmação, você poderá continuar as três fotos do seu próprio rosto.</p></section>;
 }
 
+function platformFaceQuickMessage(pose){
+ return pose==='front'?'Olhe de frente para a câmera.':'Vire só um pouquinho para a sua '+(pose==='right'?'direita':'esquerda')+'.';
+}
+function platformFaceChallengeValid(value,enrolling){
+ if(value?.captureVersion!==2||value.directions!=='person'||!Array.isArray(value.sequence)||value.sequence.length!==3||value.sequence[0]!=='front')return false;
+ if(value.captureMode==='quick')return !enrolling&&['left','right'].includes(value.sequence[1])&&value.sequence[2]==='front';
+ return value.captureMode!== 'quick'&&value.sequence.includes('right')&&value.sequence.includes('left');
+}
 function PlatformFaceCapture({user,base,purpose='portal',consentText='',consentVersion='',initialConsentAccepted=false,onRequireRecentLogin,onAuthenticationConfirmed,onFinished,onCancel}){
  const video=React.useRef(null),overlay=React.useRef(null),stream=React.useRef(null),scanner=React.useRef(null),alive=React.useRef(true),generation=React.useRef(0),lock=React.useRef(false),timer=React.useRef(null),attempt=React.useRef({step:0,frames:[],ready:false,scanning:false,baseline:null,readySince:0});
- const [accepted,setAccepted]=React.useState(!!initialConsentAccepted),[needsAuthentication,setNeedsAuthentication]=React.useState(false),[challenge,setChallenge]=React.useState(null),[step,setStep]=React.useState(0),[busy,setBusy]=React.useState(false),[error,setError]=React.useState(''),[cameraReady,setCameraReady]=React.useState(false),[status,setStatus]=React.useState(''),[scan,setScan]=React.useState({ready:false,hold:0}),[ratio,setRatio]=React.useState(4/3),[automatic,setAutomatic]=React.useState(true);const automaticRef=React.useRef(true);automaticRef.current=automatic;const enrolling=purpose==='enroll';
+ const [accepted,setAccepted]=React.useState(!!initialConsentAccepted),[needsAuthentication,setNeedsAuthentication]=React.useState(false),[challenge,setChallenge]=React.useState(null),[step,setStep]=React.useState(0),[busy,setBusy]=React.useState(false),[error,setError]=React.useState(''),[cameraReady,setCameraReady]=React.useState(false),[status,setStatus]=React.useState(''),[scan,setScan]=React.useState({ready:false,hold:0}),[ratio,setRatio]=React.useState(4/3),[automatic,setAutomatic]=React.useState(true);const automaticRef=React.useRef(true),autoRequested=React.useRef(false);automaticRef.current=automatic;const enrolling=purpose==='enroll';
  const stop=()=>{generation.current++;clearTimeout(timer.current);timer.current=null;platformFaceStopStream(stream.current);stream.current=null;scanner.current?.close();scanner.current=null;if(video.current)video.current.srcObject=null;attempt.current.frames.length=0;attempt.current.scanning=false;attempt.current.ready=false;};
  React.useEffect(()=>{alive.current=true;return()=>{alive.current=false;stop();};},[]);
  const capture=async()=>{
@@ -3240,8 +3248,8 @@ function PlatformFaceCapture({user,base,purpose='portal',consentText='',consentV
    platformAssertCurrentFaceUser(user.uid);const source=video.current;if(!source?.videoWidth||source.readyState<2)throw Error('Aguarde a câmera ficar pronta.');
    const scale=Math.min(1,960/source.videoWidth,960/source.videoHeight),canvas=document.createElement('canvas');canvas.width=Math.round(source.videoWidth*scale);canvas.height=Math.round(source.videoHeight*scale);canvas.getContext('2d').drawImage(source,0,0,canvas.width,canvas.height);a.frames.push(canvas.toDataURL('image/jpeg',.85));canvas.width=canvas.height=0;
    if(a.step===0)a.baseline=a.yaw;
-   if(a.step<2){a.step++;a.readySince=0;a.ready=false;setStep(a.step);setScan({ready:false,hold:0});setStatus('Foto registrada nesta captura. Agora: '+platformFacePoseLabel(a.challenge.sequence[a.step])+'.');return;}
-   const frames=a.frames.slice(),id=a.challenge.id;stop();const completionVersion=generation.current;setCameraReady(false);setBusy(true);setStatus('Conferindo as três fotos, a identidade e a presença ao vivo no servidor…');let result;
+   if(a.step<2){a.step++;a.readySince=0;a.ready=false;setStep(a.step);setScan({ready:false,hold:0});setStatus(enrolling?'Foto registrada nesta captura. Agora: '+platformFacePoseLabel(a.challenge.sequence[a.step])+'.':platformFaceQuickMessage(a.challenge.sequence[a.step]));return;}
+   const frames=a.frames.slice(),id=a.challenge.id;stop();const completionVersion=generation.current;setCameraReady(false);setBusy(true);setStatus(enrolling?'Conferindo e salvando seu cadastro facial…':'Confirmando seu rosto com segurança…');let result;
    try{result=await platformFaceApi(base,'/complete',{method:'POST',uid:user.uid,body:{challengeId:id,frames,consent:enrolling&&accepted,consentVersion:enrolling?consentVersion:''},timeoutMs:90000});}finally{frames.length=0;}
    if(alive.current&&generation.current===completionVersion)onFinished(result);
   }catch(e){stop();if(alive.current){setChallenge(null);setCameraReady(false);setStatus('');if(platformFaceNeedsRecentLogin(e)){setNeedsAuthentication(true);setError('');onRequireRecentLogin?.({purpose,accepted,consentVersion});}else setError(e.message);}}finally{lock.current=false;if(alive.current)setBusy(false);}
@@ -3253,9 +3261,9 @@ function PlatformFaceCapture({user,base,purpose='portal',consentText='',consentV
    const result=await scanner.current.detect(source);if(!alive.current||version!==generation.current)return;
    const a=attempt.current,pose=platformFaceReadPose(result.faces,a.challenge.sequence[a.step],a.baseline);
    const sample=document.createElement('canvas');sample.width=64;sample.height=48;const ctx=sample.getContext('2d',{willReadFrequently:true});ctx.drawImage(source,0,0,64,48);const pixels=ctx.getImageData(0,0,64,48).data;let mean=0;for(let i=0;i<pixels.length;i+=16)mean+=(pixels[i]+pixels[i+1]+pixels[i+2])/3;mean/=pixels.length/16;sample.width=sample.height=0;const light=mean>=32&&mean<=235;
-   a.ready=pose.ready&&light;a.yaw=pose.yaw;if(!a.ready)a.readySince=0;else if(!a.readySince)a.readySince=performance.now();const hold=a.ready?Math.min(1,(performance.now()-a.readySince)/850):0;
-   setScan({ready:a.ready,hold});setStatus(light?pose.message:'Melhore a iluminação para registrar o rosto.');
-   if(overlay.current){overlay.current.width=source.videoWidth;overlay.current.height=source.videoHeight;platformDrawFaceMesh(overlay.current,result,a.ready);}
+   a.ready=pose.ready&&light;a.yaw=pose.yaw;if(!a.ready)a.readySince=0;else if(!a.readySince)a.readySince=performance.now();const hold=a.ready?Math.min(1,(performance.now()-a.readySince)/(enrolling?850:650)):0;
+   setScan({ready:a.ready,hold});setStatus(light?(enrolling?pose.message:pose.ready?'Ótimo. Só mais um instante…':platformFaceQuickMessage(a.challenge.sequence[a.step])):'Melhore um pouco a iluminação.');
+   if(enrolling&&overlay.current){overlay.current.width=source.videoWidth;overlay.current.height=source.videoHeight;platformDrawFaceMesh(overlay.current,result,a.ready);}
    if(hold>=1&&automaticRef.current)await capture();
   }catch(e){if(alive.current&&version===generation.current){stop();setCameraReady(false);setChallenge(null);setError(e.message||'Inicie a câmera novamente.');}}
   if(alive.current&&version===generation.current&&attempt.current.scanning)timer.current=setTimeout(()=>inspect(version),250);
@@ -3264,29 +3272,30 @@ function PlatformFaceCapture({user,base,purpose='portal',consentText='',consentV
   if(lock.current)return;lock.current=true;setBusy(true);setError('');stop();setCameraReady(false);setScan({ready:false,hold:0});const version=generation.current;
   try{
    platformAssertCurrentFaceUser(user.uid);if(enrolling&&!accepted)throw Error('Autorize o cadastro facial antes de ligar a câmera.');if(!window.isSecureContext||!navigator.mediaDevices?.getUserMedia)throw Error('Abra a plataforma em HTTPS e libere a câmera.');
-   setStatus('Preparando as três posições…');const value=await platformFaceApi(base,'/challenge',{method:'POST',uid:user.uid,body:{purpose}});
-   if(value.captureVersion!==2||value.directions!=='person'||value.sequence?.length!==3||value.sequence[0]!=='front'||!value.sequence.includes('right')||!value.sequence.includes('left'))throw Error('O servidor precisa da atualização das três posições. Solicite ao administrador.');
+   setStatus(enrolling?'Preparando seu primeiro cadastro…':'Preparando a confirmação rápida…');const value=await platformFaceApi(base,'/challenge',{method:'POST',uid:user.uid,body:{purpose,...(!enrolling?{captureMode:'quick'}:{})}});
+   if(!platformFaceChallengeValid(value,enrolling))throw Error('O servidor não preparou uma confirmação compatível. Tente novamente ou peça ajuda à equipe.');
    if(!alive.current||version!==generation.current||auth.currentUser?.uid!==user.uid)return;
    const media=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'user'},width:{ideal:960,max:1280},height:{ideal:720,max:1280}},audio:false});if(!alive.current||version!==generation.current||auth.currentUser?.uid!==user.uid){platformFaceStopStream(media);return;}
-   stream.current=media;video.current.srcObject=media;await video.current.play();if(!alive.current||version!==generation.current)return;setRatio(video.current.videoWidth/video.current.videoHeight||4/3);setCameraReady(true);setChallenge(value);setStep(0);setStatus('Carregando a análise real do rosto…');
+   stream.current=media;video.current.srcObject=media;await video.current.play();if(!alive.current||version!==generation.current)return;setRatio(video.current.videoWidth/video.current.videoHeight||4/3);setCameraReady(true);setChallenge(value);setStep(0);setStatus(enrolling?'Carregando a análise real do rosto…':'Olhe para a câmera. A confirmação é automática.');
    let expired=false,deadline;const loading=platformCreateFaceScanner().then(value=>{if(expired){value.close();throw Error('O scanner demorou para carregar.');}return value;});let detector;
    try{detector=await Promise.race([loading,new Promise((_,reject)=>{deadline=setTimeout(()=>{expired=true;reject(Error('O scanner demorou para carregar. Confira a conexão e tente novamente.'));},40000);})]);}finally{clearTimeout(deadline);}
    if(!alive.current||version!==generation.current){detector.close();return;}scanner.current=detector;attempt.current={challenge:value,step:0,frames:[],ready:false,scanning:true,baseline:null,readySince:0};lock.current=false;setBusy(false);inspect(version);
   }catch(e){stop();if(alive.current){setChallenge(null);setCameraReady(false);setStatus('');if(platformFaceNeedsRecentLogin(e)){setNeedsAuthentication(true);setError('');onRequireRecentLogin?.({purpose,accepted,consentVersion});}else setError(e.name==='NotAllowedError'?'A câmera não foi autorizada. Libere o acesso nas configurações do navegador.':e.name==='NotFoundError'?'Nenhuma câmera foi encontrada neste dispositivo.':e.message);}}finally{lock.current=false;if(alive.current)setBusy(false);}
  };
+ React.useEffect(()=>{if(!enrolling&&!autoRequested.current){autoRequested.current=true;start();}},[]);
  if(needsAuthentication)return <PlatformFaceAccountConfirmation uid={user.uid} onConfirmed={()=>{if(!alive.current)return;setNeedsAuthentication(false);setError('');setStatus('Conta confirmada. Continue o cadastro facial.');onAuthenticationConfirmed?.();}} onCancel={()=>{stop();setNeedsAuthentication(false);onCancel?.();}}/>;
- const sequence=challenge?.sequence||['front','right','left'],pose=sequence[step];
+ const sequence=challenge?.sequence||(enrolling?['front','right','left']:['front','right','front']),pose=sequence[step];
  return <section className="space-y-4" aria-label={enrolling?'Cadastro facial':'Confirmar meu rosto'}>
  <style>{'.am-scan-preview{position:relative;overflow:hidden;border-radius:18px;background:#020617;border:1px solid #334155}.am-scan-preview video,.am-scan-preview canvas{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;transform:scaleX(-1)}.am-scan-preview canvas{pointer-events:none}.am-scan-preview:after{content:"";position:absolute;inset:8% 22%;border:1px dashed #93c5fd70;border-radius:48%;pointer-events:none}.am-scan-steps{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}.am-scan-steps span{border:1px solid #334155;border-radius:12px;padding:10px 6px;text-align:center;font-size:12px}.am-scan-steps .done{border-color:#10b981;color:#6ee7b7}.am-scan-steps .current{border-color:#3b82f6;background:#172554;color:#bfdbfe}'}</style>
- <p className="text-sm text-slate-300">Registre três posições: de frente, sua direita e sua esquerda. Vire só um pouco e mantenha os dois olhos visíveis. A visualização funciona como um espelho; as fotos mantêm a orientação original da câmera.</p>
+ <p className="text-sm text-slate-300">{enrolling?'Registre três posições: de frente, sua direita e sua esquerda. Vire só um pouco e mantenha os dois olhos visíveis. A visualização funciona como um espelho; as fotos mantêm a orientação original da câmera.':'Olhe para a câmera e siga a indicação. É só uma confirmação rápida do seu rosto cadastrado.'}</p>
  {enrolling&&<details open={!accepted} className="rounded-xl border border-slate-600 p-4"><summary className="font-bold text-sm cursor-pointer">Autorização para o cadastro facial</summary><p className="text-sm text-slate-300 mt-3">{consentText}</p><label className="flex gap-3 text-sm mt-4"><input type="checkbox" checked={accepted} disabled={busy||cameraReady} onChange={e=>setAccepted(e.target.checked)}/><span>Li e autorizo o cadastro facial da minha própria conta.</span></label></details>}
- <div className="am-scan-steps" aria-label="Fotos necessárias">{sequence.map((value,i)=><span key={value} className={cameraReady&&i<step?'done':cameraReady&&i===step?'current':''}>{cameraReady&&i<step?'✓ ':i+1+'. '}{platformFacePoseLabel(value)}</span>)}</div>
- <div className={'am-scan-preview '+(cameraReady?'':'hidden')} style={{aspectRatio:ratio,maxHeight:440}}><video ref={video} autoPlay playsInline muted aria-label="Câmera com visualização em espelho"/><canvas ref={overlay} aria-label="Pontos reais do rosto detectados ao vivo"/></div>
- {cameraReady&&<><h3 className="text-lg font-bold text-center">{platformFacePoseLabel(pose)}</h3><div className="h-2 bg-slate-800 rounded-full overflow-hidden" role="progressbar" aria-label="Estabilidade da posição" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(scan.hold*100)}><div className="h-full bg-emerald-400 transition-all" style={{width:Math.round(scan.hold*100)+'%'}}/></div><p className="text-xs text-slate-400">A malha acompanha os pontos detectados. A identidade e a presença ao vivo são conferidas pelo servidor após as três fotos.</p></>}
+ {enrolling&&<div className="am-scan-steps" aria-label="Fotos necessárias">{sequence.map((value,i)=><span key={i} className={cameraReady&&i<step?'done':cameraReady&&i===step?'current':''}>{cameraReady&&i<step?'✓ ':i+1+'. '}{platformFacePoseLabel(value)}</span>)}</div>}
+ <div className={'am-scan-preview '+(cameraReady?'':'hidden')} style={{aspectRatio:ratio,maxHeight:440}}><video ref={video} autoPlay playsInline muted aria-label="Câmera com visualização em espelho"/>{enrolling&&<canvas ref={overlay} aria-label="Pontos reais do rosto detectados ao vivo"/>}</div>
+ {cameraReady&&enrolling&&<><h3 className="text-lg font-bold text-center">{platformFacePoseLabel(pose)}</h3><div className="h-2 bg-slate-800 rounded-full overflow-hidden" role="progressbar" aria-label="Estabilidade da posição" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(scan.hold*100)}><div className="h-full bg-emerald-400 transition-all" style={{width:Math.round(scan.hold*100)+'%'}}/></div><p className="text-xs text-slate-400">A malha acompanha os pontos detectados. A identidade e a presença ao vivo são conferidas pelo servidor após as três fotos.</p></>}
  {status&&<p role="status" className="text-sm rounded-xl border border-slate-600 p-3">{status}</p>}{error&&<p role="alert" className="text-red-300 rounded-xl border border-red-800 p-3">{error}</p>}
- <label className="flex items-center gap-3 text-sm"><input type="checkbox" checked={automatic} disabled={busy} onChange={e=>setAutomatic(e.target.checked)}/>Capturar automaticamente quando a posição estiver estável</label>
- <div className="flex flex-wrap gap-3"><button type="button" disabled={busy||enrolling&&!accepted||cameraReady&&!scan.ready} onClick={cameraReady?capture:start} className="rounded-xl bg-blue-600 px-5 py-3 font-bold text-white disabled:opacity-50">{busy?'Aguarde…':cameraReady?'Capturar '+platformFacePoseLabel(pose).toLowerCase():error?'Ligar câmera e tentar novamente':'Ligar câmera e iniciar scanner'}</button><button type="button" onClick={()=>{stop();onCancel?.();}} className="rounded-xl border border-slate-600 px-4 py-3">Cancelar</button></div>
- <p className="text-xs text-slate-400">As três fotos são salvas juntas após a conferência do servidor. No primeiro cadastro, aguarde a revisão do administrador.</p></section>;
+ {enrolling&&<label className="flex items-center gap-3 text-sm"><input type="checkbox" checked={automatic} disabled={busy} onChange={e=>setAutomatic(e.target.checked)}/>Capturar automaticamente quando a posição estiver estável</label>}
+ <div className="flex flex-wrap gap-3"><button type="button" disabled={busy||enrolling&&!accepted||cameraReady&&!scan.ready} onClick={cameraReady?capture:start} className="rounded-xl bg-blue-600 px-5 py-3 font-bold text-white disabled:opacity-50">{busy?'Aguarde…':cameraReady?enrolling?'Capturar '+platformFacePoseLabel(pose).toLowerCase():'Confirmar agora':error?'Tentar novamente':enrolling?'Ligar câmera e iniciar scanner':'Confirmar com a câmera'}</button><button type="button" onClick={()=>{stop();onCancel?.();}} className="rounded-xl border border-slate-600 px-4 py-3">Cancelar</button></div>
+ {enrolling&&<p className="text-xs text-slate-400">As três fotos são salvas juntas após a conferência do servidor. No primeiro cadastro, aguarde a revisão do administrador.</p>}</section>;
 }
 
 
@@ -3317,7 +3326,7 @@ async function platformFaceBeforeLogout(user){
 }
 function PlatformFaceGate({user,children}){
  const [state,setState]=React.useState({loading:true}),[capture,setCapture]=React.useState(false),[privacy,setPrivacy]=React.useState(false),[reason,setReason]=React.useState(''),[message,setMessage]=React.useState(''),[requesting,setRequesting]=React.useState(false),[captureConsent,setCaptureConsent]=React.useState(null);
- const alive=React.useRef(true),running=React.useRef(false),generation=React.useRef(0),sessionKey=React.useRef(''),recentCapture=React.useRef(null);
+ const alive=React.useRef(true),running=React.useRef(false),generation=React.useRef(0),sessionKey=React.useRef(''),recentCapture=React.useRef(null),automaticVerificationKey=React.useRef('');
  const refresh=async()=>{
   if(running.current)return;running.current=true;const request=++generation.current;
   try{
@@ -3332,13 +3341,15 @@ function PlatformFaceGate({user,children}){
      recentCapture.current=null;
      setCaptureConsent(resume.accepted&&resume.purpose==='enroll'&&status.needsEnrollment&&resume.consentVersion===status.consentVersion?{uid:user.uid,version:status.consentVersion}:null);
      setCapture(status.enabled===true&&!status.staffExempt&&!status.servicePaused&&!status.legacyEnrollment&&status.enrollmentStatus!=='pending'&&(status.needsEnrollment||status.needsVerification));
+    }else if(status.enabled===true&&!status.allowed&&!status.staffExempt&&!status.servicePaused&&!status.legacyEnrollment&&status.enrollmentStatus==='active'&&status.needsVerification&&automaticVerificationKey.current!==session.key){
+     automaticVerificationKey.current=session.key;setCapture(true);
     }
    }
   }catch(e){if(alive.current&&request===generation.current)setState({loading:false,error:e.message});}
   finally{if(request===generation.current)running.current=false;}
  };
  React.useEffect(()=>{
-  alive.current=true;recentCapture.current=null;setCaptureConsent(null);setState({loading:true});sessionKey.current='';refresh();
+  alive.current=true;recentCapture.current=null;automaticVerificationKey.current='';setCaptureConsent(null);setState({loading:true});sessionKey.current='';refresh();
   const unsubscribe=onIdTokenChanged(auth,async current=>{
    if(!alive.current)return;
    if(!current||current.uid!==user.uid){recentCapture.current=null;setCaptureConsent(null);generation.current++;running.current=false;setState({loading:true});setCapture(false);platformFacePurchaseDialog?.cancel();return;}
@@ -3371,7 +3382,7 @@ function PlatformFaceGate({user,children}){
   <div><p className="text-xs text-slate-400 mb-3">✓ CPF e celular · 2. Confirmação facial</p><p className="text-xs uppercase tracking-widest text-blue-400 mb-2">Face ID da A&amp;M Produções</p><h1 className="text-2xl font-bold">{privacy?'Meu cadastro facial':pending?'Cadastro aguardando aprovação':state.servicePaused?'Preparando seu acesso seguro':state.needsEnrollment?newAccount?'Última etapa: cadastre seu rosto':'Ative a proteção da sua conta':'Confirme seu rosto'}</h1></div>
   {state.error?<p role="alert" className="text-red-300">{state.error} Verifique sua conexão ou peça ao administrador para conferir o servidor e as regras do Firebase.</p>:<>
    {privacy?<><p className="text-sm text-slate-300">Modelo e fotos de cadastro e verificações ficam criptografados na pasta da sua conta. Status: {state.enrollmentStatus||'sem cadastro'}. A exclusão remove seu modelo e as fotos; registros de segurança sem imagens seguem a retenção informada.</p><button type="button" onClick={remove} className="rounded-lg border border-red-700 text-red-300 px-4 py-3">Excluir cadastro e retirar autorização</button>{state.allowed&&<button type="button" onClick={()=>setPrivacy(false)} className="block text-blue-300 underline">Voltar à plataforma</button>}</>:state.servicePaused?<p className="text-slate-300">O cadastro facial é obrigatório para acessar a plataforma. A câmera está temporariamente indisponível enquanto a equipe prepara ou revisa o serviço. Seus dados continuam salvos. Consulte novamente em instantes ou entre em contato com a equipe.</p>:state.legacyEnrollment?<p className="text-amber-200">Seu cadastro pertence ao motor anterior. Solicite revisão ao administrador para remover o cadastro antigo e autorizar um novo.</p>:pending?<p className="text-slate-300">Seu rosto foi cadastrado com sucesso! Agora nossa equipe vai conferir sua identidade e aprovar o cadastro. Assim que for aprovado, confirme seu rosto para começar a navegar. Você não precisa cadastrar outra conta.</p>:capture?<PlatformFaceCapture key={user.uid} user={user} base={base} purpose={state.needsEnrollment?'enroll':'portal'} consentText={state.consentText} consentVersion={state.consentVersion} initialConsentAccepted={captureConsent?.uid===user.uid&&captureConsent.version===state.consentVersion} onRequireRecentLogin={requireRecentLogin} onAuthenticationConfirmed={authenticationConfirmed} onFinished={()=>{recentCapture.current=null;setCaptureConsent(null);setCapture(false);refresh();}} onCancel={cancelCapture}/>:<><p className="text-slate-300">{state.needsEnrollment?newAccount?'Falta só proteger sua nova conta! Depois dos seus dados, cadastre seu rosto para concluir o cadastro. Essa etapa é obrigatória para navegar e ajuda a manter seus cursos e suas compras seguros.':'Olá! Para cuidar da segurança da sua conta, precisamos ativar a verificação em duas etapas por reconhecimento facial. Seu login continua o mesmo. Cadastre seu próprio rosto para liberar a navegação na plataforma. Essa ativação é obrigatória e nossa equipe vai conferir o primeiro cadastro.':state.inactivityDue?'Seu período de inatividade exige uma nova confirmação.':'Confirme o rosto cadastrado para liberar esta sessão.'}</p>{state.needsEnrollment&&<p className="text-sm text-slate-400">Você escolhe quando ligar a câmera e autoriza o uso das imagens antes da captura. Se não puder usar a câmera, peça ajuda à equipe. O portal permanece protegido até a liberação.</p>}<button type="button" onClick={()=>setCapture(true)} className="bg-blue-600 font-bold px-5 py-3 rounded-xl">{state.needsEnrollment?'Ativar reconhecimento facial obrigatório':'Verificar com a câmera'}</button></>}
-   {state.policy&&<p className="text-xs text-slate-400">Retenção de até {state.policy.retentionDays} dias e {state.policy.maxPhotos} fotos. Limite de {state.policy.maxVerificationsPerDay} confirmações por dia ({state.timeZone||'horário configurado'}). Cada foto recebe um identificador e conferência de integridade.</p>}
+   {state.policy&&(state.needsEnrollment||privacy||pending)&&<p className="text-xs text-slate-400">Retenção de até {state.policy.retentionDays} dias e {state.policy.maxPhotos} fotos. Limite de {state.policy.maxVerificationsPerDay} confirmações por dia ({state.timeZone||'horário configurado'}). Cada foto recebe um identificador e conferência de integridade.</p>}
    {!capture&&base&&<details className="rounded-xl border border-slate-700 p-4"><summary className="cursor-pointer font-bold">Preciso de ajuda com o acesso</summary><p className="text-sm text-slate-400 my-3">Descreva o problema. O administrador pode revisar o cadastro ou autorizar acesso temporário ao portal de um cadastro já aprovado. Compras exigidas pela política continuam dependendo da conferência do rosto.</p><label className="block text-sm">Motivo<textarea maxLength="500" minLength="5" value={reason} onChange={e=>setReason(e.target.value)} className="w-full mt-2 p-3 rounded-lg bg-slate-950 border border-slate-600"/></label><button type="button" disabled={requesting||reason.trim().length<5} onClick={requestHelp} className="mt-3 px-4 py-2 border border-slate-500 rounded-lg disabled:opacity-50">{requesting?'Enviando…':'Solicitar revisão'}</button></details>}
   </>}
   {message&&<p role="status" className="text-sm text-amber-200">{message}</p>}
@@ -3380,7 +3391,7 @@ function PlatformFaceGate({user,children}){
  </section></main>;
 }
 
-// END SITE CURSOS FACIAL v22
+// END SITE CURSOS FACIAL v23
 
 // BEGIN SITE CURSOS STORAGE v14
 // SITE CURSOS v14 — shared R2 service, no S3 credentials in student requests.
@@ -15573,3 +15584,71 @@ JSON Permitidos (Siga exatamente estes formatos):
                             commandExecuted = true;
                             break;
                         case 'post_community':
+                            const postRes = await window.AemGlobalAPI.postToCommunity(cmdObj.text);
+                            if(postRes) aiReply += `<br><br><small style='color:#4ade80'>Mensagem publicada na comunidade!</small>`;
+                            commandExecuted = true;
+                            break;
+                        case 'take_notes':
+                            const noteRes = await window.AemGlobalAPI.takeNotesAutomated(cmdObj.courseName, cmdObj.notes);
+                            if(noteRes === 'sucesso') { aiReply += `<br><br><small style='color:#4ade80'>Anotação criada e salva no seu diário de bordo premium deste curso!</small>`; commandExecuted = true; }
+                            else aiReply += "<br><br><small style='color:#f87171'>Não encontrei o curso para salvar a anotação.</small>";
+                            break;
+                    }
+                }
+
+                if (commandExecuted) {
+                    aiReply += "<br><br><small style='color:#4ade80'><i class='fa-solid fa-bolt'></i> Ação concluída com sucesso!</small>";
+                    if (shouldCloseWidget) {
+                        setTimeout(() => { window.AemIaWidget.closeWidget(); }, 2000);
+                    }
+                }
+            } else {
+                aiReply = aiReply.replace(/```[\s\S]*?```/g, '').trim();
+            }
+            
+            appendMessage(aiReply.trim(), false);
+            
+            // 💾 SALVA A RESPOSTA DA IA NO HISTÓRICO PARA ELA LEMBRAR DEPOIS
+            chatHistory.push(`${nomeDaIA}: ${aiReply.replace(/<[^>]*>?/gm, '')}`); // Remove HTML antes de salvar
+            localStorage.setItem('aem_ia_chat_history', JSON.stringify(chatHistory));
+            
+        } catch (err) {
+            typing.classList.add('hidden');
+            if (err.name !== "AbortError" && window.AemIaWidget.canShow()) appendMessage("⚠️ Sistema offline ou falha na conexão.", false);
+        } finally {
+            iaRequests.delete(requestController);
+        }
+    });
+    }
+    
+    // 👇 INÍCIO DA LÓGICA DO BOTÃO NOVA CONVERSA 👇
+    const btnRestartIa = document.getElementById('aem-ia-restart-btn');
+    if (btnRestartIa) {
+        btnRestartIa.addEventListener('click', () => {
+            // 1. Limpa visualmente as mensagens da tela 
+            const chatBody = document.getElementById('aem-chat-box-normal');
+            if (chatBody) {
+                chatBody.innerHTML = ''; 
+            }
+            
+            // 2. Limpa a memória salva no navegador
+            localStorage.removeItem('aem_ia_chat_history'); 
+            
+            // 3. Adiciona um feedback visual no botão de rodar
+            btnRestartIa.classList.add('animate-spin');
+            setTimeout(() => btnRestartIa.classList.remove('animate-spin'), 500);
+
+            // 4. Manda a IA dar as boas-vindas oficiais puxadas do Banco de Dados
+            setTimeout(() => {
+                const msgOficial = window.AemIaWelcomeMsg || "Olá! Como posso te ajudar hoje?";
+                appendMessage(msgOficial, false);
+            }, 300);
+        });
+    }
+    
+    
+    window.AemIaWidget.syncVisibility();
+})();
+  </script>
+</body>
+</html>
